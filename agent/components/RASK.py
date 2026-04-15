@@ -6,7 +6,7 @@ from typing import Dict, Any
 
 import numpy as np
 import pandas as pd
-# import plotly.graph_objects as go
+import plotly.graph_objects as go
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
@@ -133,9 +133,9 @@ def train_rask_models(df, show_result=False, img_suffix=None, override_relation=
 
                 service_models[ServiceType(service_type_s)] |= {var: (poly, model)}
                 if show_result:
-                    # draw_3d_plot_interactive(df_service, var, deps, poly, model, service_type_s)
+                    draw_3d_plot_interactive(df_service, var, deps, poly, model, service_type_s)
                     # draw_3d_plot_fast(df_service, var, deps, poly, model, service_type_s, img_suffix= f"_{img_suffix}")
-                    draw_heatmap_fast(df_service, var, deps, poly, model, service_type_s)
+                    # draw_heatmap_fast(df_service, var, deps, poly, model, service_type_s)
 
     return service_models
 
@@ -488,5 +488,4 @@ if __name__ == "__main__":
 
     rask = RASK(show_figures=True) # If you set the 'show_figures' parameter once, its exported every cycle
     df = pd.read_csv("../../statics/metrics_20_0.csv")
-    rask.init_models(df_combined=df, override_relation=False)
-    # rask.init_models()
+    rask.init_models(df_combined=df)

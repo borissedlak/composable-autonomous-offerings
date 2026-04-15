@@ -5,3 +5,4 @@ docker~=7.1.0
 matplotlib~=3.10.8
 seaborn~=0.13.2
 scikit-learn~=1.8.0
+plotly~=6.7.0 # only needed for interactive RASK plot
