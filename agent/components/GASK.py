@@ -1,14 +1,21 @@
 import ast
 import logging
+import sys
 from typing import Dict, Any
 
 import numpy as np
 import plotly.graph_objects as go
 import pandas as pd
+import seaborn as sns
+from matplotlib import pyplot as plt
 from sklearn.decomposition import PCA
 from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C, WhiteKernel
+from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C, WhiteKernel, DotProduct
+from sklearn.mixture import GaussianMixture
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
+import utils
 from agent.components.RASK import draw_3d_plot_interactive
 from agent.components.commons import ServiceType
 
@@ -22,7 +29,9 @@ class GASK:
         self.show_figures = show_figures
         self.models: Dict[ServiceType, Dict] = {}
 
-    def init_models(self, df_combined: pd.DataFrame):
+    def init_models(self, df_combined: pd.DataFrame, density = 1.0):
+        if density < 1.0:
+            df_combined = df_combined.sample(frac=density, random_state=35)
         """Preprocesses data and trains Gaussian Process models."""
         df_cleared = self.preprocess_data(df_combined)
         self.models = self.train_gp_models(df_cleared)
@@ -52,12 +61,13 @@ class GASK:
     def get_dependent_variable_mapping(self, service_type: ServiceType):
         """Defines which independent variables influence the target variable."""
         mapping = {
-            ServiceType.QR: {'max_tp': sorted(['cores', 'data_quality'])},
-            ServiceType.CV: {'max_tp': sorted(['cores', 'model_size', 'data_quality'])},
-            ServiceType.PC: {'max_tp': sorted(['cores', 'data_quality'])}
+            ServiceType.QR: {'avg_p_latency': sorted(['cores', 'data_quality'])},
+            ServiceType.CV: {'avg_p_latency': sorted(['cores', 'model_size', 'data_quality'])},
+            ServiceType.PC: {'avg_p_latency': sorted(['cores', 'data_quality'])}
         }
         return mapping.get(service_type, {})
 
+    @utils.print_execution_time
     def train_gp_models(self, df: pd.DataFrame) -> Dict:
         service_models = {}
 
@@ -80,15 +90,15 @@ class GASK:
                 from sklearn.gaussian_process.kernels import DotProduct
 
                 # Linear trend + Non-linear RBF + Noise
-                kernel = (C(1.0, (1e-3, 1e3)) * DotProduct(sigma_0=1.0, sigma_0_bounds=(1e-2, 1e3)) +
-                          C(1.0, (1e-3, 1e3)) * RBF(1.0, (1e-2, 1e3)) +
-                          WhiteKernel(noise_level=1.0, noise_level_bounds=(1e-5, 1e3)))
+                kernel = (C(1.0, (1e-3, 1e3)) * DotProduct(sigma_0=1.0, sigma_0_bounds=(1e-2, 1e3))
+                          + C(1.0, (1e-3, 1e3)) * RBF(1.0, (1e-2, 1e3)))
+                          #+ WhiteKernel(noise_level=1.0, noise_level_bounds=(1e-5, 1e3))) # We don't have any noise
                 # In your train_gp_models function:
                 gp_pipeline = Pipeline([
                     ('scaler', StandardScaler()),
                     ('gp', GaussianProcessRegressor(
                         kernel=kernel,
-                        n_restarts_optimizer=10,
+                        # n_restarts_optimizer=10, # Especially needed when your (noise) kernels might be ill configured
                         alpha=0.1,
                         normalize_y=True  # Crucial: this scales your throughput/target automatically
                     ))
@@ -105,6 +115,7 @@ class GASK:
 
         return service_models
 
+    @utils.print_execution_time
     def predict(self, service_type: ServiceType, dep_var: str, sample_state: Dict[str, Any]):
         """Predicts mean and uncertainty."""
         if service_type not in self.models or dep_var not in self.models[service_type]:
@@ -119,6 +130,7 @@ class GASK:
 
         return y_pred[0][0], sigma[0]
 
+    @utils.print_execution_time
     def draw_3d_gp_plot(self, df, var, deps, gp, service_name):
         """
         Visualizes GP mean surface, ±95% confidence intervals, and actual data.
@@ -177,19 +189,19 @@ class GASK:
         # Trace 2: Upper Confidence Surface (σ over function)
         fig.add_trace(go.Surface(
             x=xx, y=yy, z=y_upper,
-            colorscale=[[0, 'rgba(100, 100, 100, 0.2)'], [1, 'rgba(100, 100, 100, 0.2)']],
+            colorscale=[[0, 'rgba(100, 100, 100, 0.5)'], [1, 'rgba(100, 100, 100, 0.5)']],
             name='+95% Conf. Interval',
             showscale=False,
-            opacity=0.3
+            opacity=0.5
         ))
 
         # Trace 3: Lower Confidence Surface (σ over function)
         fig.add_trace(go.Surface(
             x=xx, y=yy, z=y_lower,
-            colorscale=[[0, 'rgba(100, 100, 100, 0.2)'], [1, 'rgba(100, 100, 100, 0.2)']],
+            colorscale=[[0, 'rgba(100, 100, 100, 0.5)'], [1, 'rgba(100, 100, 100, 0.5)']],
             name='-95% Conf. Interval',
             showscale=False,
-            opacity=0.3
+            opacity=0.5
         ))
 
         # Trace 4: Actual Observations (Markers)
@@ -219,9 +231,10 @@ class GASK:
             legend=dict(x=0, y=1)
         )
 
-        filename = f"gp_uncertainty_{service_name}_{var}.html"
-        fig.write_html(filename)
-        logger.info(f"Saved uncertainty visualization to {filename}")
+        fig.show()
+        # filename = f"gp_uncertainty_{service_name}_{var}.html"
+        # fig.write_html(filename)
+        # logger.info(f"Saved uncertainty visualization to {filename}")
 
 
 # --- Execution ---
@@ -230,11 +243,7 @@ if __name__ == "__main__":
     df = pd.read_csv("../../statics/metrics_20_0.csv")
     # 2. Initialize and train
     rask_gp = GASK(show_figures=True)
-    rask_gp.init_models(df)
-
-    # 3. Predict a sample
-    # test_sample = {'cores': 4.0, 'data_quality': 0.8}
-    # mean, std = rask_gp.predict(ServiceType.QR, 'max_tp', test_sample)
-    # print(f"\nPrediction for QR Service at {test_sample}:")
-    # print(f"Predicted Max Throughput: {mean:.2f}")
-    # print(f"Uncertainty (StdDev): {std:.2f}")
+    rask_gp.init_models(df, density=1.0)
+    rask_gp.init_models(df, density=0.5)
+    rask_gp.init_models(df, density=0.1)
+    sys.exit()
