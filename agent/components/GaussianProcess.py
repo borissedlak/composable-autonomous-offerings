@@ -4,19 +4,13 @@ import sys
 from typing import Dict, Any
 
 import numpy as np
-import plotly.graph_objects as go
 import pandas as pd
-import seaborn as sns
-from matplotlib import pyplot as plt
+import plotly.graph_objects as go
 from sklearn.decomposition import PCA
 from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C, WhiteKernel, DotProduct
-from sklearn.mixture import GaussianMixture
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
+from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
 
 import utils
-from agent.components.RASK import draw_3d_plot_interactive
 from agent.components.commons import ServiceType
 
 # --- Setup Logging ---
@@ -24,16 +18,93 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("GP_Model")
 
 
+def normalize(val, v_min, v_max):
+    if v_max <= v_min:
+        return 0.0
+    return (val - v_min) / (v_max - v_min)
+
+
+def normalize_value_in_bounds(full_state, empirical_bounds):
+    normalized_states = {}
+
+    for key, val in full_state.items():
+        if key == 'cores':
+            # Inverses the maximum amount of assigned cores, because we want it small
+            val = empirical_bounds[key][1] - (val - empirical_bounds[key][0])
+        normalized_states[key] = normalize(val, *empirical_bounds[key])
+
+    return normalized_states
+
+
+def get_dependent_variable_mapping(service_type: ServiceType):
+    """Defines which independent variables influence the target variable."""
+    mapping = {
+        ServiceType.QR: {'max_tp': sorted(['cores', 'data_quality'])},
+        ServiceType.CV: {'max_tp': sorted(['cores', 'model_size', 'data_quality'])},
+        ServiceType.PC: {'max_tp': sorted(['cores', 'data_quality'])}
+    }
+    return mapping.get(service_type, {})
+
+
+def get_empirical_boundaries(df) -> Dict[ServiceType, Dict]:
+    empirical_boundaries = {}
+    for s_type in df['service_type'].unique():
+        s_type = ServiceType(s_type)
+        variable_dep = get_dependent_variable_mapping(ServiceType(s_type))
+
+        # The list of variables you care about (extracting from the dict)
+        target_vars = variable_dep['max_tp']
+
+        # Building the min/max dictionary from the original DataFrame
+        empirical_boundary = {
+            var: [df[var].min(), df[var].max()]
+            for var in [*target_vars, "max_tp"]
+        }
+        empirical_boundaries[s_type] = empirical_boundary
+
+    # print(empirical_boundaries)
+    return empirical_boundaries
+
+
+# def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
+#     """
+#     Normalizes columns per service_type in-place based on their specific ranges.
+#     Returns the updated DataFrame.
+#     """
+#     # Use groupby to efficiently access indices for each service_type
+#     for s_type, indices in df.groupby('service_type').groups.items():
+#         # Get the specific features/variables for this service
+#         val = get_dependent_variable_mapping(ServiceType(s_type))['max_tp']
+#         cols_to_norm = ["max_tp"] + val
+#
+#         for col in cols_to_norm:
+#             # Extract the slice for this service/column
+#             series = df.loc[indices, col]
+#             c_min, c_max = series.min(), series.max()
+#
+#             # Apply 0-1 normalization in-place
+#             if c_max > c_min:
+#                 df.loc[indices, col] = (series - c_min) / (c_max - c_min)
+#             else:
+#                 # Handle cases with zero variance
+#                 df.loc[indices, col] = 0.0
+#
+#     return df
+
+
 class GASK:
     def __init__(self, show_figures=True):
         self.show_figures = show_figures
         self.models: Dict[ServiceType, Dict] = {}
+        self.training_data: pd.DataFrame = None
 
-    def init_models(self, df_combined: pd.DataFrame, density = 1.0):
+    def init_models(self, df_combined: pd.DataFrame, density=1.0):
         if density < 1.0:
             df_combined = df_combined.sample(frac=density, random_state=35)
-        """Preprocesses data and trains Gaussian Process models."""
+
         df_cleared = self.preprocess_data(df_combined)
+        # df_normalized = normalize_df(df_cleared)
+        self.training_data = df_cleared
         self.models = self.train_gp_models(df_cleared)
 
     def preprocess_data(self, df_input: pd.DataFrame) -> pd.DataFrame:
@@ -58,25 +129,16 @@ class GASK:
         df.reset_index(drop=True, inplace=True)
         return df
 
-    def get_dependent_variable_mapping(self, service_type: ServiceType):
-        """Defines which independent variables influence the target variable."""
-        mapping = {
-            ServiceType.QR: {'avg_p_latency': sorted(['cores', 'data_quality'])},
-            ServiceType.CV: {'avg_p_latency': sorted(['cores', 'model_size', 'data_quality'])},
-            ServiceType.PC: {'avg_p_latency': sorted(['cores', 'data_quality'])}
-        }
-        return mapping.get(service_type, {})
-
     @utils.print_execution_time
     def train_gp_models(self, df: pd.DataFrame) -> Dict:
         service_models = {}
 
-        for service_val in ['elastic-workbench-qr-detector']: #df['service_type'].unique():
+        for service_val in ['elastic-workbench-qr-detector']:  # df['service_type'].unique():
             stype = ServiceType(service_val)
             df_service = df[df['service_type'] == service_val]
             service_models[stype] = {}
 
-            dep_map = self.get_dependent_variable_mapping(stype)
+            dep_map = get_dependent_variable_mapping(stype)
             for var, deps in dep_map.items():
                 X = df_service[deps].values
                 y = df_service[var].values.reshape(-1, 1)
@@ -92,8 +154,7 @@ class GASK:
                 # Linear trend + Non-linear RBF + Noise
                 kernel = (C(1.0, (1e-3, 1e3)) * DotProduct(sigma_0=1.0, sigma_0_bounds=(1e-2, 1e3))
                           + C(1.0, (1e-3, 1e3)) * RBF(1.0, (1e-2, 1e3)))
-                          #+ WhiteKernel(noise_level=1.0, noise_level_bounds=(1e-5, 1e3))) # We don't have any noise
-                # In your train_gp_models function:
+                # + WhiteKernel(noise_level=1.0, noise_level_bounds=(1e-5, 1e3))) # We don't have any noise
                 gp_pipeline = Pipeline([
                     ('scaler', StandardScaler()),
                     ('gp', GaussianProcessRegressor(
@@ -103,7 +164,15 @@ class GASK:
                         normalize_y=True  # Crucial: this scales your throughput/target automatically
                     ))
                 ])
-
+                # gp_pipeline = Pipeline([
+                #     # This forces every feature into the exact [0, 1] range
+                #     ('scaler', MinMaxScaler(feature_range=(0, 1))),
+                #     ('gp', GaussianProcessRegressor(
+                #         kernel=kernel,
+                #         alpha=0.1,
+                #         normalize_y=True  # This handles the Target (Y) axis normalization
+                #     ))
+                # ])
 
                 logger.info(f"Fitting GP for {stype.value} - Target: {var}")
                 gp_pipeline.fit(X, y)
@@ -115,20 +184,21 @@ class GASK:
 
         return service_models
 
-    @utils.print_execution_time
+    # @utils.print_execution_time
     def predict(self, service_type: ServiceType, dep_var: str, sample_state: Dict[str, Any]):
         """Predicts mean and uncertainty."""
         if service_type not in self.models or dep_var not in self.models[service_type]:
             return None, None
 
         model = self.models[service_type][dep_var]
-        deps = self.get_dependent_variable_mapping(service_type)[dep_var]
+        deps = get_dependent_variable_mapping(service_type)[dep_var]
 
         # Ensure inputs are sorted to match training
         input_data = np.array([[sample_state[k] for k in sorted(deps)]])
         y_pred, sigma = model.predict(input_data, return_std=True)
 
-        return y_pred[0][0], sigma[0]
+        mu, sigma = y_pred[0], sigma[0]
+        return mu, sigma  # np.random.normal(mu, sigma, 1)[0]
 
     @utils.print_execution_time
     def draw_3d_gp_plot(self, df, var, deps, gp, service_name):
@@ -239,11 +309,10 @@ class GASK:
 
 # --- Execution ---
 if __name__ == "__main__":
-
     df = pd.read_csv("../../statics/metrics_20_0.csv")
     # 2. Initialize and train
     rask_gp = GASK(show_figures=True)
     rask_gp.init_models(df, density=1.0)
-    rask_gp.init_models(df, density=0.5)
-    rask_gp.init_models(df, density=0.1)
+    # rask_gp.init_models(df, density=0.5)
+    # rask_gp.init_models(df, density=0.1)
     sys.exit()

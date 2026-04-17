@@ -32,6 +32,9 @@ def print_execution_time(func):
 
     return wrapper
 
+def smoothstep(x, x0=0.0, x1=1.0) -> float:
+    t = np.clip((x - x0) / (x1 - x0), 0.0, 1.0)
+    return float(t * t * (3 - 2 * t))
 
 class FPS_:
     def __init__(self, max_fps=300):

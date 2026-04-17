@@ -1,0 +1,17 @@
+experiment-1:
+
+  client-1:
+    cores: 0.5 # equivalent to resources
+    data_quality: 0.2 # equivalent to accuracy
+    max_tp: 0.3 # equivalent to availability/latency
+
+  client-2:
+    cores: 0.2
+    data_quality: 0.3
+    max_tp: 0.5
+
+  client-3:
+    cores: 0.2
+    data_quality: 0.6
+    max_tp: 0.2
+
