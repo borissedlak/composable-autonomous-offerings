@@ -7,19 +7,13 @@ from agent.components.SLORegistry_v2 import calculate_weighted_SLO_F
 from agent.components.commons import ServiceType
 
 
-# TODO:
-#  1. Translate SLO weight to variable min/max; simply aim for max and put weight: Check
-#  2. Evaluate fitness (= SLO fulfillment) of one solution: Check
-#  3. Extract one optimal value: Check
-#  4. Relax :-) and extract entire front
-
 
 def local_obj(x_norm, slos: Dict[str, float], gp: GASK, ordered_bounds):
     """
         :param x_norm: values that are NOT normalized
         :param slos: just weights, no thresholds
-        :param gp:
-        :param ordered_bounds:
+        :param gp: gaussian process expressing system dynamics
+        :param ordered_bounds: min/max feature bounds according to dataset
         :return: SLO fulfillment
         """
 
@@ -32,7 +26,10 @@ def local_obj(x_norm, slos: Dict[str, float], gp: GASK, ordered_bounds):
 
     # Now the GP receives the units it expects (or uses its internal scaler)
     mu, sigma = gp.predict(ServiceType.QR, "max_tp", x_state)
-    conservative_max_tp = mu - 1.96 * sigma # TODO: Try to understand better what this does
+
+    # Gives me the 5th percentile, meaning 95% of the time, tp is larger; thus, solutions that have a high mean,
+    # but also a high sd, are not as likely chosen because they might fail this also quite often.
+    conservative_max_tp = mu - 1.645 * sigma
     max_tp = {'max_tp': conservative_max_tp}
 
     empirical_boundaries = get_empirical_boundaries(gp.training_data)[ServiceType.QR]
