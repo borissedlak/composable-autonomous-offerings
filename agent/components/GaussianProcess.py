@@ -164,15 +164,6 @@ class GASK:
                         normalize_y=True  # Crucial: this scales your throughput/target automatically
                     ))
                 ])
-                # gp_pipeline = Pipeline([
-                #     # This forces every feature into the exact [0, 1] range
-                #     ('scaler', MinMaxScaler(feature_range=(0, 1))),
-                #     ('gp', GaussianProcessRegressor(
-                #         kernel=kernel,
-                #         alpha=0.1,
-                #         normalize_y=True  # This handles the Target (Y) axis normalization
-                #     ))
-                # ])
 
                 logger.info(f"Fitting GP for {stype.value} - Target: {var}")
                 gp_pipeline.fit(X, y)

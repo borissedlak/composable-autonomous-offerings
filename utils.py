@@ -130,3 +130,46 @@ class SlidingWindow:
         if not self.values:
             return None
         return round(sum(self.values) / len(self.values), 3)
+
+
+import matplotlib.pyplot as plt
+
+
+def visualize_ndarray(arr, title="Array Visualization", cmap="YlGnBu"):
+    """
+    Visualizes a 2D numpy array with cell values and a color scale.
+    """
+    if arr.ndim != 2:
+        raise ValueError("This function only supports 2D arrays. Please slice your data.")
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    im = ax.imshow(arr, cmap=cmap)
+
+    # Add color bar
+    plt.colorbar(im, ax=ax)
+
+    # Set labels for rows and columns
+    ax.set_xticks(np.arange(arr.shape[1]))
+    ax.set_yticks(np.arange(arr.shape[0]))
+
+    # Optional: label the axes
+    ax.set_xlabel("Columns")
+    ax.set_ylabel("Rows")
+
+    # Loop over data dimensions and create text annotations.
+    # We determine text color based on the intensity of the cell color.
+    threshold = im.norm(arr.max()) / 2.
+    for i in range(arr.shape[0]):
+        for j in range(arr.shape[1]):
+            val = arr[i, j]
+            color = "white" if im.norm(val) > threshold else "black"
+            ax.text(j, i, f"{val:.2f}" if isinstance(val, float) else val,
+                    ha="center", va="center", color=color, fontsize=9)
+
+    ax.set_title(title)
+    fig.tight_layout()
+    plt.show()
+
+# --- Example Usage ---
+# data = np.random.randint(0, 100, size=(8, 8))
+# visualize_ndarray(data)

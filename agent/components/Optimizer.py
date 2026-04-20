@@ -8,9 +8,10 @@ from agent.components.commons import ServiceType
 
 
 
-def local_obj(x_norm, slos: Dict[str, float], gp: GASK, ordered_bounds):
+def local_obj(x_norm, s_type: ServiceType, slos: Dict[str, float], gp: GASK, ordered_bounds):
     """
         :param x_norm: values that are NOT normalized
+        :param s_type:
         :param slos: just weights, no thresholds
         :param gp: gaussian process expressing system dynamics
         :param ordered_bounds: min/max feature bounds according to dataset
@@ -25,29 +26,27 @@ def local_obj(x_norm, slos: Dict[str, float], gp: GASK, ordered_bounds):
     x_state = {'cores': x_real[0], 'data_quality': x_real[1]}
 
     # Now the GP receives the units it expects (or uses its internal scaler)
-    mu, sigma = gp.predict(ServiceType.QR, "max_tp", x_state)
+    mu, sigma = gp.predict(s_type, "max_tp", x_state)
 
     # Gives me the 5th percentile, meaning 95% of the time, tp is larger; thus, solutions that have a high mean,
     # but also a high sd, are not as likely chosen because they might fail this also quite often.
     conservative_max_tp = mu - 1.645 * sigma
     max_tp = {'max_tp': conservative_max_tp}
 
-    empirical_boundaries = get_empirical_boundaries(gp.training_data)[ServiceType.QR]
+    empirical_boundaries = get_empirical_boundaries(gp.training_data)[s_type]
     slo_f = calculate_weighted_SLO_F(x_state | max_tp, slos, empirical_boundaries)
 
     # print(f"Calculated SLO-F for {x_state}: {slo_f}")
     return -slo_f
 
 
-def solve_global(slos, gp, last_assignments):
-    raw_bounds = get_empirical_boundaries(gp.training_data)[ServiceType.QR]
+def solve_global(s_type: ServiceType, slos, gp: GASK, last_assignments):
+    raw_bounds = get_empirical_boundaries(gp.training_data)[s_type]
     del raw_bounds['max_tp']
-
-    # Store these to use for de-normalization inside the objective
     ordered_bounds = list(raw_bounds.values())
 
     # THE SOLVER BOX: Everything is 0 to 1
-    flat_bounds = [(0.0, 1.0) for _ in ordered_bounds]
+    normalized_bounds = [(0.0, 1.0) for _ in ordered_bounds]
 
     # Normalize your starting point x0
     if last_assignments:
@@ -60,8 +59,8 @@ def solve_global(slos, gp, last_assignments):
         x0 = [0.5, 0.5]  # Start in the middle
 
     # Pass ordered_bounds to the objective so it can "un-scale"
-    result = minimize(local_obj, x0, method='SLSQP', bounds=flat_bounds,
-                      args=(slos, gp, ordered_bounds), options={'maxiter': 150, 'eps': 1e-2})
+    result = minimize(local_obj, x0, method='SLSQP', bounds=normalized_bounds,
+                      args=(s_type, slos, gp, ordered_bounds), options={'maxiter': 150})
 
     if not result.success:
         raise RuntimeWarning("Solver failed: " + result.message)
@@ -87,7 +86,7 @@ class VersatileMapElites:
         idx = (x_norm * (self.bins - 1)).astype(int)
         return np.clip(idx, 0, self.bins - 1)
 
-    def run_search(self, slos, gp, ordered_bounds, iterations=1000):
+    def run_search(self, s_type: ServiceType, slos, gp, ordered_bounds, iterations=1000):
         """
         The illumination loop.
         1. Select a parent from the archive (or start random).
@@ -113,7 +112,7 @@ class VersatileMapElites:
             # --- 2. EVALUATION ---
             # We use your 'local_obj' but flip the sign because MAP-Elites maximizes fitness
             # Note: Ensure local_obj uses the Conservative Mean (mu - 1.96*sigma)
-            fitness = -local_obj(x_new, slos, gp, ordered_bounds)
+            fitness = -local_obj(x_new, s_type, slos, gp, ordered_bounds)
 
             # --- 3. THE COMPETITION (The 'Elite' part) ---
             bin_idx = self.get_bin(x_new)
