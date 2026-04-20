@@ -1,9 +1,9 @@
 experiment-1:
 
   client-1:
-    cores: 0.5 # equivalent to resources
-    data_quality: 0.2 # equivalent to accuracy
-    max_tp: 0.3 # equivalent to availability/latency
+    cores: 0.05 # equivalent to resources
+    data_quality: 0.9 # equivalent to accuracy
+    max_tp: 0.05 # equivalent to availability/latency
 
   client-2:
     cores: 0.2

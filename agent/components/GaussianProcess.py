@@ -24,16 +24,16 @@ def normalize(val, v_min, v_max):
     return (val - v_min) / (v_max - v_min)
 
 
-def normalize_value_in_bounds(full_state, empirical_bounds):
-    normalized_states = {}
-
-    for key, val in full_state.items():
-        if key == 'cores':
-            # Inverses the maximum amount of assigned cores, because we want it small
-            val = empirical_bounds[key][1] - (val - empirical_bounds[key][0])
-        normalized_states[key] = normalize(val, *empirical_bounds[key])
-
-    return normalized_states
+# def normalize_value_in_bounds(full_state, empirical_bounds):
+#     normalized_states = {}
+#
+#     for key, val in full_state.items():
+#         if key == 'cores':
+#             # Inverses the maximum amount of assigned cores, because we want it small
+#             val = empirical_bounds[key][1] - (val - empirical_bounds[key][0])
+#         normalized_states[key] = normalize(val, *empirical_bounds[key])
+#
+#     return normalized_states
 
 
 def get_dependent_variable_mapping(service_type: ServiceType):
@@ -49,6 +49,7 @@ def get_dependent_variable_mapping(service_type: ServiceType):
 def get_empirical_boundaries(df) -> Dict[ServiceType, Dict]:
     empirical_boundaries = {}
     for s_type in df['service_type'].unique():
+        df_s_type= df[df['service_type'] == s_type]
         s_type = ServiceType(s_type)
         variable_dep = get_dependent_variable_mapping(ServiceType(s_type))
 
@@ -57,7 +58,7 @@ def get_empirical_boundaries(df) -> Dict[ServiceType, Dict]:
 
         # Building the min/max dictionary from the original DataFrame
         empirical_boundary = {
-            var: [df[var].min(), df[var].max()]
+            var: [df_s_type[var].min(), df_s_type[var].max()]
             for var in [*target_vars, "max_tp"]
         }
         empirical_boundaries[s_type] = empirical_boundary
@@ -93,10 +94,11 @@ def get_empirical_boundaries(df) -> Dict[ServiceType, Dict]:
 
 
 class GASK:
-    def __init__(self, show_figures=True):
+    def __init__(self, s_type: ServiceType, show_figures=True):
         self.show_figures = show_figures
         self.models: Dict[ServiceType, Dict] = {}
         self.training_data: pd.DataFrame = None
+        self.s_type = s_type
 
     def init_models(self, df_combined: pd.DataFrame, density=1.0):
         if density < 1.0:
@@ -122,7 +124,7 @@ class GASK:
         if 'avg_p_latency' in df.columns:
             df['max_tp'] = np.where(df['avg_p_latency'] > 0, (1000 / df['avg_p_latency']), 0)
             # Adjust QR service for cores
-            qr_mask = df['service_type'] == ServiceType.QR.value
+            qr_mask = df['service_type'] == self.s_type.value
             if 'cores' in df.columns:
                 df.loc[qr_mask, 'max_tp'] = df.loc[qr_mask, 'max_tp'] * df.loc[qr_mask, 'cores'].round()
 
@@ -133,7 +135,7 @@ class GASK:
     def train_gp_models(self, df: pd.DataFrame) -> Dict:
         service_models = {}
 
-        for service_val in ['elastic-workbench-qr-detector']:  # df['service_type'].unique():
+        for service_val in [self.s_type.value]:  # df['service_type'].unique():
             stype = ServiceType(service_val)
             df_service = df[df['service_type'] == service_val]
             service_models[stype] = {}

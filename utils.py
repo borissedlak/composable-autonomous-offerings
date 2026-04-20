@@ -134,40 +134,66 @@ class SlidingWindow:
 
 import matplotlib.pyplot as plt
 
+import matplotlib.pyplot as plt
+import numpy as np
+
 
 def visualize_ndarray(arr, title="Array Visualization", cmap="YlGnBu"):
     """
-    Visualizes a 2D numpy array with cell values and a color scale.
+    Visualizes a 2D or 3D numpy array.
+    2D: Heatmap with text annotations.
+    3D: 3D Scatter plot where point intensity represents value.
     """
-    if arr.ndim != 2:
-        raise ValueError("This function only supports 2D arrays. Please slice your data.")
+    if arr.ndim == 2:
+        # --- Existing 2D Logic ---
+        fig, ax = plt.subplots(figsize=(10, 8))
+        im = ax.imshow(arr, cmap=cmap)
+        plt.colorbar(im, ax=ax)
 
-    fig, ax = plt.subplots(figsize=(10, 8))
-    im = ax.imshow(arr, cmap=cmap)
+        ax.set_xticks(np.arange(arr.shape[1]))
+        ax.set_yticks(np.arange(arr.shape[0]))
+        ax.set_xlabel("Data Quality")
+        ax.set_ylabel("Resources")
 
-    # Add color bar
-    plt.colorbar(im, ax=ax)
+        threshold = (np.nanmax(arr) + np.nanmin(arr[arr > -np.inf])) / 2. if np.any(arr > -np.inf) else 0
+        for i in range(arr.shape[0]):
+            for j in range(arr.shape[1]):
+                val = arr[i, j]
+                if val == -np.inf: continue
+                color = "white" if val > threshold else "black"
+                ax.text(j, i, f"{val:.2f}", ha="center", va="center", color=color)
 
-    # Set labels for rows and columns
-    ax.set_xticks(np.arange(arr.shape[1]))
-    ax.set_yticks(np.arange(arr.shape[0]))
+    elif arr.ndim == 3:
+        # --- New 3D Logic ---
+        fig = plt.figure(figsize=(12, 9))
+        ax = fig.add_subplot(111, projection='3d')
 
-    # Optional: label the axes
-    ax.set_xlabel("Columns")
-    ax.set_ylabel("Rows")
+        # Get coordinates of all cells that are not -inf
+        indices = np.argwhere(arr > -np.inf)
+        if len(indices) == 0:
+            print("Archive is empty. Nothing to plot.")
+            return
 
-    # Loop over data dimensions and create text annotations.
-    # We determine text color based on the intensity of the cell color.
-    threshold = im.norm(arr.max()) / 2.
-    for i in range(arr.shape[0]):
-        for j in range(arr.shape[1]):
-            val = arr[i, j]
-            color = "white" if im.norm(val) > threshold else "black"
-            ax.text(j, i, f"{val:.2f}" if isinstance(val, float) else val,
-                    ha="center", va="center", color=color, fontsize=9)
+        x = indices[:, 0]
+        y = indices[:, 1]
+        z = indices[:, 2]
+        values = arr[arr > -np.inf]
 
-    ax.set_title(title)
-    fig.tight_layout()
+        # Create scatter plot
+        # s=size, c=color mapped to values
+        img = ax.scatter(x, y, z, c=values, cmap=cmap, s=100, alpha=0.8, edgecolors='w')
+
+        fig.colorbar(img, ax=ax, label='Fitness')
+
+        ax.set_xlabel('Dim 1 (Res: High)')
+        ax.set_ylabel('Dim 2 (Res: High)')
+        ax.set_zlabel('Dim 3 (Res: Half)')
+
+    else:
+        raise ValueError(f"Unsupported dimensions: {arr.ndim}. Only 2D and 3D are supported.")
+
+    plt.title(title)
+    plt.tight_layout()
     plt.show()
 
 # --- Example Usage ---

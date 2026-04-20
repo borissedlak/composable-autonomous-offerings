@@ -24,8 +24,14 @@ def calculate_weighted_SLO_F(full_state, slos: Dict[str, float], empirical_bound
     if sum(slos.values()) != 1.0:
         raise RuntimeError("The sum of the SLO weights must equal 1")
 
+    local_slos = slos.copy()
+    if 'model_size' in full_state.keys():  # We're having the CV service
+        original_quality_slo = slos['data_quality']
+        local_slos['data_quality'] = original_quality_slo * 0.5
+        local_slos['model_size'] = original_quality_slo * 0.5
+
     weighted_slo_f = 0.0
-    for slo_var, slo_weight in slos.items():
+    for slo_var, slo_weight in local_slos.items():
 
         if slo_var not in full_state:
             raise RuntimeError(f"Missing variable '{slo_var}' in the state for evaluating SLOs")
@@ -34,6 +40,9 @@ def calculate_weighted_SLO_F(full_state, slos: Dict[str, float], empirical_bound
         threshold = empirical_boundaries[slo_var][1]
         slo_value = var_value / threshold
 
+        if slo_var == 'cores': # We want low cost!!
+            slo_value = 1 - slo_value
+
         slo_f_single_slo = float(smoothstep(slo_value) * slo_weight)
 
         if slo_f_single_slo > 1.0:
@@ -41,5 +50,9 @@ def calculate_weighted_SLO_F(full_state, slos: Dict[str, float], empirical_bound
 
         weighted_slo_f += slo_f_single_slo
         # print(value, slo_weight)
+
+    # Heavily penalize if we don't have any output
+    if full_state["max_tp"] < 1.0:
+        return weighted_slo_f * 0.1
 
     return weighted_slo_f

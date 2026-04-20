@@ -7,7 +7,6 @@ from agent.components.SLORegistry_v2 import calculate_weighted_SLO_F
 from agent.components.commons import ServiceType
 
 
-
 def local_obj(x_norm, s_type: ServiceType, slos: Dict[str, float], gp: GASK, ordered_bounds):
     """
         :param x_norm: values that are NOT normalized
@@ -24,6 +23,8 @@ def local_obj(x_norm, s_type: ServiceType, slos: Dict[str, float], gp: GASK, ord
         x_real.append(x_norm[i] * (maxi - mini) + mini)
 
     x_state = {'cores': x_real[0], 'data_quality': x_real[1]}
+    if s_type == ServiceType.CV:
+        x_state['model_size'] = x_real[2]
 
     # Now the GP receives the units it expects (or uses its internal scaler)
     mu, sigma = gp.predict(s_type, "max_tp", x_state)
@@ -56,7 +57,7 @@ def solve_global(s_type: ServiceType, slos, gp: GASK, last_assignments):
             norm_val = (last_assignments[i] - mini) / (maxi - mini)
             x0.append(norm_val)
     else:
-        x0 = [0.5, 0.5]  # Start in the middle
+        x0 = [0.5]  * (3 if s_type == ServiceType.CV else 2)
 
     # Pass ordered_bounds to the objective so it can "un-scale"
     result = minimize(local_obj, x0, method='SLSQP', bounds=normalized_bounds,
@@ -73,90 +74,91 @@ def solve_global(s_type: ServiceType, slos, gp: GASK, last_assignments):
     return final_x
 
 import numpy as np
-from sklearn.cluster import KMeans
+
+import numpy as np
 
 
 class VersatileMapElites:
-    def __init__(self, bins=10):
+    def __init__(self, s_type: ServiceType, bins=10):
         self.bins = bins
-        self.fitness_table = np.full((bins, bins), -np.inf) # max solution fitness at cell (x, y)
-        self.solution_params_table = np.empty((bins, bins), dtype=object) # respective param. assignments (x, y)
+        self.s_type = s_type
+
+        # Determine the shape of the archive
+        # If CV, the 3rd dimension has half the resolution (bins // 2)
+        if s_type == ServiceType.CV:
+            self.dims = 3
+            self.table_shape = (bins, bins, max(1, bins // 2))
+        else:
+            self.dims = 2
+            self.table_shape = (bins, bins)
+
+        # Initialize tables with dynamic shape
+        self.fitness_table = np.full(self.table_shape, -np.inf)
+        self.solution_params_table = np.empty(self.table_shape, dtype=object)
 
     def get_bin(self, x_norm):
-        idx = (x_norm * (self.bins - 1)).astype(int)
-        return np.clip(idx, 0, self.bins - 1)
+        """
+        Converts normalized coordinates (0-1) to integer indices.
+        """
+        indices = []
+        for i in range(self.dims):
+            # Use the specific bin count for this dimension from table_shape
+            dim_bins = self.table_shape[i]
+            idx = int(x_norm[i] * (dim_bins - 1))
+            indices.append(np.clip(idx, 0, dim_bins - 1))
+        return tuple(indices)
 
-    def run_search(self, s_type: ServiceType, slos, gp, ordered_bounds, iterations=1000):
-        """
-        The illumination loop.
-        1. Select a parent from the archive (or start random).
-        2. Mutate the parent to create a child.
-        3. Evaluate the child using the GP (Conservative Mean).
-        4. Attempt to store the child in the grid.
-        """
+    def run_search(self, slos, gp, ordered_bounds, iterations=1000):
         for i in range(iterations):
             # --- 1. SELECTION & MUTATION ---
             if i < 100 or np.all(self.fitness_table == -np.inf):
-                # Bootstrap phase: Randomly sample the space to find the first 'Elites'
-                x_new = np.random.uniform(0, 1, 2)
+                # Sample based on the number of dimensions (2 or 3)
+                x_new = np.random.uniform(0, 1, self.dims)
             else:
-                # Picking phase: Randomly select a solution that already exists in the archive
+                # Select from existing elites
                 occupied_indices = np.argwhere(self.fitness_table > -np.inf)
-                random_idx = occupied_indices[np.random.choice(len(occupied_indices))]
-                parent = self.solution_params_table[random_idx[0], random_idx[1]]
+                random_idx = tuple(occupied_indices[np.random.choice(len(occupied_indices))])
+                parent = self.solution_params_table[random_idx]
 
-                # Mutate: Add a small Gaussian nudge (Sigma 0.05 = 5% of range)
-                # This allows us to 'crawl' from a known good cell into a neighbor
-                x_new = np.clip(parent + np.random.normal(0, 0.05, 2), 0, 1)
+                # Mutate: Gaussian nudge for all dimensions
+                x_new = np.clip(parent + np.random.normal(0, 0.05, self.dims), 0, 1)
 
             # --- 2. EVALUATION ---
-            # We use your 'local_obj' but flip the sign because MAP-Elites maximizes fitness
-            # Note: Ensure local_obj uses the Conservative Mean (mu - 1.96*sigma)
-            fitness = -local_obj(x_new, s_type, slos, gp, ordered_bounds)
+            # Pass s_type (stored in self) to the objective function
+            fitness = -local_obj(x_new, self.s_type, slos, gp, ordered_bounds)
 
-            # --- 3. THE COMPETITION (The 'Elite' part) ---
+            # --- 3. THE COMPETITION ---
             bin_idx = self.get_bin(x_new)
-            row, col = bin_idx[0], bin_idx[1]
 
-            # Check if this new solution is better than what's currently in that niche
-            if fitness > self.fitness_table[row, col]:
-                self.fitness_table[row, col] = fitness
-                self.solution_params_table[row, col] = x_new
+            if fitness > self.fitness_table[bin_idx]:
+                self.fitness_table[bin_idx] = fitness
+                self.solution_params_table[bin_idx] = x_new
 
                 if i % 100 == 0:
-                    print(f"Iteration {i}: Discovered new Elite in bin {row, col} with fitness {fitness:.4f}")
+                    print(f"Iteration {i}: Elite found in bin {bin_idx} with fitness {fitness:.4f}")
 
     def get_diverse_set(self, n_solutions=5, versatility=0.2):
-        """
-        :param n_solutions: How many candidates to return.
-        :param versatility: 0.0 (only optimal) to 1.0 (maximum spread).
-                            Acts as the 'exclusion radius' in the normalized 0-1 space.
-        """
-        # 1. Flatten the archive into a list of valid candidates
+        # 1. Flatten the archive (works for both 2D and 3D shapes)
         candidates = []
-        for r in range(self.bins):
-            for c in range(self.bins):
-                if self.fitness_table[r, c] > -np.inf:
-                    candidates.append({
-                        'coord': self.solution_params_table[r, c],
-                        'fitness': self.fitness_table[r, c]
-                    })
+        it = np.nditer(self.fitness_table, flags=['multi_index'])
+        for f in it:
+            idx = it.multi_index
+            if self.fitness_table[idx] > -np.inf:
+                candidates.append({
+                    'coord': self.solution_params_table[idx],
+                    'fitness': self.fitness_table[idx]
+                })
 
-        # Sort by fitness descending (best first)
         candidates = sorted(candidates, key=lambda x: x['fitness'], reverse=True)
 
         selected = []
-        if not candidates:
-            return selected
-
-        # 2. Iterative Selection with Distance Constraint
         for cand in candidates:
             if len(selected) >= n_solutions:
                 break
 
-            # Check distance against all currently selected solutions
             is_diverse_enough = True
             for sel in selected:
+                # Euclidean distance works regardless of 2D or 3D
                 dist = np.linalg.norm(cand['coord'] - sel['coord'])
                 if dist < versatility:
                     is_diverse_enough = False
