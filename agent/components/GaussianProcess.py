@@ -62,7 +62,7 @@ class GASK:
         self.training_data: pd.DataFrame = None
         self.s_type = s_type
 
-    def init_models(self, df_combined: pd.DataFrame, data_density=1.0):
+    def init_model(self, df_combined: pd.DataFrame, data_density=1.0):
         if data_density < 1.0:
             df_combined = df_combined.sample(frac=data_density, random_state=35)
 
@@ -262,12 +262,18 @@ class GASK:
         # logger.info(f"Saved uncertainty visualization to {filename}")
 
 
+def get_ordered_boundaries(model: GASK):
+    raw_bounds = get_empirical_boundaries(model.training_data)[model.s_type]
+    del raw_bounds['max_tp']
+    return list(raw_bounds.values())
+
+
 # --- Execution ---
 if __name__ == "__main__":
     df = pd.read_csv("../../statics/metrics_20_0.csv")
     # 2. Initialize and train
     rask_gp = GASK(show_figures=True)
-    rask_gp.init_models(df, density=1.0)
+    rask_gp.init_model(df, density=1.0)
     # rask_gp.init_models(df, density=0.5)
     # rask_gp.init_models(df, density=0.1)
     sys.exit()

@@ -2,6 +2,7 @@ from typing import Dict
 
 import yaml
 
+from agent.components.commons import ServiceVar
 from utils import smoothstep
 
 
@@ -10,37 +11,39 @@ class SLO_Registry:
         with open(slo_config_path, "r") as f:
             self.slo_lib = yaml.safe_load(f)
 
-    def get_slo_for_client(self, experiment_id: str, client_id: str) -> Dict[str, float]:
+    def get_slo_for_client(self, experiment_id: str, client_id: str) -> Dict[ServiceVar, float]:
         result = {}
         client_data = self.slo_lib.get(experiment_id, {}).get(client_id, {})
 
         for var_name, weight in client_data.items():
-            result[var_name] = float(weight)
+            result[ServiceVar(var_name)] = float(weight)
 
         return result
 
 
-def calculate_weighted_SLO_F(full_state, slos: Dict[str, float], empirical_boundaries):
+def calculate_weighted_SLO_F(full_state, slos: Dict[ServiceVar, float], empirical_boundaries):
     if sum(slos.values()) != 1.0:
         raise RuntimeError("The sum of the SLO weights must equal 1")
 
     local_slos = slos.copy()
     if 'model_size' in full_state.keys():  # We're having the CV service
-        original_quality_slo = slos['data_quality']
-        local_slos['data_quality'] = original_quality_slo * 0.5
-        local_slos['model_size'] = original_quality_slo * 0.5
+        original_quality_slo = slos[ServiceVar.QUALITY]
+        local_slos[ServiceVar.QUALITY] = original_quality_slo * 0.5
+        local_slos[ServiceVar.MODEL] = original_quality_slo * 0.5
 
     weighted_slo_f = 0.0
     for slo_var, slo_weight in local_slos.items():
+        slo_var_text = slo_var.value
 
-        if slo_var not in full_state:
-            raise RuntimeError(f"Missing variable '{slo_var}' in the state for evaluating SLOs")
-        var_value = full_state[slo_var]
+        # TODO: Refactor, this is the str value of the slo variable name
+        if slo_var_text not in full_state:
+            raise RuntimeError(f"Missing variable '{slo_var_text}' in the state for evaluating SLOs")
+        var_value = full_state[slo_var_text]
 
-        threshold = empirical_boundaries[slo_var][1]
+        threshold = empirical_boundaries[slo_var_text][1]
         slo_value = var_value / threshold
 
-        if slo_var == 'cores': # We want low cost!!
+        if slo_var_text == 'cores': # We want low cost!!
             slo_value = 1 - slo_value
 
         slo_f_single_slo = float(smoothstep(slo_value) * slo_weight)

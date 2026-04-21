@@ -6,8 +6,9 @@ from typing import NamedTuple
 
 class ServiceVar(Enum):
     QUALITY = "data_quality"
-    TIME = "max_tp"
+    PERFORMANCE = "max_tp"
     COST = "cores"
+    MODEL = "model_size"
 
 class ServiceType(Enum):
     QR = "elastic-workbench-qr-detector"

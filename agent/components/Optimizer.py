@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, List, Any
 
 from scipy.optimize import minimize
 
@@ -94,6 +94,7 @@ class VersatileMapElites:
         # Initialize tables with dynamic shape
         self.fitness_table = np.full(self.table_shape, -np.inf)
         self.solution_params_table = np.empty(self.table_shape, dtype=object)
+        self.elite_group: List[Any] = []
 
     def get_bin(self, x_norm):
         """
@@ -166,4 +167,5 @@ class VersatileMapElites:
             if is_diverse_enough:
                 selected.append(cand)
 
+        self.elite_group = selected
         return selected
