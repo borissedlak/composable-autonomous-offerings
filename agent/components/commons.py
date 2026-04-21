@@ -1,6 +1,13 @@
 from enum import Enum
 from typing import NamedTuple
 
+# class SloBalance(NamedTuple):
+#     slos: Dict[SloVar, float]
+
+class ServiceVar(Enum):
+    QUALITY = "data_quality"
+    TIME = "max_tp"
+    COST = "cores"
 
 class ServiceType(Enum):
     QR = "elastic-workbench-qr-detector"

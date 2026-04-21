@@ -1,9 +1,11 @@
 experiment-1:
 
+  # High data_quality is a config that might fail easily, or collapse.
+
   client-1:
     cores: 0.05 # equivalent to resources
-    data_quality: 0.9 # equivalent to accuracy
-    max_tp: 0.05 # equivalent to availability/latency
+    data_quality: 0.05 # equivalent to accuracy
+    max_tp: 0.9 # equivalent to availability/latency
 
   client-2:
     cores: 0.2

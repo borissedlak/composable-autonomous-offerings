@@ -24,18 +24,6 @@ def normalize(val, v_min, v_max):
     return (val - v_min) / (v_max - v_min)
 
 
-# def normalize_value_in_bounds(full_state, empirical_bounds):
-#     normalized_states = {}
-#
-#     for key, val in full_state.items():
-#         if key == 'cores':
-#             # Inverses the maximum amount of assigned cores, because we want it small
-#             val = empirical_bounds[key][1] - (val - empirical_bounds[key][0])
-#         normalized_states[key] = normalize(val, *empirical_bounds[key])
-#
-#     return normalized_states
-
-
 def get_dependent_variable_mapping(service_type: ServiceType):
     """Defines which independent variables influence the target variable."""
     mapping = {
@@ -49,7 +37,7 @@ def get_dependent_variable_mapping(service_type: ServiceType):
 def get_empirical_boundaries(df) -> Dict[ServiceType, Dict]:
     empirical_boundaries = {}
     for s_type in df['service_type'].unique():
-        df_s_type= df[df['service_type'] == s_type]
+        df_s_type = df[df['service_type'] == s_type]
         s_type = ServiceType(s_type)
         variable_dep = get_dependent_variable_mapping(ServiceType(s_type))
 
@@ -67,32 +55,6 @@ def get_empirical_boundaries(df) -> Dict[ServiceType, Dict]:
     return empirical_boundaries
 
 
-# def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
-#     """
-#     Normalizes columns per service_type in-place based on their specific ranges.
-#     Returns the updated DataFrame.
-#     """
-#     # Use groupby to efficiently access indices for each service_type
-#     for s_type, indices in df.groupby('service_type').groups.items():
-#         # Get the specific features/variables for this service
-#         val = get_dependent_variable_mapping(ServiceType(s_type))['max_tp']
-#         cols_to_norm = ["max_tp"] + val
-#
-#         for col in cols_to_norm:
-#             # Extract the slice for this service/column
-#             series = df.loc[indices, col]
-#             c_min, c_max = series.min(), series.max()
-#
-#             # Apply 0-1 normalization in-place
-#             if c_max > c_min:
-#                 df.loc[indices, col] = (series - c_min) / (c_max - c_min)
-#             else:
-#                 # Handle cases with zero variance
-#                 df.loc[indices, col] = 0.0
-#
-#     return df
-
-
 class GASK:
     def __init__(self, s_type: ServiceType, show_figures=True):
         self.show_figures = show_figures
@@ -100,9 +62,9 @@ class GASK:
         self.training_data: pd.DataFrame = None
         self.s_type = s_type
 
-    def init_models(self, df_combined: pd.DataFrame, density=1.0):
-        if density < 1.0:
-            df_combined = df_combined.sample(frac=density, random_state=35)
+    def init_models(self, df_combined: pd.DataFrame, data_density=1.0):
+        if data_density < 1.0:
+            df_combined = df_combined.sample(frac=data_density, random_state=35)
 
         df_cleared = self.preprocess_data(df_combined)
         # df_normalized = normalize_df(df_cleared)

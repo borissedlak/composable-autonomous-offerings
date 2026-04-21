@@ -9,8 +9,8 @@ from agent.components.commons import ServiceType
 
 def local_obj(x_norm, s_type: ServiceType, slos: Dict[str, float], gp: GASK, ordered_bounds):
     """
-        :param x_norm: values that are NOT normalized
-        :param s_type:
+        :param x_norm: values that MUST BE normalized
+        :param s_type: type of service to investigate
         :param slos: just weights, no thresholds
         :param gp: gaussian process expressing system dynamics
         :param ordered_bounds: min/max feature bounds according to dataset
@@ -73,7 +73,6 @@ def solve_global(s_type: ServiceType, slos, gp: GASK, last_assignments):
 
     return final_x
 
-import numpy as np
 
 import numpy as np
 
