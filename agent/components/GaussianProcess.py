@@ -71,27 +71,28 @@ class GASK:
         self.training_data = df_cleared
         self.models = self.train_gp_models(df_cleared)
 
-    def preprocess_data(self, df_input: pd.DataFrame) -> pd.DataFrame:
-        df = df_input.copy()
-
-        # Handle string representation of dicts if present
-        if 's_config' in df.columns:
-            df['s_config'] = df['s_config'].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else x)
-            metadata_expanded = pd.json_normalize(df['s_config'])
-            df = pd.concat([df.drop(columns=['s_config']), metadata_expanded], axis=1)
-
-        df['model_size'] = df['model_size'].fillna(-1)
-
-        # Calculate max throughput based on latency
-        if 'avg_p_latency' in df.columns:
-            df['max_tp'] = np.where(df['avg_p_latency'] > 0, (1000 / df['avg_p_latency']), 0)
-            # Adjust QR service for cores
-            qr_mask = df['service_type'] == self.s_type.value
-            if 'cores' in df.columns:
-                df.loc[qr_mask, 'max_tp'] = df.loc[qr_mask, 'max_tp'] * df.loc[qr_mask, 'cores'].round()
-
-        df.reset_index(drop=True, inplace=True)
-        return df
+    # TODO: This is some nonsense, the one from RASK works well
+    # def preprocess_data(self, df_input: pd.DataFrame) -> pd.DataFrame:
+    #     df = df_input.copy()
+    #
+    #     # Handle string representation of dicts if present
+    #     if 's_config' in df.columns:
+    #         df['s_config'] = df['s_config'].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else x)
+    #         metadata_expanded = pd.json_normalize(df['s_config'])
+    #         df = pd.concat([df.drop(columns=['s_config']), metadata_expanded], axis=1)
+    #
+    #     df['model_size'] = df['model_size'].fillna(-1)
+    #
+    #     # Calculate max throughput based on latency
+    #     if 'avg_p_latency' in df.columns:
+    #         df['max_tp'] = np.where(df['avg_p_latency'] > 0, (1000 / df['avg_p_latency']), 0)
+    #         # Adjust QR service for cores
+    #         qr_mask = df['service_type'] == self.s_type.value
+    #         if 'cores' in df.columns:
+    #             df.loc[qr_mask, 'max_tp'] = df.loc[qr_mask, 'max_tp'] * df.loc[qr_mask, 'cores'].round()
+    #
+    #     df.reset_index(drop=True, inplace=True)
+    #     return df
 
     @utils.print_execution_time
     def train_gp_models(self, df: pd.DataFrame) -> Dict:

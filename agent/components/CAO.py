@@ -9,8 +9,6 @@ from agent.components.SLORegistry_v2 import SLO_Registry
 from agent.components.commons import ServiceType, ServiceVar
 
 
-# TODO: The idea is that we have some recursive CAO structure and from it I can infer things
-
 class CAO:
     def __init__(self, service_type: ServiceType):
         self.service_type = service_type
@@ -23,7 +21,7 @@ class CAO:
         self.model: GASK = GASK(service_type, show_figures=False)
         self.slos: Dict[ServiceVar, float] = slos
 
-        # TODO: Actually, the config is only defined by the two actionable params
+        # TODO: Actually, the config is only defined by the actionable params
         self.config: Dict[ServiceVar, float] = get_random_CAO_config()
         self.pfo: VersatileMapElites = VersatileMapElites(self.service_type, bins=10)
 
@@ -51,10 +49,9 @@ class CAO:
 
     # TODO: Add data to GP, recalculate it, and propagate changes (by doing xyz)
     def integrate_observations(self, new_obs: pd.DataFrame, data_density=1.0):
-        # if new_obs is None:
-        #     new_obs = pd.read_csv("../statics/metrics_20_0.csv")
 
-        self.model.init_model(new_obs, data_density)
+        training_df = new_obs if self.model.training_data is None else (self.model.training_data + new_obs)
+        self.model.init_model(training_df, data_density)
 
         ordered_bounds = get_ordered_boundaries(self.model)
         self.pfo.run_search(self.slos, self.model, ordered_bounds, iterations=800)
