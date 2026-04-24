@@ -7,3 +7,7 @@ seaborn~=0.13.2
 scikit-learn~=1.8.0
 plotly~=6.7.0 # only needed for interactive RASK plot
 pyyaml~=6.0.3
+
+# For GP
+torch~=2.11.0
+gpytorch~=1.15.2
