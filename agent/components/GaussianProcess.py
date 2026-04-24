@@ -11,6 +11,7 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
 
 import utils
+from agent.components import RASK
 from agent.components.commons import ServiceType
 
 # --- Setup Logging ---
@@ -66,33 +67,10 @@ class GASK:
         if data_density < 1.0:
             df_combined = df_combined.sample(frac=data_density, random_state=35)
 
-        df_cleared = self.preprocess_data(df_combined)
+        df_cleared = RASK.preprocess_data(df_combined)
         # df_normalized = normalize_df(df_cleared)
         self.training_data = df_cleared
         self.models = self.train_gp_models(df_cleared)
-
-    # TODO: This is some nonsense, the one from RASK works well
-    # def preprocess_data(self, df_input: pd.DataFrame) -> pd.DataFrame:
-    #     df = df_input.copy()
-    #
-    #     # Handle string representation of dicts if present
-    #     if 's_config' in df.columns:
-    #         df['s_config'] = df['s_config'].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else x)
-    #         metadata_expanded = pd.json_normalize(df['s_config'])
-    #         df = pd.concat([df.drop(columns=['s_config']), metadata_expanded], axis=1)
-    #
-    #     df['model_size'] = df['model_size'].fillna(-1)
-    #
-    #     # Calculate max throughput based on latency
-    #     if 'avg_p_latency' in df.columns:
-    #         df['max_tp'] = np.where(df['avg_p_latency'] > 0, (1000 / df['avg_p_latency']), 0)
-    #         # Adjust QR service for cores
-    #         qr_mask = df['service_type'] == self.s_type.value
-    #         if 'cores' in df.columns:
-    #             df.loc[qr_mask, 'max_tp'] = df.loc[qr_mask, 'max_tp'] * df.loc[qr_mask, 'cores'].round()
-    #
-    #     df.reset_index(drop=True, inplace=True)
-    #     return df
 
     @utils.print_execution_time
     def train_gp_models(self, df: pd.DataFrame) -> Dict:
@@ -274,7 +252,7 @@ if __name__ == "__main__":
     df = pd.read_csv("../../statics/metrics_20_0.csv")
     # 2. Initialize and train
     rask_gp = GASK(show_figures=True)
-    rask_gp.init_model(df, density=1.0)
-    # rask_gp.init_models(df, density=0.5)
-    # rask_gp.init_models(df, density=0.1)
+    rask_gp.init_model(df, data_density=1.0)
+    # rask_gp.init_models(df, data_density=0.5)
+    # rask_gp.init_models(df, data_density=0.1)
     sys.exit()
