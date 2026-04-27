@@ -16,6 +16,7 @@ import numpy as np
 
 def prepare_chained_data(df: pd.DataFrame, service_configs: List[ServiceFeatureMapping], test_size: float):
 
+    # This splits the training samples between ALL individual services, i.e., also between different QRs
     num_services = len(service_configs)
 
     # 1. Split the interleaved rows based on the number of services in the chain
@@ -30,6 +31,19 @@ def prepare_chained_data(df: pd.DataFrame, service_configs: List[ServiceFeatureM
     qt = QuantileTransformer(output_distribution='uniform', n_quantiles=100)
     for s_df in service_dfs:
         s_df['scaled_tp'] = qt.fit_transform(s_df[['max_tp']])
+
+    # # 1. Split the interleaved rows
+    # df_qr = df.iloc[0::3].copy().reset_index(drop=True)
+    # df_cv = df.iloc[1::3].copy().reset_index(drop=True)
+    # df_pc = df.iloc[2::3].copy().reset_index(drop=True)
+    #
+    # # 2. Scale each service throughput to quantiles
+    # # Thus, the values are not truly representative as they are now
+    # # Plus the y values are automatically scaled to a range of 0 to 1
+    # qt = QuantileTransformer(output_distribution='uniform', n_quantiles=100)
+    # df_qr['scaled_tp'] = qt.fit_transform(df_qr[['max_tp']])
+    # df_cv['scaled_tp'] = qt.fit_transform(df_cv[['max_tp']])
+    # df_pc['scaled_tp'] = qt.fit_transform(df_pc[['max_tp']])
 
     # 3. Link the service performance (Bottleneck logic)
     # Each service is capped by the performance of the one immediately preceding it
