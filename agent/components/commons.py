@@ -1,14 +1,9 @@
 from enum import Enum
 from typing import NamedTuple
 
-# class SloBalance(NamedTuple):
-#     slos: Dict[SloVar, float]
+from dataclasses import dataclass
+from typing import List
 
-class ServiceVar(Enum):
-    QUALITY = "data_quality"
-    PERFORMANCE = "max_tp"
-    COST = "cores"
-    MODEL = "model_size"
 
 class ServiceType(Enum):
     QR = "elastic-workbench-qr-detector"
@@ -16,6 +11,17 @@ class ServiceType(Enum):
     PC = "elastic-workbench-pc-visualizer"
     LS = "elastic-workbench-linked-service"
     UNKNOWN = "unknown"
+
+@dataclass
+class ServiceFeatureMapping:
+    service_type: ServiceType
+    feature_indices: List[int]
+
+class ServiceVar(Enum):
+    QUALITY = "data_quality"
+    PERFORMANCE = "max_tp"
+    COST = "cores"
+    MODEL = "model_size"
 
 
 class ESType(Enum):
