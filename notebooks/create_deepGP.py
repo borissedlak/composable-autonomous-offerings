@@ -144,14 +144,9 @@ def prepare_chained_data_error(df: pd.DataFrame, service_configs: List[ServiceFe
     for i, config in enumerate(service_configs):
         s_df = service_dfs[i]
 
-        # Logic specific to your service types:
         if config.service_type == ServiceType.CV:
-            # CV has cores, data_quality, AND model_size
-            features = s_df[['cores', 'data_quality', 'model_size']].values
-        elif config.service_type == ServiceType.QR:
-            # QR and PC only have cores and data_quality
-            features = s_df[['data_quality']].values
-        else:# config.service_type == ServiceType.PC:
+            features = np.ones((len(s_df), 1))
+        else:
             # QR and PC only have cores and data_quality
             features = s_df[['cores', 'data_quality']].values
 
