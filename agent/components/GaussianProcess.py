@@ -249,7 +249,7 @@ def get_ordered_boundaries(model: GASK):
 
 # --- Execution ---
 if __name__ == "__main__":
-    df = pd.read_csv("../../statics/metrics_20_0.csv")
+    df = pd.read_csv("../../statics/metrics_TSC_EXPLORE.csv")
     # 2. Initialize and train
     rask_gp = GASK(show_figures=True)
     rask_gp.init_model(df, data_density=1.0)

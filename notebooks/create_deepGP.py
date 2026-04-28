@@ -26,11 +26,12 @@ def prepare_chained_data(df: pd.DataFrame, service_configs: List[ServiceFeatureM
         for i in range(num_services)
     ]
 
-    # 2. Scale each service throughput to quantiles
-    # Maintaining the 0-1 range for the GP targets
-    qt = QuantileTransformer(output_distribution='uniform', n_quantiles=100)
+    # 2. Scale each service throughput to log(max)
     for s_df in service_dfs:
-        s_df['scaled_tp'] = qt.fit_transform(s_df[['max_tp']])
+        # Use log1p (log(1+x)) to handle cases where throughput might be 0
+        s_df['log_tp'] = np.log1p(s_df['max_tp'])
+        tp_max = s_df['log_tp'].max()
+        s_df['scaled_tp'] = s_df['log_tp'] / tp_max
 
     # # 1. Split the interleaved rows
     # df_qr = df.iloc[0::3].copy().reset_index(drop=True)

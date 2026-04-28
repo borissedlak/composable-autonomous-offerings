@@ -487,5 +487,5 @@ if __name__ == "__main__":
         logger.addHandler(ch)
 
     rask = RASK(show_figures=True) # If you set the 'show_figures' parameter once, its exported every cycle
-    df = pd.read_csv("../../statics/metrics_20_0.csv")
+    df = pd.read_csv("../../statics/metrics_TSC_EXPLORE.csv")
     rask.init_models(df_combined=df)
