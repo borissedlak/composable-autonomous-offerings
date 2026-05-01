@@ -104,6 +104,7 @@ def prepare_chained_data(df: pd.DataFrame, service_configs: List[ServiceFeatureM
     return dataloader, t_x_test, t_y_test, scaler_X
 
 
+# TODO: Ildefons recommended to inject some noise between the services
 def prepare_chained_data_error(df: pd.DataFrame, service_configs: List[ServiceFeatureMapping], test_size: float):
 
     # This splits the training samples between ALL individual services, i.e., also between different QRs
