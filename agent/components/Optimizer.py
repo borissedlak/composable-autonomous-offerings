@@ -2,29 +2,32 @@ from typing import Dict, List, Any
 
 from scipy.optimize import minimize
 
-from agent.components.GaussianProcess import GASK, get_empirical_boundaries
+from agent.components.GaussianProcess import GASK, get_empirical_variable_bounds
 from agent.components.SLORegistry_v2 import calculate_weighted_SLO_F
-from agent.components.commons import ServiceType
+from agent.components.commons import ServiceType, ServiceVar
 
 
-def local_obj(x_norm, s_type: ServiceType, slos: Dict[str, float], gp: GASK, ordered_bounds):
+def local_obj(x_norm, s_type: ServiceType, slos: Dict[ServiceVar, float], gp: GASK, simple_param_bounds):
     """
         :param x_norm: values that MUST BE normalized
         :param s_type: type of service to investigate
         :param slos: just weights, no thresholds
         :param gp: gaussian process expressing system dynamics
-        :param ordered_bounds: min/max feature bounds according to dataset
+        :param simple_param_bounds: min/max feature bounds according to dataset
         :return: SLO fulfillment
         """
 
+    # Store these to use for de-normalization inside the objective
+    # simplified_bounds = list((a[0], a[1]) for a in ordered_bounds.values())
+
     # Translate 0-1 back to Real Units
     x_real = []
-    for i, (mini, maxi) in enumerate(ordered_bounds):
+    for i, (mini, maxi) in enumerate(simple_param_bounds):
         x_real.append(x_norm[i] * (maxi - mini) + mini)
 
-    x_state = {'cores': x_real[0], 'data_quality': x_real[1]}
+    x_state = {ServiceVar.COST: x_real[0], ServiceVar.QUALITY: x_real[1]}
     if s_type == ServiceType.CV:
-        x_state['model_size'] = x_real[2]
+        x_state[ServiceVar.MODEL] = x_real[2]
 
     # Now the GP receives the units it expects (or uses its internal scaler)
     mu, sigma = gp.predict(s_type, "max_tp", x_state)
@@ -32,43 +35,43 @@ def local_obj(x_norm, s_type: ServiceType, slos: Dict[str, float], gp: GASK, ord
     # Gives me the 5th percentile, meaning 95% of the time, tp is larger; thus, solutions that have a high mean,
     # but also a high sd, are not as likely chosen because they might fail this also quite often.
     conservative_max_tp = mu - 1.645 * sigma
-    max_tp = {'max_tp': conservative_max_tp}
+    max_tp = {ServiceVar.PERFORMANCE: conservative_max_tp}
 
-    empirical_boundaries = get_empirical_boundaries(gp.training_data)[s_type]
+    empirical_boundaries = get_empirical_variable_bounds(gp.training_data)[s_type]
     slo_f = calculate_weighted_SLO_F(x_state | max_tp, slos, empirical_boundaries)
 
     # print(f"Calculated SLO-F for {x_state}: {slo_f}")
     return -slo_f
 
 
-def solve_global(s_type: ServiceType, slos, gp: GASK, last_assignments):
-    raw_bounds = get_empirical_boundaries(gp.training_data)[s_type]
-    del raw_bounds['max_tp']
-    ordered_bounds = list(raw_bounds.values())
-
-    # THE SOLVER BOX: Everything is 0 to 1
-    normalized_bounds = [(0.0, 1.0) for _ in ordered_bounds]
+def solve_global(s_type: ServiceType, slos, gp: GASK, empirical_var_bounds, last_assignments):
+    parameter_bounds = empirical_var_bounds.copy()
+    del parameter_bounds[ServiceVar.PERFORMANCE]
+    parameter_bounds = list(parameter_bounds.values())
 
     # Normalize your starting point x0
     if last_assignments:
         # Convert [5.0, 590] -> [normalized_cores, normalized_dq]
         x0 = []
-        for i, (mini, maxi) in enumerate(ordered_bounds):
+        for i, (mini, maxi) in enumerate(parameter_bounds):
             norm_val = (last_assignments[i] - mini) / (maxi - mini)
             x0.append(norm_val)
     else:
-        x0 = [0.5]  * (3 if s_type == ServiceType.CV else 2)
+        x0 = [0.5] * (3 if s_type == ServiceType.CV else 2)
+
+    # THE SOLVER BOX: Everything is 0 to 1
+    normalized_param_bounds = [(0.0, 1.0) for _ in parameter_bounds]
 
     # Pass ordered_bounds to the objective so it can "un-scale"
-    result = minimize(local_obj, x0, method='SLSQP', bounds=normalized_bounds,
-                      args=(s_type, slos, gp, ordered_bounds), options={'maxiter': 150})
+    result = minimize(local_obj, x0, method='SLSQP', bounds=normalized_param_bounds,
+                      args=(s_type, slos, gp, parameter_bounds), options={'maxiter': 150})
 
     if not result.success:
         raise RuntimeWarning("Solver failed: " + result.message)
 
     # Convert the optimal 0-1 answer BACK to real units
     final_x = []
-    for i, (mini, maxi) in enumerate(ordered_bounds):
+    for i, (mini, maxi) in enumerate(parameter_bounds):
         final_x.append(result.x[i] * (maxi - mini) + mini)
 
     return final_x
@@ -108,7 +111,7 @@ class VersatileMapElites:
             indices.append(np.clip(idx, 0, dim_bins - 1))
         return tuple(indices)
 
-    def run_search(self, slos, gp, ordered_bounds, iterations=1000):
+    def run_search(self, slos, gp, simple_param_bounds, iterations=1000):
         for i in range(iterations):
             # --- 1. SELECTION & MUTATION ---
             if i < 100 or np.all(self.fitness_table == -np.inf):
@@ -125,7 +128,7 @@ class VersatileMapElites:
 
             # --- 2. EVALUATION ---
             # Pass s_type (stored in self) to the objective function
-            fitness = -local_obj(x_new, self.s_type, slos, gp, ordered_bounds)
+            fitness = -local_obj(x_new, self.s_type, slos, gp, simple_param_bounds)
 
             # --- 3. THE COMPETITION ---
             bin_idx = self.get_bin(x_new)

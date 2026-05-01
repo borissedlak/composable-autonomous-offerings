@@ -1,7 +1,6 @@
-import ast
 import logging
 import sys
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 
 import numpy as np
 import pandas as pd
@@ -12,7 +11,7 @@ from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
 
 import utils
 from agent.components import RASK
-from agent.components.commons import ServiceType
+from agent.components.commons import ServiceType, ServiceVar
 
 # --- Setup Logging ---
 logging.basicConfig(level=logging.INFO)
@@ -35,8 +34,8 @@ def get_dependent_variable_mapping(service_type: ServiceType):
     return mapping.get(service_type, {})
 
 
-def get_empirical_boundaries(df) -> Dict[ServiceType, Dict]:
-    empirical_boundaries = {}
+def get_empirical_variable_bounds(df) -> Dict[ServiceType, Dict[ServiceVar, Tuple[float, float]]]:
+    empirical_var_bounds = {}
     for s_type in df['service_type'].unique():
         df_s_type = df[df['service_type'] == s_type]
         s_type = ServiceType(s_type)
@@ -47,13 +46,13 @@ def get_empirical_boundaries(df) -> Dict[ServiceType, Dict]:
 
         # Building the min/max dictionary from the original DataFrame
         empirical_boundary = {
-            var: [df_s_type[var].min(), df_s_type[var].max()]
+            ServiceVar(var): (df_s_type[var].min(), df_s_type[var].max())
             for var in [*target_vars, "max_tp"]
         }
-        empirical_boundaries[s_type] = empirical_boundary
+        empirical_var_bounds[s_type] = empirical_boundary
 
     # print(empirical_boundaries)
-    return empirical_boundaries
+    return empirical_var_bounds
 
 
 class GASK:
@@ -119,7 +118,7 @@ class GASK:
         return service_models
 
     # @utils.print_execution_time
-    def predict(self, service_type: ServiceType, dep_var: str, sample_state: Dict[str, Any]):
+    def predict(self, service_type: ServiceType, dep_var: str, sample_state: Dict[ServiceVar, Any]):
         """Predicts mean and uncertainty."""
         if service_type not in self.models or dep_var not in self.models[service_type]:
             return None, None
@@ -128,7 +127,7 @@ class GASK:
         deps = get_dependent_variable_mapping(service_type)[dep_var]
 
         # Ensure inputs are sorted to match training
-        input_data = np.array([[sample_state[k] for k in sorted(deps)]])
+        input_data = np.array([[sample_state[ServiceVar(k)] for k in sorted(deps)]])
         y_pred, sigma = model.predict(input_data, return_std=True)
 
         mu, sigma = y_pred[0], sigma[0]
@@ -241,10 +240,10 @@ class GASK:
         # logger.info(f"Saved uncertainty visualization to {filename}")
 
 
-def get_ordered_boundaries(model: GASK):
-    raw_bounds = get_empirical_boundaries(model.training_data)[model.s_type]
-    del raw_bounds['max_tp']
-    return list(raw_bounds.values())
+# def get_ordered_boundaries(model: GASK):
+#     raw_bounds = get_empirical_variable_bounds(model.training_data)[model.s_type]
+#     del raw_bounds['max_tp']
+#     return list(raw_bounds.values())
 
 
 # --- Execution ---
