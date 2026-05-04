@@ -138,7 +138,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def visualize_ndarray(arr, title="Array Visualization", cmap="YlGnBu"):
+def visualize_ndarray(arr, title, cmap="YlGnBu"):
     """
     Visualizes a 2D or 3D numpy array.
     2D: Heatmap with text annotations.
@@ -146,7 +146,7 @@ def visualize_ndarray(arr, title="Array Visualization", cmap="YlGnBu"):
     """
     if arr.ndim == 2:
         # --- Existing 2D Logic ---
-        fig, ax = plt.subplots(figsize=(10, 8))
+        fig, ax = plt.subplots(figsize=(8, 6))
         im = ax.imshow(arr, cmap=cmap)
         plt.colorbar(im, ax=ax)
 
@@ -165,7 +165,7 @@ def visualize_ndarray(arr, title="Array Visualization", cmap="YlGnBu"):
 
     elif arr.ndim == 3:
         # --- New 3D Logic ---
-        fig = plt.figure(figsize=(12, 9))
+        fig = plt.figure(figsize=(8, 6))
         ax = fig.add_subplot(111, projection='3d')
 
         # Get coordinates of all cells that are not -inf
@@ -194,6 +194,7 @@ def visualize_ndarray(arr, title="Array Visualization", cmap="YlGnBu"):
 
     plt.title(title)
     plt.tight_layout()
+    plt.savefig(f"../figures/{title}.jpg")
     plt.show()
 
 # --- Example Usage ---
