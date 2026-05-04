@@ -140,18 +140,14 @@ def train_rask_models(df, show_result=False, img_suffix=None, override_relation=
     return service_models
 
 
-def get_dependent_variable_mapping(service_type: ServiceType, override= False):
-    if override:
-        return {'cores': sorted(['max_tp', 'data_quality'])}
-
-    if service_type == ServiceType.QR:
-        return {'max_tp': sorted(['cores', 'data_quality'])}
-    elif service_type == ServiceType.CV:
-        return {'max_tp': sorted(['cores', 'model_size', 'data_quality'])}
-    elif service_type == ServiceType.PC:
-        return {'max_tp': sorted(['cores', 'data_quality'])}
-    else:
-        raise RuntimeError(f"Service type {service_type} not supported")
+def get_dependent_variable_mapping(service_type: ServiceType):
+    """Defines which independent variables influence the target variable."""
+    mapping = {
+        ServiceType.QR: {'max_tp': sorted(['cores', 'data_quality'])},
+        ServiceType.CV: {'max_tp': sorted(['cores', 'model_size', 'data_quality'])},
+        ServiceType.PC: {'max_tp': sorted(['cores', 'data_quality'])}
+    }
+    return mapping.get(service_type, {})
 
 
 def calculate_missing_vars(partial_state, total_rps: int):

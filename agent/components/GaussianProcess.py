@@ -11,6 +11,7 @@ from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
 
 import utils
 from agent.components import RASK
+from agent.components.RASK import get_dependent_variable_mapping
 from agent.components.commons import ServiceType, ServiceVar
 
 # --- Setup Logging ---
@@ -23,15 +24,6 @@ def normalize(val, v_min, v_max):
         return 0.0
     return (val - v_min) / (v_max - v_min)
 
-
-def get_dependent_variable_mapping(service_type: ServiceType):
-    """Defines which independent variables influence the target variable."""
-    mapping = {
-        ServiceType.QR: {'max_tp': sorted(['cores', 'data_quality'])},
-        ServiceType.CV: {'max_tp': sorted(['cores', 'model_size', 'data_quality'])},
-        ServiceType.PC: {'max_tp': sorted(['cores', 'data_quality'])}
-    }
-    return mapping.get(service_type, {})
 
 
 def get_empirical_variable_bounds(df) -> Dict[ServiceType, Dict[ServiceVar, Tuple[float, float]]]:
@@ -64,7 +56,9 @@ class GASK:
 
     def init_model(self, df_combined: pd.DataFrame, data_density=1.0):
         if data_density < 1.0:
-            df_combined = df_combined.sample(frac=data_density, random_state=35)
+            # df_combined = df_combined.sample(frac=data_density, random_state=35)
+            split_idx = int(len(df_combined) * data_density)
+            df_combined = df_combined.iloc[:split_idx]
 
         df_cleared = RASK.preprocess_data(df_combined)
         # df_normalized = normalize_df(df_cleared)
@@ -132,6 +126,22 @@ class GASK:
 
         mu, sigma = y_pred[0], sigma[0]
         return mu, sigma  # np.random.normal(mu, sigma, 1)[0]
+
+    def get_model_lml(self, service_type: ServiceType, dep_var: str) -> float:
+        """Extracts the Log-Marginal Likelihood from the fitted GP pipeline."""
+        if service_type not in self.models or dep_var not in self.models[service_type]:
+            return None
+
+        # 1. Get the pipeline
+        pipeline = self.models[service_type][dep_var]
+
+        # 2. Access the 'gp' step from the pipeline
+        gp_model = pipeline.named_steps['gp']
+
+        # 3. Return the LML
+        # Note: .log_marginal_likelihood() returns the LML of the
+        # optimized hyperparameters found during .fit()
+        return gp_model.log_marginal_likelihood()
 
     @utils.print_execution_time
     def draw_3d_gp_plot(self, df, var, deps, gp, service_name):
@@ -235,9 +245,10 @@ class GASK:
         )
 
         fig.show()
-        # filename = f"gp_uncertainty_{service_name}_{var}.html"
+        filename = f"../figures/gp_{service_name}_{var}.jpg"
         # fig.write_html(filename)
-        # logger.info(f"Saved uncertainty visualization to {filename}")
+        fig.write_image(filename)
+        logger.info(f"Saved uncertainty visualization to {filename}")
 
 
 # def get_ordered_boundaries(model: GASK):

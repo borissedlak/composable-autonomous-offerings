@@ -6,14 +6,18 @@ from agent.components.GaussianProcess import GASK, get_empirical_variable_bounds
 from agent.components.SLORegistry_v2 import calculate_weighted_SLO_F
 from agent.components.commons import ServiceType, ServiceVar
 
+import logging
+logger = logging.getLogger(__name__)
 
-def local_obj(x_norm, s_type: ServiceType, slos: Dict[ServiceVar, float], gp: GASK, simple_param_bounds):
+def local_obj(x_norm, s_type: ServiceType, slos: Dict[ServiceVar, float], gp: GASK,
+              simple_param_bounds, conservative: bool = True):
     """
         :param x_norm: values that MUST BE normalized
         :param s_type: type of service to investigate
         :param slos: just weights, no thresholds
         :param gp: gaussian process expressing system dynamics
         :param simple_param_bounds: min/max feature bounds according to dataset
+        :param conservative: describes if the numerical solver should penalize high variance (when True)
         :return: SLO fulfillment
         """
 
@@ -34,7 +38,7 @@ def local_obj(x_norm, s_type: ServiceType, slos: Dict[ServiceVar, float], gp: GA
 
     # Gives me the 5th percentile, meaning 95% of the time, tp is larger; thus, solutions that have a high mean,
     # but also a high sd, are not as likely chosen because they might fail this also quite often.
-    conservative_max_tp = mu - 1.645 * sigma
+    conservative_max_tp = (mu - 1.645 * sigma) if conservative else mu
     max_tp = {ServiceVar.PERFORMANCE: conservative_max_tp}
 
     empirical_boundaries = get_empirical_variable_bounds(gp.training_data)[s_type]
@@ -44,7 +48,16 @@ def local_obj(x_norm, s_type: ServiceType, slos: Dict[ServiceVar, float], gp: GA
     return -slo_f
 
 
-def solve_global(s_type: ServiceType, slos, gp: GASK, empirical_var_bounds, last_assignments):
+def run_optimizer_multi(s_type: ServiceType, slos, gp: GASK, empirical_var_bounds, runs: int = 10):
+    results = []
+    for _ in range(runs):
+        fitness, x = solve_global(s_type, slos, gp, empirical_var_bounds, conservative=True)
+        results.append((fitness, x))
+    return results
+
+
+def solve_global(s_type: ServiceType, slos, gp: GASK, empirical_var_bounds,
+                 last_assignments=None, conservative: bool = True):
     parameter_bounds = empirical_var_bounds.copy()
     del parameter_bounds[ServiceVar.PERFORMANCE]
     parameter_bounds = list(parameter_bounds.values())
@@ -57,24 +70,28 @@ def solve_global(s_type: ServiceType, slos, gp: GASK, empirical_var_bounds, last
             norm_val = (last_assignments[i] - mini) / (maxi - mini)
             x0.append(norm_val)
     else:
-        x0 = [0.5] * (3 if s_type == ServiceType.CV else 2)
+        x0 = [np.random.uniform()] + [np.random.uniform()] + ([np.random.uniform()] if s_type == ServiceType.CV else [])
 
     # THE SOLVER BOX: Everything is 0 to 1
     normalized_param_bounds = [(0.0, 1.0) for _ in parameter_bounds]
 
     # Pass ordered_bounds to the objective so it can "un-scale"
     result = minimize(local_obj, x0, method='SLSQP', bounds=normalized_param_bounds,
-                      args=(s_type, slos, gp, parameter_bounds), options={'maxiter': 150})
+                      args=(s_type, slos, gp, parameter_bounds, conservative), options={'maxiter': 150})
 
+    # if not result.success:
+    #     raise RuntimeWarning("Solver failed: " + result.message)
     if not result.success:
-        raise RuntimeWarning("Solver failed: " + result.message)
+        logger.warning(f"Solver failed: {result.message}. Returning best found so far.")
+        # Instead of raising, return the result anyway or a default
+        return -result.fun, result.x
 
     # Convert the optimal 0-1 answer BACK to real units
     final_x = []
     for i, (mini, maxi) in enumerate(parameter_bounds):
         final_x.append(result.x[i] * (maxi - mini) + mini)
 
-    return final_x
+    return -result.fun, final_x
 
 
 import numpy as np

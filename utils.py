@@ -4,8 +4,6 @@ import os
 import time
 from typing import Dict
 
-import numpy as np
-
 logger = logging.getLogger('multiscale')
 ROOT = os.path.dirname(__file__)
 
@@ -131,8 +129,6 @@ class SlidingWindow:
             return None
         return round(sum(self.values) / len(self.values), 3)
 
-
-import matplotlib.pyplot as plt
 
 import matplotlib.pyplot as plt
 import numpy as np
