@@ -48,36 +48,35 @@ def local_obj(x_norm, s_type: ServiceType, slos: Dict[ServiceVar, float], gp: GA
     return -slo_f
 
 
-def run_optimizer_multi(s_type: ServiceType, slos, gp: GASK, empirical_var_bounds, runs: int = 10):
+def run_optimizer_multi(s_type: ServiceType, slos, gp: GASK, bounds, runs: int = 10):
     results = []
     for _ in range(runs):
-        fitness, x = solve_global(s_type, slos, gp, empirical_var_bounds, conservative=True)
+        fitness, x = solve_global(s_type, slos, gp, bounds, conservative=True)
         results.append((fitness, x))
     return results
 
 
-def solve_global(s_type: ServiceType, slos, gp: GASK, empirical_var_bounds,
+def solve_global(s_type: ServiceType, slos, gp: GASK, parameter_bounds,
                  last_assignments=None, conservative: bool = True):
-    parameter_bounds = empirical_var_bounds.copy()
-    del parameter_bounds[ServiceVar.PERFORMANCE]
-    parameter_bounds = list(parameter_bounds.values())
+
+    simplified_bounds = list(parameter_bounds.copy().values())
 
     # Normalize your starting point x0
     if last_assignments:
         # Convert [5.0, 590] -> [normalized_cores, normalized_dq]
         x0 = []
-        for i, (mini, maxi) in enumerate(parameter_bounds):
+        for i, (mini, maxi) in enumerate(simplified_bounds):
             norm_val = (last_assignments[i] - mini) / (maxi - mini)
             x0.append(norm_val)
     else:
         x0 = [np.random.uniform()] + [np.random.uniform()] + ([np.random.uniform()] if s_type == ServiceType.CV else [])
 
     # THE SOLVER BOX: Everything is 0 to 1
-    normalized_param_bounds = [(0.0, 1.0) for _ in parameter_bounds]
+    normalized_param_bounds = [(0.0, 1.0) for _ in simplified_bounds]
 
     # Pass ordered_bounds to the objective so it can "un-scale"
     result = minimize(local_obj, x0, method='SLSQP', bounds=normalized_param_bounds,
-                      args=(s_type, slos, gp, parameter_bounds, conservative), options={'maxiter': 150})
+                      args=(s_type, slos, gp, simplified_bounds, conservative), options={'maxiter': 150})
 
     # if not result.success:
     #     raise RuntimeWarning("Solver failed: " + result.message)
@@ -88,7 +87,7 @@ def solve_global(s_type: ServiceType, slos, gp: GASK, empirical_var_bounds,
 
     # Convert the optimal 0-1 answer BACK to real units
     final_x = []
-    for i, (mini, maxi) in enumerate(parameter_bounds):
+    for i, (mini, maxi) in enumerate(simplified_bounds):
         final_x.append(result.x[i] * (maxi - mini) + mini)
 
     return -result.fun, final_x

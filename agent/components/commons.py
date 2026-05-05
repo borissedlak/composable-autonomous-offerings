@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import NamedTuple
+from typing import NamedTuple, Dict, Tuple
 
 from dataclasses import dataclass
 from typing import List
@@ -41,3 +41,42 @@ class ServiceID(NamedTuple):
     service_type: ServiceType
     container_id: str
     port: str = 8080
+
+theoretical_param_bounds: Dict[ServiceType, Dict[ServiceVar, Tuple[float, float]]] = {
+    ServiceType.QR: {
+        ServiceVar.COST: (1.0, 8.0),
+        ServiceVar.QUALITY: (100.0, 1000.0),
+    },
+    ServiceType.CV: {
+        ServiceVar.COST: (1.0, 8.0),
+        ServiceVar.QUALITY: (128.0, 320.0),
+        ServiceVar.MODEL: (1.0, 4.0),
+    },
+    ServiceType.PC: {
+        ServiceVar.COST: (1.0, 8.0),
+        ServiceVar.QUALITY: (6.0, 60.0),
+    }
+}
+
+from agent.components.SLORegistry_v2 import SLO_Registry
+
+slo_lib = SLO_Registry("../statics/config/service_level_objectives.yml")
+_slos_default = slo_lib.get_slo_for_client("experiment-1", "default")
+_slos_high_perf = slo_lib.get_slo_for_client("experiment-1", "high_perf")
+_slos_low_cost = slo_lib.get_slo_for_client("experiment-1", "low_cost")
+_slos_high_quality = slo_lib.get_slo_for_client("experiment-1", "high_quality")
+
+# class SloType(Enum):
+#     DEFAULT = "default"
+#     HIGH_PERF = "high_perf"
+#     LOW_COST = "low_cost"
+#     HIGH_QUALITY = "high_quality"
+
+class SloMapping(NamedTuple):
+    name: str
+    slos: Dict[ServiceVar, float]
+
+SLO_DEFAULT = SloMapping("default", _slos_default)
+SLO_HIGH_PERF = SloMapping("high_perf", _slos_high_perf)
+SLO_LOW_COST = SloMapping("low_cost", _slos_low_cost)
+SLO_HIGH_QUALITY = SloMapping("high_quality", _slos_high_quality)
