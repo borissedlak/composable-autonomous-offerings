@@ -66,7 +66,9 @@ def preprocess_data(df_input):
     metadata_expanded = pd.json_normalize(df['s_config'])
 
     df = pd.concat([df.drop(columns=['s_config']), metadata_expanded], axis=1)
-    df['model_size'] = df['model_size'].fillna(-1)
+
+    if 'model_size' in df.keys():
+        df['model_size'] = df['model_size'].fillna(-1)
     # df = combined_df_expanded
 
     df['max_tp'] = np.where(df['avg_p_latency'] != -1, (1000 / df['avg_p_latency']), 0)

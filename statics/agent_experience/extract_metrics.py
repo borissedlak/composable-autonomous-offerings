@@ -32,7 +32,8 @@ def extract_fields(row):
     })
 
 default_files = [
-        'agent_experience_PERCOM_EXPLORE.csv',
+        'agent_experience_ICSOC_EXPLORE.csv',
+        'agent_experience_ICSOC_evaluation.csv',
     ]
 
 def extract_metrics(files):
