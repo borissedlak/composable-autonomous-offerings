@@ -32,7 +32,7 @@ def extract_fields(row):
     })
 
 default_files = [
-        'agent_experience_RASK_180_0.csv',
+        'agent_experience_PERCOM_EXPLORE.csv',
     ]
 
 def extract_metrics(files):

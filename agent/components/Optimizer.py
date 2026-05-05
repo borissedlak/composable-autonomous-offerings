@@ -154,8 +154,8 @@ class VersatileMapElites:
                 self.fitness_table[bin_idx] = fitness
                 self.solution_params_table[bin_idx] = x_new
 
-                if i % 100 == 0:
-                    print(f"Iteration {i}: Elite found in bin {bin_idx} with fitness {fitness:.4f}")
+                # if i % 100 == 0:
+                #     print(f"Iteration {i}: Elite found in bin {bin_idx} with fitness {fitness:.4f}")
 
     def get_diverse_set(self, n_solutions=5, versatility=0.2):
         # 1. Flatten the archive (works for both 2D and 3D shapes)
