@@ -66,17 +66,17 @@ _slos_high_perf = slo_lib.get_slo_for_client("experiment-1", "high_perf")
 _slos_low_cost = slo_lib.get_slo_for_client("experiment-1", "low_cost")
 _slos_high_quality = slo_lib.get_slo_for_client("experiment-1", "high_quality")
 
-# class SloType(Enum):
-#     DEFAULT = "default"
-#     HIGH_PERF = "high_perf"
-#     LOW_COST = "low_cost"
-#     HIGH_QUALITY = "high_quality"
+class SloSet(Enum):
+    DEFAULT = _slos_default
+    HIGH_PERF = _slos_high_perf
+    LOW_COST = _slos_low_cost
+    HIGH_QUALITY = _slos_high_quality
 
-class SloMapping(NamedTuple):
-    name: str
-    slos: Dict[ServiceVar, float]
-
-SLO_DEFAULT = SloMapping("default", _slos_default)
-SLO_HIGH_PERF = SloMapping("high_perf", _slos_high_perf)
-SLO_LOW_COST = SloMapping("low_cost", _slos_low_cost)
-SLO_HIGH_QUALITY = SloMapping("high_quality", _slos_high_quality)
+# class SloMapping(NamedTuple):
+#     name: str
+#     slos: Dict[ServiceVar, float]
+#
+# SLO_DEFAULT = SloMapping("default", _slos_default)
+# SLO_HIGH_PERF = SloMapping("high_perf", _slos_high_perf)
+# SLO_LOW_COST = SloMapping("low_cost", _slos_low_cost)
+# SLO_HIGH_QUALITY = SloMapping("high_quality", _slos_high_quality)

@@ -57,7 +57,7 @@ def calculate_weighted_SLO_F(
         # print(value, slo_weight)
 
     # Heavily penalize if we don't have any output
-    if full_state[ServiceVar.PERFORMANCE] < 0.0:
-        return weighted_slo_f * 0.1
+    if full_state[ServiceVar.PERFORMANCE] <= 1.0:
+        return weighted_slo_f * 0.05
 
     return weighted_slo_f
