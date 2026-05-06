@@ -1,21 +1,69 @@
-# %% [markdown]
-# ### Setup Data loader
-# %%
 from typing import List
 
 import gpytorch
+import numpy as np
 import pandas as pd
 import torch
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import QuantileTransformer, MinMaxScaler
-
-from agent.components.commons import ServiceFeatureMapping, ServiceType
 from torch.utils.data import TensorDataset, DataLoader
-import numpy as np
+
+from agent.components import RASK
+from agent.components.commons import ServiceFeatureMapping, ServiceType
+
+
+def get_prepared_metrics_df(path="../statics/agent_experience/metrics_ICSOC_EXPLORE.csv",
+                            share: float = 1.0):
+    _raw_df = pd.read_csv(path)
+    first_x_percent = int(len(_raw_df) * share)
+    _trimmed_df = _raw_df.iloc[:first_x_percent].reset_index(drop=True)
+    converted_df = RASK.preprocess_data(_trimmed_df)
+    return converted_df
+
+
+class DynamicServiceChain(torch.nn.Module):
+    def __init__(self, service_configs: List[ServiceFeatureMapping], num_inducing: int = 64):
+        super().__init__()
+        self.configs = service_configs
+        self.gp_layers = torch.nn.ModuleList()
+        self.likelihoods = torch.nn.ModuleList()
+
+        for i, config in enumerate(service_configs):
+            input_dims = len(config.feature_indices)
+            if i > 0:
+                input_dims += 1  # Previous service output
+
+            gp = ServiceGP(input_dims=input_dims, num_inducing=num_inducing)
+            likelihood = gpytorch.likelihoods.GaussianLikelihood()
+            self.gp_layers.append(gp)
+            self.likelihoods.append(likelihood)
+
+    def forward(self, x, boundary_indices: List[int]):
+        dists = []
+        last_output = None
+
+        for i, gp in enumerate(self.gp_layers):
+            indices = self.configs[i].feature_indices
+            current_input = x[:, indices]
+
+            # During training, we want to block the gradients from
+            # flowing from one service chunk to another
+            if last_output is not None:
+                if i in boundary_indices:
+                    inp_sample = last_output.detach()
+                else:
+                    inp_sample = last_output
+
+                current_input = torch.cat([current_input, inp_sample], dim=-1)
+
+            dist = gp(current_input)
+            dists.append(dist)
+            last_output = dist.rsample().unsqueeze(-1)
+
+        return tuple(dists)
 
 
 def prepare_chained_data(df: pd.DataFrame, service_configs: List[ServiceFeatureMapping], test_size: float):
-
     # This splits the training samples between ALL individual services, i.e., also between different QRs
     num_services = len(service_configs)
 
@@ -32,19 +80,6 @@ def prepare_chained_data(df: pd.DataFrame, service_configs: List[ServiceFeatureM
         s_df['log_tp'] = np.log1p(s_df['max_tp'])
         tp_max = s_df['log_tp'].max()
         s_df['scaled_tp'] = s_df['log_tp'] / tp_max
-
-    # # 1. Split the interleaved rows
-    # df_qr = df.iloc[0::3].copy().reset_index(drop=True)
-    # df_cv = df.iloc[1::3].copy().reset_index(drop=True)
-    # df_pc = df.iloc[2::3].copy().reset_index(drop=True)
-    #
-    # # 2. Scale each service throughput to quantiles
-    # # Thus, the values are not truly representative as they are now
-    # # Plus the y values are automatically scaled to a range of 0 to 1
-    # qt = QuantileTransformer(output_distribution='uniform', n_quantiles=100)
-    # df_qr['scaled_tp'] = qt.fit_transform(df_qr[['max_tp']])
-    # df_cv['scaled_tp'] = qt.fit_transform(df_cv[['max_tp']])
-    # df_pc['scaled_tp'] = qt.fit_transform(df_pc[['max_tp']])
 
     # 3. Link the service performance (Bottleneck logic)
     # Each service is capped by the performance of the one immediately preceding it
@@ -88,10 +123,10 @@ def prepare_chained_data(df: pd.DataFrame, service_configs: List[ServiceFeatureM
     # 5. Split and Tensors
     x_train, x_test, y_train, y_test = train_test_split(X_final, Y_final, test_size=test_size)
 
-    t_x_train = torch.tensor(x_train, dtype=torch.float64)
-    t_y_train = torch.tensor(y_train, dtype=torch.float64)
-    t_x_test = torch.tensor(x_test, dtype=torch.float64)
-    t_y_test = torch.tensor(y_test, dtype=torch.float64)
+    t_x_train = torch.tensor(x_train, dtype=torch.float32)
+    t_y_train = torch.tensor(y_train, dtype=torch.float32)
+    t_x_test = torch.tensor(x_test, dtype=torch.float32)
+    t_y_test = torch.tensor(y_test, dtype=torch.float32)
 
     dataloader = DataLoader(
         TensorDataset(t_x_train, t_y_train),
@@ -106,7 +141,6 @@ def prepare_chained_data(df: pd.DataFrame, service_configs: List[ServiceFeatureM
 
 # TODO: Ildefons recommended to inject some noise between the services
 def prepare_chained_data_error(df: pd.DataFrame, service_configs: List[ServiceFeatureMapping], test_size: float):
-
     # This splits the training samples between ALL individual services, i.e., also between different QRs
     num_services = len(service_configs)
 
@@ -163,10 +197,10 @@ def prepare_chained_data_error(df: pd.DataFrame, service_configs: List[ServiceFe
     # 5. Split and Tensors
     x_train, x_test, y_train, y_test = train_test_split(X_final, Y_final, test_size=test_size)
 
-    t_x_train = torch.tensor(x_train, dtype=torch.float64)
-    t_y_train = torch.tensor(y_train, dtype=torch.float64)
-    t_x_test = torch.tensor(x_test, dtype=torch.float64)
-    t_y_test = torch.tensor(y_test, dtype=torch.float64)
+    t_x_train = torch.tensor(x_train, dtype=torch.float32)
+    t_y_train = torch.tensor(y_train, dtype=torch.float32)
+    t_x_test = torch.tensor(x_test, dtype=torch.float32)
+    t_y_test = torch.tensor(y_test, dtype=torch.float32)
 
     dataloader = DataLoader(
         TensorDataset(t_x_train, t_y_train),
@@ -178,8 +212,6 @@ def prepare_chained_data_error(df: pd.DataFrame, service_configs: List[ServiceFe
 
     return dataloader, t_x_test, t_y_test, scaler_X
 
-
-# --- 1. MODEL DEFINITION ---
 
 class ServiceGP(gpytorch.models.ApproximateGP):
     """A standard Variational GP for an individual service."""

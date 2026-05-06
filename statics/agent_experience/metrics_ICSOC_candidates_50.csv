@@ -1,4 +1,7 @@
 timestamp,service_type,container_id,avg_p_latency,s_config,cores,rps,throughput,cooldown
+2026-05-05 19:39:46.158235,elastic-workbench-qr-detector,elastic-workbench-qr-detector-1,26,"{'data_quality': 550, 'parallelism': 1}",2.67,-1,80,-1
+2026-05-05 19:39:46.162254,elastic-workbench-cv-analyzer,elastic-workbench-cv-analyzer-1,303,"{'data_quality': 224, 'model_size': 3, 'parallelism': 1}",2.67,-1,0,-1
+2026-05-05 19:39:46.165937,elastic-workbench-pc-visualizer,elastic-workbench-pc-visualizer-1,5,"{'data_quality': 30, 'model_size': 1, 'parallelism': 1}",2.67,-1,50,-1
 2026-05-05 19:39:56.161283,elastic-workbench-qr-detector,elastic-workbench-qr-detector-1,6,"{'data_quality': 204, 'parallelism': 1}",5.54,-1,80,-1
 2026-05-05 19:39:56.168592,elastic-workbench-cv-analyzer,elastic-workbench-cv-analyzer-1,41,"{'data_quality': 174, 'model_size': 1, 'parallelism': 1}",7.92,-1,5,-1
 2026-05-05 19:39:56.171333,elastic-workbench-pc-visualizer,elastic-workbench-pc-visualizer-1,5,"{'data_quality': 51, 'model_size': 1, 'parallelism': 1}",1.0,-1,50,-1
@@ -5993,9 +5996,6 @@ timestamp,service_type,container_id,avg_p_latency,s_config,cores,rps,throughput,
 2026-05-06 01:12:47.516336,elastic-workbench-qr-detector,elastic-workbench-qr-detector-1,64,"{'data_quality': 929, 'parallelism': 1}",4.44,-1,59,-1
 2026-05-06 01:12:47.520136,elastic-workbench-cv-analyzer,elastic-workbench-cv-analyzer-1,167,"{'data_quality': 288, 'model_size': 4, 'parallelism': 1}",3.91,-1,0,-1
 2026-05-06 01:12:47.522761,elastic-workbench-pc-visualizer,elastic-workbench-pc-visualizer-1,6,"{'data_quality': 55, 'model_size': 1, 'parallelism': 1}",1.0,-1,50,-1
-2026-05-06 01:12:57.515847,elastic-workbench-qr-detector,elastic-workbench-qr-detector-1,64,"{'data_quality': 929, 'parallelism': 1}",4.44,-1,58,-1
-2026-05-06 01:12:57.519486,elastic-workbench-cv-analyzer,elastic-workbench-cv-analyzer-1,-1,"{'data_quality': 288, 'model_size': 4, 'parallelism': 1}",3.91,-1,0,-1
-2026-05-06 01:12:57.522076,elastic-workbench-pc-visualizer,elastic-workbench-pc-visualizer-1,6,"{'data_quality': 55, 'model_size': 1, 'parallelism': 1}",1.0,-1,50,-1
 2026-05-06 01:12:57.515847,elastic-workbench-qr-detector,elastic-workbench-qr-detector-1,64,"{'data_quality': 929, 'parallelism': 1}",4.44,-1,58,-1
 2026-05-06 01:12:57.519486,elastic-workbench-cv-analyzer,elastic-workbench-cv-analyzer-1,-1,"{'data_quality': 288, 'model_size': 4, 'parallelism': 1}",3.91,-1,0,-1
 2026-05-06 01:12:57.522076,elastic-workbench-pc-visualizer,elastic-workbench-pc-visualizer-1,6,"{'data_quality': 55, 'model_size': 1, 'parallelism': 1}",1.0,-1,50,-1
