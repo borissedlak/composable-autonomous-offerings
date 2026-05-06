@@ -35,6 +35,7 @@ default_files = [
         'agent_experience_ICSOC_EXPLORE.csv',
         'agent_experience_ICSOC_evaluation.csv',
         'agent_experience_ICSOC_candidates.csv',
+        'agent_experience_ICSOC_candidates_50.csv',
     ]
 
 def extract_metrics(files):

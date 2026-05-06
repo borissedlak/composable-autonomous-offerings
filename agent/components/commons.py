@@ -58,6 +58,14 @@ theoretical_param_bounds: Dict[ServiceType, Dict[ServiceVar, Tuple[float, float]
     }
 }
 
+FIG_SIZE_SINGLE = (6, 3)
+
+SERVICE_STYLE = {
+    'elastic-workbench-qr-detector': {'color': '#d62728', 'linestyle': '-', 'marker': 'o'},
+    'elastic-workbench-cv-analyzer': {'color': '#1f77b4', 'linestyle': '--', 'marker': 's'},
+    'elastic-workbench-pc-visualizer': {'color': '#2ca02c', 'linestyle': ':', 'marker': 'D'}
+}
+
 from agent.components.SLORegistry_v2 import SLO_Registry
 
 slo_lib = SLO_Registry("../statics/config/service_level_objectives.yml")
@@ -71,12 +79,3 @@ class SloSet(Enum):
     HIGH_PERF = _slos_high_perf
     LOW_COST = _slos_low_cost
     HIGH_QUALITY = _slos_high_quality
-
-# class SloMapping(NamedTuple):
-#     name: str
-#     slos: Dict[ServiceVar, float]
-#
-# SLO_DEFAULT = SloMapping("default", _slos_default)
-# SLO_HIGH_PERF = SloMapping("high_perf", _slos_high_perf)
-# SLO_LOW_COST = SloMapping("low_cost", _slos_low_cost)
-# SLO_HIGH_QUALITY = SloMapping("high_quality", _slos_high_quality)
