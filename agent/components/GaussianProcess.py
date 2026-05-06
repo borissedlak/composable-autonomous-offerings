@@ -48,8 +48,9 @@ def get_empirical_variable_bounds(df) -> Dict[ServiceType, Dict[ServiceVar, Tupl
 
 
 class GASK:
-    def __init__(self, s_type: ServiceType, show_figures=True):
-        self.show_figures = show_figures
+    def __init__(self, s_type: ServiceType, create_figures=False, display_figures=False):
+        self.create_figures = create_figures
+        self.display_figures = display_figures
         self.models: Dict[ServiceType, Dict] = {}
         self.training_data: pd.DataFrame = None
         self.s_type = s_type
@@ -106,7 +107,7 @@ class GASK:
 
                 service_models[stype][var] = gp_pipeline
 
-                if self.show_figures:
+                if self.create_figures:
                     self.draw_3d_gp_plot(df_service, var, deps, gp_pipeline, stype.value)
 
         return service_models
@@ -147,21 +148,19 @@ class GASK:
     def draw_3d_gp_plot(self, df, var, deps, gp, service_name):
         """
         Visualizes GP mean surface, ±95% confidence intervals, and actual data.
+        Aligned with paper figure sizes (600px width approx).
         """
-        # Define visualization parameters
-        grid_res = 30  # Adjust for surface smoothness
+        grid_res = 30
 
-        # 1. Coordinate Handling (Keep existing PCA or raw logic)
+        # 1. Coordinate Handling
         if len(deps) > 2:
             pca = PCA(n_components=2)
             coords = pca.fit_transform(df[deps].values)
             x_axis, y_axis = "PC1", "PC2"
-            x_actual = coords[:, 0]
-            y_actual = coords[:, 1]
+            x_actual, y_actual = coords[:, 0], coords[:, 1]
         else:
             x_axis, y_axis = deps[0], deps[1]
-            x_actual = df[x_axis]
-            y_actual = df[y_axis]
+            x_actual, y_actual = df[x_axis], df[y_axis]
 
         # Create 2D Meshgrid
         x_range = np.linspace(x_actual.min(), x_actual.max(), grid_res)
@@ -169,86 +168,86 @@ class GASK:
         xx, yy = np.meshgrid(x_range, y_range)
         grid_points_pca = np.c_[xx.ravel(), yy.ravel()]
 
-        # Transform visualization grid back to model space if PCA was used
-        if len(deps) > 2:
-            grid_points_orig = pca.inverse_transform(grid_points_pca)
-        else:
-            grid_points_orig = grid_points_pca
+        grid_points_orig = pca.inverse_transform(grid_points_pca) if len(deps) > 2 else grid_points_pca
 
-        # 2. Key GP Prediction Step: Get Mean AND StdDev
+        # 2. GP Prediction
         y_pred, sigma = gp.predict(grid_points_orig, return_std=True)
-
-        # Reshape predictions back to grid shape
         y_mean_grid = y_pred.reshape(xx.shape)
         sigma_grid = sigma.reshape(xx.shape)
 
-        # 3. Calculate Confidence Intervals
-        # We use ±1.96 * sigma for 95% confidence interval
+        # 3. Confidence Intervals
         y_upper = y_mean_grid + 1.96 * sigma_grid
         y_lower = y_mean_grid - 1.96 * sigma_grid
 
         # 4. Construct Plotly Figure
         fig = go.Figure()
 
-        # Trace 1: Predicted Mean Surface (The Function)
+        # Trace 1: Mean Surface
         fig.add_trace(go.Surface(
             x=xx, y=yy, z=y_mean_grid,
             colorscale='Viridis',
-            name='GP Mean Prediction',
-            colorbar=dict(title=f"Predicted {var}", x=-0.12),
+            name='Mean',
+            showscale=False,
+            # colorbar=dict(title=f"{var}", thickness=15, len=0.5),
             opacity=0.9
         ))
 
-        # Trace 2: Upper Confidence Surface (σ over function)
-        fig.add_trace(go.Surface(
-            x=xx, y=yy, z=y_upper,
-            colorscale=[[0, 'rgba(100, 100, 100, 0.5)'], [1, 'rgba(100, 100, 100, 0.5)']],
-            name='+95% Conf. Interval',
-            showscale=False,
-            opacity=0.5
-        ))
+        # Trace 2 & 3: Confidence Bands (Simplified to one color)
+        conf_style = dict(showscale=False, opacity=0.3, colorscale=[[0, 'grey'], [1, 'grey']])
+        fig.add_trace(go.Surface(x=xx, y=yy, z=y_upper, name='+95% CI', **conf_style))
+        fig.add_trace(go.Surface(x=xx, y=yy, z=y_lower, name='-95% CI', **conf_style))
 
-        # Trace 3: Lower Confidence Surface (σ over function)
-        fig.add_trace(go.Surface(
-            x=xx, y=yy, z=y_lower,
-            colorscale=[[0, 'rgba(100, 100, 100, 0.5)'], [1, 'rgba(100, 100, 100, 0.5)']],
-            name='-95% Conf. Interval',
-            showscale=False,
-            opacity=0.5
-        ))
-
-        # Trace 4: Actual Observations (Markers)
+        # Trace 4: Observations
         fig.add_trace(go.Scatter3d(
-            x=x_actual,
-            y=y_actual,
-            z=df[var],
+            x=x_actual, y=y_actual, z=df[var],
             mode='markers',
-            marker=dict(size=4, color='red', opacity=0.8),
-            name='Observations'
+            marker=dict(size=3, color='red', opacity=0.8),
+            name='Obs.',
         ))
 
-        # Define Layout
         fig.update_layout(
-            title={
-                'text': f'RASK GP: {service_name} Performance ({var}) with 95% Confidence Band',
-                'y': 0.9, 'x': 0.5, 'xanchor': 'center', 'yanchor': 'top'
-            },
+            width=700, height=450,
+            paper_bgcolor='white',
+            plot_bgcolor='white',
+
+            # 1. Eliminate outer margins entirely
+            margin=dict(l=0, r=0, t=0, b=0),
+
             scene=dict(
-                xaxis_title=x_axis,
-                yaxis_title=y_axis,
-                zaxis_title=var,
+                xaxis_title="Quality",
+                yaxis_title="Resources",
+                zaxis_title="Performance",
+                xaxis=dict(backgroundcolor="white", gridcolor="lightgrey", showbackground=True),
+                yaxis=dict(backgroundcolor="white", gridcolor="lightgrey", showbackground=True),
+                zaxis=dict(backgroundcolor="white", gridcolor="lightgrey", showbackground=True),
                 aspectmode='manual',
-                aspectratio=dict(x=1, y=1, z=0.6)  # Flatten Z-axis slightly for better surface viewing
+                aspectratio=dict(x=1, y=1, z=0.5),
+
+                # 2. Adjust Camera: 'eye' values closer to 1.0 (default is ~1.25-2.0)
+                # Reducing these values "zooms in," effectively removing internal white space.
+                camera=dict(
+                    eye=dict(x=1.2, y=1.2, z=0.8),
+                    center=dict(x=0, y=0, z=-0.1)  # Slightly offset center to lift the plot
+                )
             ),
-            width=1200, height=900,
-            legend=dict(x=0, y=1)
+
+            # 3. Move legend inside the plot area to save space
+            showlegend=True,
+            legend=dict(
+                yanchor="top", y=0.95,
+                xanchor="left", x=0.05,
+                bgcolor='rgba(255, 255, 255, 0.5)'  # Semi-transparent background
+            ),
+            font=dict(size=10)
         )
 
-        fig.show()
-        filename = f"../figures/gp_{service_name}_{var}.jpg"
-        # fig.write_html(filename)
-        fig.write_image(filename)
-        logger.info(f"Saved uncertainty visualization to {filename}")
+        if self.display_figures:
+            fig.show()
+
+        filename = f"../figures/gp_{service_name}_{var}.pdf"
+        # 4. Use crop/tight parameters if supported by your kaleido version
+        fig.write_image(filename, engine="kaleido")
+        logger.info(f"Saved 3D GP plot to {filename}")
 
 
 # def get_ordered_boundaries(model: GASK):

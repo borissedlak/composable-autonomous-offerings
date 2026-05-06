@@ -58,7 +58,7 @@ theoretical_param_bounds: Dict[ServiceType, Dict[ServiceVar, Tuple[float, float]
     }
 }
 
-FIG_SIZE_SINGLE = (6, 3)
+FIG_SIZE_SINGLE = (5, 3.5)
 
 SERVICE_STYLE = {
     'elastic-workbench-qr-detector': {'color': '#d62728', 'linestyle': '-', 'marker': 'o'},

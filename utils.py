@@ -142,9 +142,9 @@ def visualize_ndarray(arr, title, cmap="YlGnBu"):
     """
     if arr.ndim == 2:
         # --- Existing 2D Logic ---
-        fig, ax = plt.subplots(figsize=(8, 6))
+        fig, ax = plt.subplots(figsize=(6, 5))
         im = ax.imshow(arr, cmap=cmap)
-        plt.colorbar(im, ax=ax)
+        # plt.colorbar(im, ax=ax)
 
         ax.set_xticks(np.arange(arr.shape[1]))
         ax.set_yticks(np.arange(arr.shape[0]))
@@ -161,7 +161,7 @@ def visualize_ndarray(arr, title, cmap="YlGnBu"):
 
     elif arr.ndim == 3:
         # --- New 3D Logic ---
-        fig = plt.figure(figsize=(8, 6))
+        fig = plt.figure(figsize=(6, 5))
         ax = fig.add_subplot(111, projection='3d')
 
         # Get coordinates of all cells that are not -inf
@@ -188,9 +188,9 @@ def visualize_ndarray(arr, title, cmap="YlGnBu"):
     else:
         raise ValueError(f"Unsupported dimensions: {arr.ndim}. Only 2D and 3D are supported.")
 
-    plt.title(title)
+    # plt.title(title)
     plt.tight_layout()
-    plt.savefig(f"../figures/{title}.jpg")
+    plt.savefig(f"../figures/{title}.pdf")
     plt.show()
 
 # --- Example Usage ---

@@ -54,7 +54,6 @@ def calculate_weighted_SLO_F(
             raise RuntimeError(f"How can '{slo_var}' exceed the maximum known value?")
 
         weighted_slo_f += slo_f_single_slo
-        # print(value, slo_weight)
 
     # Heavily penalize if we don't have any output
     if full_state[ServiceVar.PERFORMANCE] <= 1.0:
