@@ -13,10 +13,11 @@ from agent.components.commons import ServiceFeatureMapping, ServiceType
 
 
 def get_prepared_metrics_df(path="../statics/agent_experience/metrics_ICSOC_EXPLORE.csv",
-                            share: float = 1.0):
+                            offset: float = 0.0, share: float = 1.0):
     _raw_df = pd.read_csv(path)
+    starting_index = int(len(_raw_df) * offset)
     first_x_percent = int(len(_raw_df) * share)
-    _trimmed_df = _raw_df.iloc[:first_x_percent].reset_index(drop=True)
+    _trimmed_df = _raw_df.iloc[starting_index:first_x_percent].reset_index(drop=True)
     converted_df = RASK.preprocess_data(_trimmed_df)
     return converted_df
 
