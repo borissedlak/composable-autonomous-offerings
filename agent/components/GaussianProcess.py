@@ -244,7 +244,7 @@ class GASK:
         if self.display_figures:
             fig.show()
 
-        filename = f"../figures/gp_{service_name}_{var}.pdf"
+        filename = f"../../figures/gp_{service_name}_{var}.pdf"
         # 4. Use crop/tight parameters if supported by your kaleido version
         fig.write_image(filename, engine="kaleido")
         logger.info(f"Saved 3D GP plot to {filename}")

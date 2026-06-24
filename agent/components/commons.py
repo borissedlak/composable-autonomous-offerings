@@ -1,3 +1,4 @@
+import os
 from enum import Enum
 from typing import NamedTuple, Dict, Tuple
 
@@ -70,7 +71,9 @@ SERVICE_STYLE = {
 
 from agent.components.SLORegistry_v2 import SLO_Registry
 
-slo_lib = SLO_Registry("../statics/config/service_level_objectives.yml")
+ROOT = os.path.dirname(__file__)
+
+slo_lib = SLO_Registry(ROOT + "/../../statics/config/service_level_objectives.yml")
 _slos_default = slo_lib.get_slo_for_client("experiment-1", "default")
 _slos_high_perf = slo_lib.get_slo_for_client("experiment-1", "high_perf")
 _slos_low_cost = slo_lib.get_slo_for_client("experiment-1", "low_cost")
