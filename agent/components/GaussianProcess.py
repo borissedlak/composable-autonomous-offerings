@@ -207,7 +207,7 @@ class GASK:
             x=x_actual, y=y_actual, z=df[var],
             mode='markers',
             marker=dict(size=3, color='red', opacity=0.8),
-            name='Obs.',
+            name='Observations',
         ))
 
         fig.update_layout(
