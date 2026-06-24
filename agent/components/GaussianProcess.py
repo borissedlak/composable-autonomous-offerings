@@ -5,6 +5,7 @@ from typing import Dict, Any, Tuple
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from IPython.core.display_functions import display
 from sklearn.decomposition import PCA
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
@@ -13,6 +14,10 @@ import utils
 from agent.components import RASK
 from agent.components.RASK import get_dependent_variable_mapping
 from agent.components.commons import ServiceType, ServiceVar
+import plotly.io as pio
+
+# print(pio.renderers)
+# pio.renderers.default = "jupyterlab"
 
 # --- Setup Logging ---
 logging.basicConfig(level=logging.INFO)
@@ -242,12 +247,13 @@ class GASK:
         )
 
         if self.display_figures:
+            # display(fig)
             fig.show()
 
-        filename = f"../../figures/gp_{service_name}_{var}.pdf"
-        # 4. Use crop/tight parameters if supported by your kaleido version
-        fig.write_image(filename, engine="kaleido")
-        logger.info(f"Saved 3D GP plot to {filename}")
+        # filename = f"../../figures/gp_{service_name}_{var}.pdf"
+        # # 4. Use crop/tight parameters if supported by your kaleido version
+        # fig.write_image(filename, engine="kaleido")
+        # logger.info(f"Saved 3D GP plot to {filename}")
 
 
 # def get_ordered_boundaries(model: GASK):
@@ -258,9 +264,9 @@ class GASK:
 
 # --- Execution ---
 if __name__ == "__main__":
-    df = pd.read_csv("../../statics/metrics_TSC_EXPLORE.csv")
+    df = pd.read_csv("../../statics/agent_experience/metrics_TSC_EXPLORE.csv")
     # 2. Initialize and train
-    rask_gp = GASK(show_figures=True)
+    rask_gp = GASK(ServiceType.QR, create_figures=True, display_figures=True)
     rask_gp.init_model(df, data_density=1.0)
     # rask_gp.init_models(df, data_density=0.5)
     # rask_gp.init_models(df, data_density=0.1)
