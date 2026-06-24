@@ -190,7 +190,7 @@ def visualize_ndarray(arr, title, cmap="YlGnBu"):
 
     # plt.title(title)
     plt.tight_layout()
-    plt.savefig(f"../figures/{title}.pdf")
+    plt.savefig(ROOT + f"/figures/{title}.pdf")
     plt.show()
 
 # --- Example Usage ---

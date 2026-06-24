@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from IPython.core.display_functions import display
+from matplotlib.pyplot import title
 from sklearn.decomposition import PCA
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
@@ -214,13 +215,13 @@ class GASK:
             width=700, height=450,
             paper_bgcolor='white',
             plot_bgcolor='white',
-
+            title=f"Gaussian process for {service_name.replace("elastic-workbench-", "")} service with {df.shape[0]} observations",
             # 1. Eliminate outer margins entirely
-            margin=dict(l=0, r=0, t=0, b=0),
+            margin=dict(l=0, r=0, t=30, b=0),
 
             scene=dict(
-                xaxis_title="Quality",
-                yaxis_title="Resources",
+                xaxis_title="Resources",
+                yaxis_title="Quality",
                 zaxis_title="Performance",
                 xaxis=dict(backgroundcolor="white", gridcolor="lightgrey", showbackground=True),
                 yaxis=dict(backgroundcolor="white", gridcolor="lightgrey", showbackground=True),
