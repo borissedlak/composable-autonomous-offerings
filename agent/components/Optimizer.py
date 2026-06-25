@@ -1,21 +1,24 @@
+import logging
 from typing import Dict, List, Any
 
+import numpy as np
 from scipy.optimize import minimize
 
 from agent.components.GaussianProcess import GASK, get_empirical_variable_bounds
+from agent.components.RASK import RASK
 from agent.components.SLORegistry_v2 import calculate_weighted_SLO_F
 from agent.components.commons import ServiceType, ServiceVar
 
-import logging
 logger = logging.getLogger(__name__)
 
-def local_obj(x_norm, s_type: ServiceType, slos: Dict[ServiceVar, float], gp: GASK,
+
+def local_obj(x_norm, s_type: ServiceType, slos: Dict[ServiceVar, float], model: GASK | RASK,
               simple_param_bounds, conservative: bool = True):
     """
         :param x_norm: values that MUST BE normalized
         :param s_type: type of service to investigate
         :param slos: just weights, no thresholds
-        :param gp: gaussian process expressing system dynamics
+        :param model: gaussian process expressing system dynamics
         :param simple_param_bounds: min/max feature bounds according to dataset
         :param conservative: describes if the numerical solver should penalize high variance (when True)
         :return: SLO fulfillment
@@ -33,32 +36,36 @@ def local_obj(x_norm, s_type: ServiceType, slos: Dict[ServiceVar, float], gp: GA
     if s_type == ServiceType.CV:
         x_state[ServiceVar.MODEL] = x_real[2]
 
-    # Now the GP receives the units it expects (or uses its internal scaler)
-    mu, sigma = gp.predict(s_type, "max_tp", x_state)
+    if type(model) is GASK:
+        # Now the GP receives the units it expects (or uses its internal scaler)
+        mu, sigma = model.predict(s_type, "max_tp", x_state)
 
-    # Gives me the 5th percentile, meaning 95% of the time, tp is larger; thus, solutions that have a high mean,
-    # but also a high sd, are not as likely chosen because they might fail this also quite often.
-    conservative_max_tp = (mu - 1.645 * sigma) if conservative else mu
-    max_tp = {ServiceVar.PERFORMANCE: conservative_max_tp}
+        # Gives me the 5th percentile, meaning 95% of the time, tp is larger; thus, solutions that have a high mean,
+        # but also a high sd, are not as likely chosen because they might fail this also quite often.
+        conservative_max_tp = (mu - 1.645 * sigma) if conservative else mu
+        max_tp = {ServiceVar.PERFORMANCE: conservative_max_tp}
+    else:  # type(model) == RASK:
+        # TODO: Here it should go the traditional deterministic path
+        model.predict(s_type, "max_tp", x_state)
+        pass
 
-    empirical_boundaries = get_empirical_variable_bounds(gp.training_data)[s_type]
+    empirical_boundaries = get_empirical_variable_bounds(model.training_data)[s_type]
     slo_f = calculate_weighted_SLO_F(x_state | max_tp, slos, empirical_boundaries)
 
     # print(f"Calculated SLO-F for {x_state}: {slo_f}")
     return -slo_f
 
 
-def run_optimizer_multi(s_type: ServiceType, slos, gp: GASK, bounds, runs: int = 10):
+def run_optimizer_multi(s_type: ServiceType, slos, model: GASK | RASK, bounds, runs: int = 10):
     results = []
     for _ in range(runs):
-        fitness, x = solve_global(s_type, slos, gp, bounds, conservative=True)
+        fitness, x = solve_global(s_type, slos, model, bounds, conservative=True)
         results.append((fitness, x))
     return results
 
 
-def solve_global(s_type: ServiceType, slos, gp: GASK, parameter_bounds,
+def solve_global(s_type: ServiceType, slos, model: GASK | RASK, parameter_bounds,
                  last_assignments=None, conservative: bool = True):
-
     simplified_bounds = list(parameter_bounds.copy().values())
 
     # Normalize your starting point x0
@@ -76,7 +83,7 @@ def solve_global(s_type: ServiceType, slos, gp: GASK, parameter_bounds,
 
     # Pass ordered_bounds to the objective so it can "un-scale"
     result = minimize(local_obj, x0, method='SLSQP', bounds=normalized_param_bounds,
-                      args=(s_type, slos, gp, simplified_bounds, conservative), options={'maxiter': 150})
+                      args=(s_type, slos, model, simplified_bounds, conservative), options={'maxiter': 150})
 
     # if not result.success:
     #     raise RuntimeWarning("Solver failed: " + result.message)
@@ -91,9 +98,6 @@ def solve_global(s_type: ServiceType, slos, gp: GASK, parameter_bounds,
         final_x.append(result.x[i] * (maxi - mini) + mini)
 
     return -result.fun, final_x
-
-
-import numpy as np
 
 
 class VersatileMapElites:
