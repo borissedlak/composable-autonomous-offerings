@@ -12,7 +12,29 @@ Note that this abstract cycle can be implemented through various technologies an
 To reduce the experimental overhead of this tutorial, we do not actually run any physical services; instead, we operate on a prerecorded dataset that tracks the service behavior during runtime. Interested participants can find the complete experimental platform in this [repository](github.com/borissedlak/elastic-workbench).
 
 
+## General
+- [ ] Exploration must be justified 
+
+## Monitor
+- [x] Explain monitoring infrastructure
+- [ ] Explain data structure
+
+## Analyze
+- [ ] Regression Model Track
+- [x] Gaussian Process Track
+
+## Plan
+- [ ] Explain RASK methodology
+- [ ] Inference w/ numerical solver
+
+## Execute
+- [ ] Refer to monitoring figure
+
+## Global Results
+- [ ] ...
+
+
 ## Final steps:
 
 - [ ] Publish repository
-- [ ] Check notebook is executable on any device
+- [ ] Check notebook is executable on arbitrary device
