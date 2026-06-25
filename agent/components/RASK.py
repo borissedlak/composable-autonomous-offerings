@@ -27,12 +27,18 @@ class RASK:
         self.models: Dict[ServiceType, Dict] = None
 
     @utils.print_execution_time
-    def init_models(self, df_combined=None, img_suffix=None, override_relation=False):
+    def init_models(self, df_combined=None, img_suffix=None, data_density=1.0, override_relation=False):
         if df_combined is None:
             df_combined = collect_all_metric_files()
+
+        if data_density < 1.0:
+            # df_combined = df_combined.sample(frac=data_density, random_state=35)
+            split_idx = int(len(df_combined) * data_density)
+            df_combined = df_combined.iloc[:split_idx]
+
         df_cleared = preprocess_data(df_combined)
 
-        self.models = train_rask_models(df_cleared, self.show_figures, img_suffix, override_relation)
+        self.models = train_rask_models(df_cleared, self.show_figures, img_suffix)
 
     def get_all_dependent_vars_ass(self, service_type: ServiceType, sample_state: Dict[str, Any]):
         dependent_variables = list(get_dependent_variable_mapping(service_type).keys())
@@ -102,7 +108,7 @@ def get_local_metric_file(path=ROOT + "/../../share/metrics/metrics.csv"):
 
 
 # @print_execution_time  # Roughly 10ms
-def train_rask_models(df, show_result=False, img_suffix=None, override_relation= False):
+def train_rask_models(df, show_result=False, img_suffix=None):
     service_models = {}
 
     for degree in [2]:  # range(1,10):
@@ -110,7 +116,7 @@ def train_rask_models(df, show_result=False, img_suffix=None, override_relation=
             df_service = df[df['service_type'] == service_type_s]
             service_models[ServiceType(service_type_s)] = {}
 
-            dependent_variables = get_dependent_variable_mapping(ServiceType(service_type_s), override_relation)
+            dependent_variables = get_dependent_variable_mapping(ServiceType(service_type_s))
             for var, deps in dependent_variables.items():
                 Y = df_service[var]  # dependent variable
                 X = df_service[deps]  # independent variables
@@ -135,8 +141,8 @@ def train_rask_models(df, show_result=False, img_suffix=None, override_relation=
 
                 service_models[ServiceType(service_type_s)] |= {var: (poly, model)}
                 if show_result:
-                    draw_3d_plot_interactive(df_service, var, deps, poly, model, service_type_s)
-                    # draw_3d_plot_fast(df_service, var, deps, poly, model, service_type_s, img_suffix= f"_{img_suffix}")
+                    # draw_3d_plot_interactive(df_service, var, deps, poly, model, service_type_s)
+                    draw_3d_plot_fast(df_service, var, deps, poly, model, service_type_s, img_suffix= f"_{img_suffix}")
                     # draw_heatmap_fast(df_service, var, deps, poly, model, service_type_s)
 
     return service_models
@@ -254,7 +260,7 @@ def draw_3d_plot_interactive(df, var, deps, poly, model, service_type_s: Service
 def draw_3d_plot_fast(df, var, deps, poly, model, service_type_s: ServiceType, grid_size: int = 30, out_dir: str = "./rask_plots", img_suffix=""):
     # put these *before* any matplotlib use
     import matplotlib
-    matplotlib.use("Agg")  # very important: use non-interactive backend for speed
+    # matplotlib.use("Agg")  # very important: use non-interactive backend for speed
     import matplotlib.pyplot as plt
     from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 (registers 3D projection)
 
@@ -354,17 +360,19 @@ def draw_3d_plot_fast(df, var, deps, poly, model, service_type_s: ServiceType, g
     ax.set_ylabel(y_axis)
     ax.set_zlabel(var)
 
-    # Tight layout + save as JPEG
-    out_path = os.path.join(out_dir, f"rask_plot_{service_type_s}{img_suffix}.jpg")
-    try:
-        plt.tight_layout()
-        fig.savefig(out_path, format="jpg", dpi=200)  # you can lower quality for smaller files/faster saving
-    except Exception as e:
-        logger.error(f"Failed to save JPG {out_path}: {e}")
-    finally:
-        plt.close(fig)  # important to free memory
+    plt.show()
 
-    logger.info(f"Saved fast 3D plot to {out_path}")
+    # Tight layout + save as JPEG
+    # out_path = os.path.join(out_dir, f"rask_plot_{service_type_s}{img_suffix}.jpg")
+    # try:
+    #     plt.tight_layout()
+    #     fig.savefig(out_path, format="jpg", dpi=200)  # you can lower quality for smaller files/faster saving
+    # except Exception as e:
+    #     logger.error(f"Failed to save JPG {out_path}: {e}")
+    # finally:
+    #     plt.close(fig)  # important to free memory
+    #
+    # logger.info(f"Saved fast 3D plot to {out_path}")
 
 def draw_heatmap_fast(df, var, deps, poly, model, service_type_s, grid_size=8, out_dir="./rask_plots", img_suffix=""):
     import os
