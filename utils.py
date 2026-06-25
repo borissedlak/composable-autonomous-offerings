@@ -4,6 +4,7 @@ import os
 import time
 from typing import Dict
 
+
 logger = logging.getLogger('multiscale')
 ROOT = os.path.dirname(__file__)
 
@@ -192,6 +193,36 @@ def visualize_ndarray(arr, title, cmap="YlGnBu"):
     plt.tight_layout()
     plt.savefig(ROOT + f"/figures/{title}.pdf")
     plt.show()
+
+import networkx as nx
+import pgmpy.base.DAG
+from networkx.drawing.nx_pydot import graphviz_layout
+
+def visualize_DAG(bn: pgmpy.base.DAG, root=None, try_visualization=False, vis_ls=None,
+                  save=False,
+                  name=None, show=True, color_map=None):
+    if vis_ls is None:
+        vis_ls = ["fdp"]
+    else:
+        vis_ls = vis_ls
+
+    if name is None:
+        name = root
+
+    if try_visualization:
+        vis_ls = ['neato', 'dot', 'twopi', 'fdp', 'sfdp', 'circo']
+
+    for s in vis_ls:
+        pos = graphviz_layout(bn, root=root, prog=s)
+        nx.draw(
+            bn, pos, with_labels=True, arrowsize=20, node_size=1500,  # alpha=1.0, font_weight="bold",
+            node_color=color_map
+        )
+        if save:
+            plt.box(False)
+            plt.savefig(f"{name}.png", dpi=400, bbox_inches="tight")  # default dpi is 100
+        if show:
+            plt.show()
 
 # --- Example Usage ---
 # data = np.random.randint(0, 100, size=(8, 8))
