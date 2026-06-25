@@ -4,6 +4,9 @@ import os
 import time
 from typing import Dict
 
+import networkx as nx
+import pgmpy.base.DAG
+from networkx.drawing.nx_pydot import graphviz_layout
 
 logger = logging.getLogger('multiscale')
 ROOT = os.path.dirname(__file__)
@@ -31,9 +34,11 @@ def print_execution_time(func):
 
     return wrapper
 
+
 def smoothstep(x, x0=0.0, x1=1.0) -> float:
     t = np.clip((x - x0) / (x1 - x0), 0.0, 1.0)
     return float(t * t * (3 - 2 * t))
+
 
 class FPS_:
     def __init__(self, max_fps=300):
@@ -194,9 +199,6 @@ def visualize_ndarray(arr, title, cmap="YlGnBu"):
     plt.savefig(ROOT + f"/figures/{title}.pdf")
     plt.show()
 
-import networkx as nx
-import pgmpy.base.DAG
-from networkx.drawing.nx_pydot import graphviz_layout
 
 def visualize_DAG(bn: pgmpy.base.DAG, root=None, try_visualization=False, vis_ls=None,
                   save=False,

@@ -11,3 +11,7 @@ pyyaml~=6.0.3
 # For GP
 torch~=2.11.0
 gpytorch~=1.15.2
+
+# For structure learning
+pgmpy~=1.1.2
+networkx~=3.6.1
