@@ -36,6 +36,7 @@ To reduce the experimental overhead of this tutorial, we do not actually run any
 ## Refer to Further Results
 
 - [ ] Different load pattern
+- [ ] Comparison with more/less ES
 
 ## Final steps:
 
