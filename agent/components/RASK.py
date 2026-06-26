@@ -160,7 +160,7 @@ def train_rask_models(df, show_result=False, img_suffix=None):
                 service_models[ServiceType(service_type_s)] |= {var: (poly, model)}
                 if show_result:
                     # draw_3d_plot_interactive(df_service, var, deps, poly, model, service_type_s)
-                    draw_3d_plot_fast(df_service, var, deps, poly, model, service_type_s, img_suffix= f"_{img_suffix}")
+                    draw_3d_plot_fast(df_service, var, deps, poly, model, ServiceType(service_type_s), img_suffix= f"_{img_suffix}")
                     # draw_heatmap_fast(df_service, var, deps, poly, model, service_type_s)
 
     return service_models
@@ -378,6 +378,7 @@ def draw_3d_plot_fast(df, var, deps, poly, model, service_type_s: ServiceType, g
     ax.set_ylabel(y_axis)
     ax.set_zlabel(var)
 
+    plt.title(f"Regression model for {service_type_s.value.replace("elastic-workbench-", "")} service with {df.shape[0]} observations")
     plt.show()
 
     # Tight layout + save as JPEG

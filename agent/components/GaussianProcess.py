@@ -248,7 +248,6 @@ class GASK:
         )
 
         if self.display_figures:
-            # display(fig)
             fig.show()
 
         # filename = f"../../figures/gp_{service_name}_{var}.pdf"
