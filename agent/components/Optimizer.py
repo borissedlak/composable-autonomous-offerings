@@ -42,15 +42,12 @@ def local_obj(x_norm, s_type: ServiceType, slos: Dict[ServiceVar, float], model:
 
         # Gives me the 5th percentile, meaning 95% of the time, tp is larger; thus, solutions that have a high mean,
         # but also a high sd, are not as likely chosen because they might fail this also quite often.
-        conservative_max_tp = (mu - 1.645 * sigma) if conservative else mu
-        max_tp = {ServiceVar.PERFORMANCE: conservative_max_tp}
+        max_tp = (mu - 1.645 * sigma) if conservative else mu
     else:  # type(model) == RASK:
-        # TODO: Here it should go the traditional deterministic path
-        model.predict(s_type, "max_tp", x_state)
-        pass
+        max_tp = model.predict(s_type, "max_tp", x_state)
 
     empirical_boundaries = get_empirical_variable_bounds(model.training_data)[s_type]
-    slo_f = calculate_weighted_SLO_F(x_state | max_tp, slos, empirical_boundaries)
+    slo_f = calculate_weighted_SLO_F(x_state | {ServiceVar.PERFORMANCE: max_tp}, slos, empirical_boundaries)
 
     # print(f"Calculated SLO-F for {x_state}: {slo_f}")
     return -slo_f

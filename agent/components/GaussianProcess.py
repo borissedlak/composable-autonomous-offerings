@@ -128,8 +128,8 @@ class GASK:
         deps = get_dependent_variable_mapping(service_type)[dep_var]
 
         # Ensure inputs are sorted to match training
-        input_data = np.array([[sample_state[ServiceVar(k)] for k in sorted(deps)]])
-        y_pred, sigma = model.predict(input_data, return_std=True)
+        x_input_data = np.array([[sample_state[ServiceVar(k)] for k in sorted(deps)]])
+        y_pred, sigma = model.predict(x_input_data, return_std=True)
 
         mu, sigma = y_pred[0], sigma[0]
         return mu, sigma  # np.random.normal(mu, sigma, 1)[0]

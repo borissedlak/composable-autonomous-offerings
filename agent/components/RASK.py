@@ -15,7 +15,7 @@ from sklearn.preprocessing import PolynomialFeatures
 
 import utils
 from agent import agent_utils
-from agent.components.commons import ServiceType
+from agent.components.commons import ServiceType, ServiceVar
 
 logger = logging.getLogger("multiscale")
 ROOT = os.path.dirname(__file__)
@@ -25,6 +25,7 @@ class RASK:
     def __init__(self, show_figures=False):
         self.show_figures = show_figures
         self.models: Dict[ServiceType, Dict] = None
+        self.training_data: pd.DataFrame = None
 
     @utils.print_execution_time
     def init_models(self, df_combined=None, img_suffix=None, data_density=1.0, override_relation=False):
@@ -38,30 +39,47 @@ class RASK:
 
         df_cleared = preprocess_data(df_combined)
 
+        self.training_data = df_cleared
         self.models = train_rask_models(df_cleared, self.show_figures, img_suffix)
 
-    def get_all_dependent_vars_ass(self, service_type: ServiceType, sample_state: Dict[str, Any]):
-        dependent_variables = list(get_dependent_variable_mapping(service_type).keys())
+    # def get_all_dependent_vars_ass(self, service_type: ServiceType, sample_state: Dict[str, Any]):
+    #     dependent_variables = list(get_dependent_variable_mapping(service_type).keys())
+    #
+    #     dependent_vars_ass = {}
+    #     for var in dependent_variables:
+    #         dependent_vars_ass[var] = self.predict(service_type, var, sample_state)
+    #
+    #     return dependent_vars_ass
 
-        dependent_vars_ass = {}
-        for var in dependent_variables:
-            dependent_vars_ass[var] = self.predict_single_sample(service_type, var, sample_state)
-
-        return dependent_vars_ass
-
-    def predict_single_sample(self, service_type: ServiceType, dep_var: str, sample_state: Dict[str, Any]):
+    def predict(self, service_type: ServiceType, dep_var: str, sample_state: Dict[ServiceVar, Any]):
 
         independent_variables = get_dependent_variable_mapping(service_type)[dep_var]
         for independent_var in independent_variables:
-            if independent_var not in sample_state.keys():
+            if ServiceVar(independent_var) not in sample_state.keys():
                 raise RuntimeWarning(f"Cannot predict assignment for {dep_var}, missing '{independent_var}' in state")
         poly, model = self.models[service_type][dep_var]
+        deps = get_dependent_variable_mapping(service_type)[dep_var]
 
-        filtered_sorted_state = {k: sample_state[k] for k in sorted(independent_variables) if k in sample_state}
-        X_single_df = pd.DataFrame([filtered_sorted_state], columns=sorted(filtered_sorted_state.keys()))
-        X_poly_single = poly.transform(X_single_df)
-        y_pred_single = model.predict(X_poly_single)
+        # 1. Create a dictionary mapping the feature names to their values
+        sorted_deps = sorted(deps)
+        input_dict = {k: [sample_state[ServiceVar(k)]] for k in sorted_deps}
+
+        # 2. Wrap it in a DataFrame so the feature names are preserved
+        x_input_df = pd.DataFrame(input_dict)
+
+        # 3. Transform and predict using the DataFrame
+        x_poly_single = poly.transform(x_input_df)
+        y_pred_single = model.predict(x_poly_single)
+
         return y_pred_single[0]
+
+        # deps = get_dependent_variable_mapping(service_type)[dep_var]
+        # # filtered_sorted_state = {k: sample_state[ServiceVar(k)] for k in sorted(independent_variables) if k in sample_state}
+        # # X_single_df = pd.DataFrame([filtered_sorted_state], columns=sorted(filtered_sorted_state.keys()))
+        # x_input_data = np.array([[sample_state[ServiceVar(k)] for k in sorted(deps)]])
+        # x_poly_single = poly.transform(x_input_data)
+        # y_pred_single = model.predict(x_poly_single)
+        # return y_pred_single[0]
 
 
 def preprocess_data(df_input):
