@@ -27,7 +27,7 @@ class RASK:
         self.models: Dict[ServiceType, Dict] = None
         self.training_data: pd.DataFrame = None
 
-    @utils.print_execution_time
+    # @utils.print_execution_time
     def init_models(self, df_combined=None, img_suffix=None, data_density=1.0, override_relation=False):
         if df_combined is None:
             df_combined = collect_all_metric_files()
@@ -104,7 +104,7 @@ def preprocess_data(df_input):
     # df = df[z_scores < 1000]  # 3 is a common threshold for extreme outliers
     df.reset_index(drop=True, inplace=True)  # Needed because the filtered does not keep the index
 
-    logger.info(f"Training data contains service types {df['service_type'].unique()}")
+    # logger.info(f"Training data contains service types {df['service_type'].unique()}")
 
     return df
 
