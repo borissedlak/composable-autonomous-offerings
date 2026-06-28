@@ -250,17 +250,6 @@ class GASK:
         if self.display_figures:
             fig.show()
 
-        # filename = f"../../figures/gp_{service_name}_{var}.pdf"
-        # # 4. Use crop/tight parameters if supported by your kaleido version
-        # fig.write_image(filename, engine="kaleido")
-        # logger.info(f"Saved 3D GP plot to {filename}")
-
-
-# def get_ordered_boundaries(model: GASK):
-#     raw_bounds = get_empirical_variable_bounds(model.training_data)[model.s_type]
-#     del raw_bounds['max_tp']
-#     return list(raw_bounds.values())
-
 
 # --- Execution ---
 if __name__ == "__main__":
@@ -268,6 +257,4 @@ if __name__ == "__main__":
     # 2. Initialize and train
     rask_gp = GASK(ServiceType.QR, create_figures=True, display_figures=True)
     rask_gp.init_model(df, data_density=1.0)
-    # rask_gp.init_models(df, data_density=0.5)
-    # rask_gp.init_models(df, data_density=0.1)
     sys.exit()

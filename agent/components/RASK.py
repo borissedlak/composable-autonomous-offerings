@@ -28,7 +28,7 @@ class RASK:
         self.training_data: pd.DataFrame = None
 
     @utils.print_execution_time
-    def init_models(self, df_combined=None, img_suffix=None, data_density=1.0, override_relation=False):
+    def init_models(self, df_combined=None, img_suffix=None, data_density=1.0):
         if df_combined is None:
             df_combined = collect_all_metric_files()
 
@@ -41,15 +41,6 @@ class RASK:
 
         self.training_data = df_cleared
         self.models = train_rask_models(df_cleared, self.show_figures, img_suffix)
-
-    # def get_all_dependent_vars_ass(self, service_type: ServiceType, sample_state: Dict[str, Any]):
-    #     dependent_variables = list(get_dependent_variable_mapping(service_type).keys())
-    #
-    #     dependent_vars_ass = {}
-    #     for var in dependent_variables:
-    #         dependent_vars_ass[var] = self.predict(service_type, var, sample_state)
-    #
-    #     return dependent_vars_ass
 
     def predict(self, service_type: ServiceType, dep_var: str, sample_state: Dict[ServiceVar, Any]):
 
@@ -72,14 +63,6 @@ class RASK:
         y_pred_single = model.predict(x_poly_single)
 
         return y_pred_single[0]
-
-        # deps = get_dependent_variable_mapping(service_type)[dep_var]
-        # # filtered_sorted_state = {k: sample_state[ServiceVar(k)] for k in sorted(independent_variables) if k in sample_state}
-        # # X_single_df = pd.DataFrame([filtered_sorted_state], columns=sorted(filtered_sorted_state.keys()))
-        # x_input_data = np.array([[sample_state[ServiceVar(k)] for k in sorted(deps)]])
-        # x_poly_single = poly.transform(x_input_data)
-        # y_pred_single = model.predict(x_poly_single)
-        # return y_pred_single[0]
 
 
 def preprocess_data(df_input):
