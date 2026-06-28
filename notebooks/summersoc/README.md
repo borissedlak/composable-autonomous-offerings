@@ -12,3 +12,19 @@ Note that this abstract cycle can be implemented through various technologies an
 ![Friction_Gravity-SummerSOC_Cycle.jpg](img/Friction_Gravity-SummerSOC_Cycle.jpg)
 
 To reduce the experimental overhead of this tutorial, we do not actually run any physical services; instead, we operate on a prerecorded dataset that tracks the service behavior during runtime. Interested participants can find the complete experimental platform in this [repository](github.com/borissedlak/elastic-workbench).
+
+## Setup
+
+Optionally, create a new Python virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+
+Install the project dependencies:
+
+```bash
+pip install -r requirements.txt
+```
