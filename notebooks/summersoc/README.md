@@ -20,18 +20,15 @@ To reduce the experimental overhead of this tutorial, we do not actually run any
 - [ ] Explain data structure
 
 ## Analyze
-- [ ] Regression Model Track
+- [x] Regression Model Track
 - [x] Gaussian Process Track
 
 ## Plan
 - [ ] Explain RASK methodology
-- [ ] Inference w/ numerical solver
+- [x] Inference w/ numerical solver
 
 ## Execute
 - [ ] Refer to monitoring figure
-
-## Global Results
-- [ ] ...
 
 ## Refer to Further Results
 

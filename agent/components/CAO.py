@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from agent.components.GaussianProcess import GASK, get_ordered_boundaries
-from agent.components.Optimizer import VersatileMapElites
+from agent.components.Optimizer_v2 import VersatileMapElites
 from agent.components.SLORegistry_v2 import SLO_Registry
 from agent.components.commons import ServiceType, ServiceVar
 
