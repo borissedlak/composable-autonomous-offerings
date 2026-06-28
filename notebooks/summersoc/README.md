@@ -9,33 +9,6 @@ This tutorial describes a complete feedback cycle for an adaptive stream process
 
 Note that this abstract cycle can be implemented through various technologies and the ones presented in this tutorial present only one of many possibilities.
 
+![Friction_Gravity-SummerSOC_Cycle.jpg](img/Friction_Gravity-SummerSOC_Cycle.jpg)
+
 To reduce the experimental overhead of this tutorial, we do not actually run any physical services; instead, we operate on a prerecorded dataset that tracks the service behavior during runtime. Interested participants can find the complete experimental platform in this [repository](github.com/borissedlak/elastic-workbench).
-
-
-## General
-- [ ] Exploration must be justified 
-
-## Monitor
-- [x] Explain monitoring infrastructure
-- [ ] Explain data structure
-
-## Analyze
-- [x] Regression Model Track
-- [x] Gaussian Process Track
-
-## Plan
-- [ ] Explain RASK methodology
-- [x] Inference w/ numerical solver
-
-## Execute
-- [ ] Refer to monitoring figure
-
-## Refer to Further Results
-
-- [ ] Different load pattern
-- [ ] Comparison with more/less ES
-
-## Final steps:
-
-- [ ] Publish repository
-- [ ] Check notebook is executable on arbitrary device

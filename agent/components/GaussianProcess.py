@@ -5,8 +5,6 @@ from typing import Dict, Any, Tuple
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from IPython.core.display_functions import display
-from matplotlib.pyplot import title
 from sklearn.decomposition import PCA
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
@@ -15,10 +13,15 @@ import utils
 from agent.components import RASK
 from agent.components.RASK import get_dependent_variable_mapping
 from agent.components.commons import ServiceType, ServiceVar
-import plotly.io as pio
 
-# print(pio.renderers)
-# pio.renderers.default = "jupyterlab"
+# TODO: Uncomment after Tutorial
+import warnings
+from sklearn.exceptions import ConvergenceWarning
+
+warnings.filterwarnings(
+    "ignore",
+    category=ConvergenceWarning,
+)
 
 # --- Setup Logging ---
 logging.basicConfig(level=logging.INFO)
@@ -72,7 +75,7 @@ class GASK:
         self.training_data = df_cleared
         self.models = self.train_gp_models(df_cleared)
 
-    @utils.print_execution_time
+    # @utils.print_execution_time
     def train_gp_models(self, df: pd.DataFrame) -> Dict:
         service_models = {}
 
@@ -108,7 +111,7 @@ class GASK:
                     ))
                 ])
 
-                logger.info(f"Fitting GP for {stype.value} - Target: {var}")
+                # logger.info(f"Fitting GP for {stype.value} - Target: {var}")
                 gp_pipeline.fit(X, y)
 
                 service_models[stype][var] = gp_pipeline
