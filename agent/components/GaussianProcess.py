@@ -5,6 +5,7 @@ from typing import Dict, Any, Tuple
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from matplotlib import pyplot as plt
 from sklearn.decomposition import PCA
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
@@ -117,6 +118,7 @@ class GASK:
                 service_models[stype][var] = gp_pipeline
 
                 if self.create_figures:
+                    # self.draw_3d_gp_plot_fast(df_service, var, deps, gp_pipeline, stype.value)
                     self.draw_3d_gp_plot(df_service, var, deps, gp_pipeline, stype.value)
 
         return service_models
@@ -253,6 +255,126 @@ class GASK:
         if self.display_figures:
             fig.show()
 
+
+    # Assuming @utils.print_execution_time is defined elsewhere
+    # @utils.print_execution_time
+    def draw_3d_gp_plot_fast(self, df, var, deps, gp, service_name):
+        """
+        Visualizes GP mean surface, ±95% confidence intervals, and actual data.
+        Generates a standard, static Matplotlib 3D plot.
+        """
+        grid_res = 30
+
+        # 1. Coordinate Handling
+        if len(deps) > 2:
+            pca = PCA(n_components=2)
+            coords = pca.fit_transform(df[deps].values)
+            x_axis, y_axis = "PC1", "PC2"
+            x_actual, y_actual = coords[:, 0], coords[:, 1]
+        else:
+            x_axis, y_axis = deps[0], deps[1]
+            x_actual, y_actual = df[x_axis], df[y_axis]
+
+        # Create 2D Meshgrid
+        x_range = np.linspace(x_actual.min(), x_actual.max(), grid_res)
+        y_range = np.linspace(y_actual.min(), y_actual.max(), grid_res)
+        xx, yy = np.meshgrid(x_range, y_range)
+        grid_points_pca = np.c_[xx.ravel(), yy.ravel()]
+
+        grid_points_orig = pca.inverse_transform(grid_points_pca) if len(deps) > 2 else grid_points_pca
+
+        # 2. GP Prediction
+        y_pred, sigma = gp.predict(grid_points_orig, return_std=True)
+        y_mean_grid = y_pred.reshape(xx.shape)
+        sigma_grid = sigma.reshape(xx.shape)
+
+        # 3. Confidence Intervals
+        y_upper = y_mean_grid + 1.96 * sigma_grid
+        y_lower = y_mean_grid - 1.96 * sigma_grid
+
+        # 4. Construct Matplotlib Figure (Non-Interactive, Paper-Sized)
+        # 700x450px translates roughly to 7x4.5 inches at 100 DPI
+        fig = plt.figure(figsize=(7, 4.5), dpi=100, facecolor='white')
+        ax = fig.add_subplot(111, projection='3d', facecolor='white')
+
+        # Trace 1: Mean Surface (using Viridis colormap)
+        mean_surf = ax.plot_surface(
+            xx, yy, y_mean_grid,
+            cmap='viridis',
+            alpha=0.9,
+            edgecolor='none',
+            label='Mean'
+        )
+        # Map a proxy artist for the legend, as plot_surface doesn't natively support legends in older mpl versions
+        mean_surf._facecolors2d = mean_surf._facecolor3d
+        mean_surf._edgecolors2d = mean_surf._edgecolor3d
+
+        # Trace 2 & 3: Confidence Bands (Semi-transparent grey)
+        upper_surf = ax.plot_surface(xx, yy, y_upper, color='grey', alpha=0.2, edgecolor='none')
+        lower_surf = ax.plot_surface(xx, yy, y_lower, color='grey', alpha=0.2, edgecolor='none')
+
+        upper_surf._facecolors2d = upper_surf._facecolor3d
+        upper_surf._edgecolors2d = upper_surf._edgecolor3d
+
+        # Trace 4: Observations (Red scatter dots)
+        scatter = ax.scatter(
+            x_actual, y_actual, df[var],
+            color='red',
+            s=15,  # marker size
+            alpha=0.8,
+            edgecolors='none',
+            label='Observations'
+        )
+
+        # Styling and Labels
+        clean_service_name = service_name.replace("elastic-workbench-", "")
+        ax.set_title(
+            f"Gaussian process for {clean_service_name} service\nwith {df.shape[0]} observations",
+            fontsize=10,
+            pad=10
+        )
+
+        # Labeling axes matching your configuration
+        ax.set_xlabel("Resources", fontsize=9, labelpad=5)
+        ax.set_ylabel("Quality", fontsize=9, labelpad=5)
+        ax.set_zlabel("Performance", fontsize=9, labelpad=5)
+
+        # Set background colors to match your white styling
+        ax.xaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
+        ax.yaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
+        ax.zaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
+
+        ax.grid(True, color='lightgrey', linestyle='--', linewidth=0.5)
+
+        # Set the aspect ratio (matches Plotly's aspectratio x=1, y=1, z=0.5)
+        ax.set_box_aspect((1, 1, 0.5))
+
+        # Replicate Camera angle (Elevation and Azimuth)
+        # elev=33 is roughly z=0.8, azim=-45 is roughly looking diagonally from (x=1.2, y=1.2)
+        ax.view_init(elev=25, azim=-135)
+
+        # Legend configurations (places it internally similar to your plotly legend)
+        # We use proxy handles to make sure the grey surface matches the legend entry
+        from matplotlib.patches import Patch
+        legend_elements = [
+            mean_surf,
+            Patch(facecolor='grey', edgecolor='none', alpha=0.3, label='±95% CI'),
+            scatter
+        ]
+        ax.legend(
+            handles=legend_elements,
+            loc='upper left',
+            bbox_to_anchor=(0.05, 0.95),
+            fontsize=8,
+            framealpha=0.5
+        )
+
+        plt.tight_layout()
+
+        if self.display_figures:
+            plt.show()
+        else:
+            plt.close(fig)  # Prevent memory leaks if running headless
 
 # --- Execution ---
 if __name__ == "__main__":
