@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 from matplotlib import pyplot as plt
 from sklearn.decomposition import PCA
 from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
+from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C, WhiteKernel
 
 import utils
 from agent.components import RASK
@@ -100,8 +100,8 @@ class GASK:
 
                 # Linear trend + Non-linear RBF + Noise
                 kernel = (C(1.0, (1e-3, 1e3)) * DotProduct(sigma_0=1.0, sigma_0_bounds=(1e-2, 1e3))
-                          + C(1.0, (1e-3, 1e3)) * RBF(1.0, (1e-2, 1e3)))
-                # + WhiteKernel(noise_level=1.0, noise_level_bounds=(1e-5, 1e3))) # We don't have any noise
+                          + C(1.0, (1e-3, 1e3)) * RBF(1.0, (1e-2, 1e3))
+                            + WhiteKernel(noise_level=1.0, noise_level_bounds=(1e-5, 1e10))) # We don't have any noise
                 gp_pipeline = Pipeline([
                     ('scaler', StandardScaler()),
                     ('gp', GaussianProcessRegressor(
@@ -118,8 +118,8 @@ class GASK:
                 service_models[stype][var] = gp_pipeline
 
                 if self.create_figures:
-                    # self.draw_3d_gp_plot_fast(df_service, var, deps, gp_pipeline, stype.value)
-                    self.draw_3d_gp_plot(df_service, var, deps, gp_pipeline, stype.value)
+                    self.draw_3d_gp_plot_fast(df_service, var, deps, gp_pipeline, stype.value)
+                    # self.draw_3d_gp_plot(df_service, var, deps, gp_pipeline, stype.value)
 
         return service_models
 
