@@ -153,8 +153,8 @@ def get_dependent_variable_mapping(service_type: ServiceType):
     """Defines which independent variables influence the target variable."""
     mapping = {
         ServiceType.QR: {'throughput': sorted(['cores', 'data_quality', 'parallelism'])},
-        ServiceType.CV: {'max_tp': sorted(['cores', 'model_size', 'data_quality'])},
-        ServiceType.PC: {'max_tp': sorted(['cores', 'data_quality'])}
+        ServiceType.CV: {'throughput': sorted(['cores', 'model_size', 'data_quality'])},
+        ServiceType.PC: {'throughput': sorted(['cores', 'data_quality', 'parallelism'])}
     }
     return mapping.get(service_type, {})
 

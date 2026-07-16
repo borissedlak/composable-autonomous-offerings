@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 from matplotlib import pyplot as plt
 from sklearn.decomposition import PCA
 from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C, WhiteKernel
+from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C, WhiteKernel, Matern
 
 import utils
 from agent.components import RASK
@@ -98,17 +98,18 @@ class GASK:
 
                 from sklearn.gaussian_process.kernels import DotProduct
 
-                # Linear trend + Non-linear RBF + Noise
-                kernel = (C(1.0, (1e-3, 1e3)) * DotProduct(sigma_0=1.0, sigma_0_bounds=(1e-2, 1e3))
-                          + C(1.0, (1e-3, 1e3)) * RBF(1.0, (1e-2, 1e3))
-                            + WhiteKernel(noise_level=1.0, noise_level_bounds=(1e-5, 1e10))) # We don't have any noise
+                kernel = (
+                        C(1.0, (1e-2, 1e2)) * Matern(length_scale=1.0, length_scale_bounds=(1e-1, 1e2), nu=2.5)
+                        + WhiteKernel(noise_level=0.01, noise_level_bounds=(1e-5, 0.1))  # Restrict max noise to 10%
+                )
+
                 gp_pipeline = Pipeline([
                     ('scaler', StandardScaler()),
                     ('gp', GaussianProcessRegressor(
                         kernel=kernel,
-                        # n_restarts_optimizer=10, # Especially needed when your (noise) kernels might be ill configured
-                        alpha=0.1,
-                        normalize_y=True  # Crucial: this scales your throughput/target automatically
+                        n_restarts_optimizer=3,  # Crucial so the optimizer doesn't get stuck in a local noise minimum
+                        alpha=1e-10,  # Keep static noise off; let WhiteKernel handle it
+                        normalize_y=True
                     ))
                 ])
 
@@ -118,8 +119,8 @@ class GASK:
                 service_models[stype][var] = gp_pipeline
 
                 if self.create_figures:
-                    self.draw_3d_gp_plot_fast(df_service, var, deps, gp_pipeline, stype.value)
-                    # self.draw_3d_gp_plot(df_service, var, deps, gp_pipeline, stype.value)
+                    # self.draw_3d_gp_plot_fast(df_service, var, deps, gp_pipeline, stype.value)
+                    self.draw_3d_gp_plot(df_service, var, deps, gp_pipeline, stype.value)
 
         return service_models
 
