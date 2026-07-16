@@ -23,6 +23,7 @@ class ServiceVar(Enum):
     PERFORMANCE = "max_tp"
     COST = "cores"
     MODEL = "model_size"
+    WORKER = "parallelism"
 
 
 class ESType(Enum):
