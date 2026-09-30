@@ -35,6 +35,33 @@ service chains under resource constraints. Results feed papers (ICSOC, TSC, Summ
   non-parametric methods for tail-latency analysis. Explain what a result *means*, not
   just the number.
 - **Plots:** see the `paper-figure` skill.
+- **Explanations (markdown cells, comments, answers):** write so a reader can follow
+  without guessing.
+  - Define every symbol and term where it first appears: what it is, its unit, and
+    where it comes from (e.g. "X, the execution time of the arriving item, in seconds").
+  - Never use a pronoun whose referent is unclear; name the thing ("the backlog",
+    not "it").
+  - Give the reason behind every non-obvious step or number, not just the result
+    (e.g. why the slope is −1, not only that it is).
+  - Describe what a plot shows (axes, units, what to look at) before interpreting it.
+  - Prefer one concrete example with real numbers over an abstract statement.
+- **No hardcoded result numbers in text:** never write a number that the code computes
+  (a quantile, a ratio, a coverage, a fitted parameter) as a literal in a markdown cell
+  or a code comment; it goes stale as soon as a parameter changes.
+  - Numbers that support a conclusion are printed from variables with f-strings, or the
+    conclusion cell is rendered from code:
+    `display(Markdown(f"The bound is {ratio:.2f}× the true p95 ..."))`.
+  - Static markdown describes results qualitatively ("the bound is about twice the true
+    p95", "coverage stays at 100%") and points to the output that holds the number.
+  - Code comments explain *why*, never *what the result was*; don't write
+    `# gives 0.287`.
+  - Exempt: the definition of a parameter itself (`arrival_rate = 3.0  # items/s`),
+    physical or mathematical constants, and numbers inside a derivation that follow
+    from the stated parameters (e.g. ρ = λμ = 0.24), as long as those parameters are
+    named next to them.
+- **Notebook coherence:** run the `notebook-review` skill after a substantial change to a
+  notebook (a changed assumption, a new section, or edits to ≥ 3 cells) and the first time
+  I work on a notebook in a session. Report findings and proposals; don't fix without asking.
 - **Commits:** only when I ask. Short, lowercase, imperative messages. Never commit
   `*.joblib`, `.idea/`, or `__pycache__/`.
 
