@@ -1,6 +1,6 @@
 from pathlib import Path
 
-DIR_METRICS = Path('../../statics/agent_experience')
+DIR_METRICS = Path('../../../statics/agent_experience')
 PATH_METRICS_ICSOC_EXPLORE = DIR_METRICS / 'metrics_ICSOC_EXPLORE.csv'
 PATH_METRICS_QR_EXPLORE = DIR_METRICS / 'metrics_QR_EXPLORE.csv'
 PATH_METRICS_PC_EXPLORE = DIR_METRICS / 'metrics_PC_EXPLORE.csv'
@@ -12,7 +12,7 @@ DATASET_LOG_SPLITS = [0.05, 0.1, 0.25, 0.5, 0.75, 1.0]
 # ITERATE_THROUGH_X_PARTS = 60
 RUNS_PER_CONFIG = 50
 
-DIR_VAR_DUMPS = Path('../../statics/var_dumps')
+DIR_VAR_DUMPS = Path('../../../statics/var_dumps')
 PATH_MODEL_LIST = DIR_VAR_DUMPS / '2_analysis_models.joblib'
 
-DIR_CANDIDATES = Path('../../statics/candidates')
+DIR_CANDIDATES = Path('../../../statics/candidates')
