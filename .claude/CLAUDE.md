@@ -59,6 +59,8 @@ service chains under resource constraints. Results feed papers (ICSOC, TSC, Summ
     physical or mathematical constants, and numbers inside a derivation that follow
     from the stated parameters (e.g. ρ = λμ = 0.24), as long as those parameters are
     named next to them.
+- **Method / baseline sections:** follow the `method-section-structure` skill (overview with setup
+  cell, one subsection per method with its computation directly after it, results last).
 - **Notebook coherence:** run the `notebook-review` skill after a substantial change to a
   notebook (a changed assumption, a new section, or edits to ≥ 3 cells) and the first time
   I work on a notebook in a session. Report findings and proposals; don't fix without asking.

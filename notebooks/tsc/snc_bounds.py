@@ -7,7 +7,7 @@ exceeded with probability at most `epsilon`. Vectorized functions take one mean/
 """
 import numpy as np
 from scipy.special import logsumexp
-from scipy.stats import norm
+from scipy.stats import norm, t as student_t
 
 THETA_GRID = np.logspace(-1, 5, 4000)   # MGF parameter theta (1/s) over which every bound is optimized
 
@@ -77,28 +77,45 @@ def queue_log_moment(log_mgf_node, log_spacing):
     return moment
 
 
-def propagated_node_bounds(path_beliefs, process, rate, epsilon, jitter=0.1, n_max=200, chunk=5, theta=THETA_GRID):
-    """Latency bound of every node on the path; one row per node, one column per configuration.
-    path_beliefs: one (mean, var) pair per node. n_max: queue lengths summed explicitly (the rest by a geometric tail)."""
+def propagated_node_moments(path_beliefs, process, rate, jitter=0.1, n_max=200, chunk=5, theta=THETA_GRID, path_lower_means=None):
+    """ln of the latency moment sum_n M_X(theta)^(n+1) E[exp(-theta A_n)] of every node on the path, shape (nodes,
+    configurations, theta). It does not depend on epsilon, and node k only depends on nodes 1..k, so the moments of the
+    longest chain serve every shorter prefix and every epsilon (see propagated_node_bounds).
+    The arrival spacing of node k is the smallest of three bounds: the service spacing of node k-1, the arrival spacing
+    of node k-1 corrected by its latency, and the external arrival process (the assumption of the SNC bound), so the result
+    is never looser than the SNC bound. path_beliefs: one (mean, var) pair per node. n_max: queue lengths summed explicitly
+    (the rest by a geometric tail). path_lower_means: the lower (optimistic) mean of every node, used where its execution
+    times space the items for the next node (a faster node spaces them less); defaults to the means of path_beliefs."""
     n = np.arange(n_max + 1)
     external = n * log_interarrival_mgf(process, rate, jitter, theta)[:, None]
     n_cfgs = len(np.atleast_1d(path_beliefs[0][0]))
-    bounds = np.empty((len(path_beliefs), n_cfgs))
+    moments = np.empty((len(path_beliefs), n_cfgs, len(theta)))
     for start in range(0, n_cfgs, chunk):
         cfgs = slice(start, start + chunk)
         log_spacing = external[None]
         for k, (mean, var) in enumerate(path_beliefs):
-            mean, var = np.atleast_1d(mean)[cfgs, None], np.atleast_1d(var)[cfgs, None]
+            lower = mean if path_lower_means is None else path_lower_means[k]
+            mean, var, lower = np.atleast_1d(mean)[cfgs, None], np.atleast_1d(var)[cfgs, None], np.atleast_1d(lower)[cfgs, None]
             log_mgf = theta * mean + 0.5 * theta ** 2 * var
-            log_mgf_negative = -theta * mean + 0.5 * theta ** 2 * var
+            log_mgf_negative = -theta * lower + 0.5 * theta ** 2 * var
             moment = queue_log_moment(log_mgf, log_spacing)
-            bounds[k, cfgs] = latency_bound_from_moment(moment, epsilon, theta)
-            # arrival model of the next node: service spacing or arrival spacing, whichever bound is smaller
+            moments[k, cfgs] = moment
+            # arrival model of the next node: service spacing, arrival spacing or the external process, whichever is smallest
             with np.errstate(invalid="ignore"):
                 via_service = n * log_mgf_negative[..., None]
                 via_arrivals = np.nan_to_num(log_spacing + log_mgf_negative[..., None] + moment[..., None], nan=np.inf)
-            log_spacing = np.minimum(np.minimum(via_service, via_arrivals), 0.0)
-    return bounds
+            log_spacing = np.minimum(np.minimum(np.minimum(via_service, via_arrivals), external[None]), 0.0)
+    return moments
+
+
+def propagated_node_bounds(path_beliefs, process, rate, epsilon, jitter=0.1, n_max=200, chunk=5, theta=THETA_GRID,
+                           moments=None, path_lower_means=None):
+    """Latency bound of every node on the path at violation probability epsilon; one row per node, one column per
+    configuration. Pass `moments` from propagated_node_moments of a longer chain with the same first nodes to skip the
+    recursion (only the minimization over theta depends on epsilon)."""
+    if moments is None:
+        moments = propagated_node_moments(path_beliefs, process, rate, jitter, n_max, chunk, theta, path_lower_means)
+    return latency_bound_from_moment(moments[:len(path_beliefs)], epsilon, theta)
 
 
 # ------------------------------------------------------------------------------
@@ -127,25 +144,73 @@ def waiting_time_tail(w, mean, sd, theta, process, rate):
     return np.minimum(1.0, np.nan_to_num(rate * (beyond + below), nan=1.0))
 
 
-def martingale_node_bound(mean, var, process, rate, epsilon, jitter=0.1, bins=4000):
+def martingale_node_bound(mean, var, process, rate, epsilon, jitter=0.1, bins=4000, iterations=30):
     """Smallest d with P(Q + X > d) <= epsilon, per configuration; inf for overloaded nodes.
-    E_X[P(Q > d - X)] uses `bins` equal-probability bins of X at their upper edges, the last bin counted as a violation,
-    so the discretization can only make the bound larger."""
+    epsilon may be a scalar (result: one bound per configuration) or a sequence (result: one row per epsilon); all
+    epsilons are solved in the same bisection. E_X[P(Q > d - X)] uses `bins` equal-probability bins of X at their upper
+    edges, the last bin counted as a violation, so the discretization can only make the bound larger. The bisection over
+    [mean, mean + 60 s] returns its upper end, so it can only err upwards, by at most 60 s / 2^iterations (56 ns for 30)."""
     mean, var = np.atleast_1d(mean).astype(float), np.atleast_1d(var).astype(float)
     sd, theta = np.sqrt(var), martingale_theta(mean, var, process, rate, jitter)
     upper_edges = mean[:, None] + sd[:, None] * norm.ppf(np.arange(1, bins) / bins)
+    epsilons = np.atleast_1d(np.asarray(epsilon, dtype=float))[:, None]          # (epsilons, 1)
+
+    def violation(d):                                                              # d: (epsilons, configurations)
+        slack = d[..., None] - upper_edges
+        tail = np.where(slack < 0, 1.0, waiting_time_tail(slack, mean[:, None], sd[:, None], theta[:, None], process, rate))
+        return (tail.sum(axis=-1) + 1.0) / bins
+
+    low = np.broadcast_to(mean, (len(epsilons), len(mean))).copy()
+    high = low + 60.0
+    for _ in range(iterations):
+        middle = 0.5 * (low + high)
+        too_small = violation(middle) > epsilons
+        low, high = np.where(too_small, middle, low), np.where(too_small, high, middle)
+    bounds = np.where(np.isnan(theta), np.inf, high)
+    return bounds[0] if np.ndim(epsilon) == 0 else bounds
+
+
+def martingale_propagated_node_bound(mean, var, previous_lower_mean, previous_var, process, rate, epsilon, jitter=0.1,
+                                     bins=4000, iterations=30):
+    """Martingale bound of a node that receives the departures of the node before it (previous_lower_mean None for the
+    first node). The waiting-time tail is the smaller of the martingale tail with external arrivals (waiting_time_tail)
+    and Kingman's bound exp(-theta_s w) for the walk with increments X_k - X_(k-1), which bounds the wait because the node
+    before cannot release items closer together than its execution times; theta_s = 2 (mean_prev - mean) / (var + var_prev).
+    The node before enters with its lower (optimistic) mean, because a faster node spaces items less. epsilon may be a
+    scalar or a sequence, as in martingale_node_bound."""
+    mean, var = np.atleast_1d(mean).astype(float), np.atleast_1d(var).astype(float)
+    sd, theta_external = np.sqrt(var), martingale_theta(mean, var, process, rate, jitter)
+    if previous_lower_mean is None:
+        theta_spacing = np.zeros_like(mean)
+    else:
+        theta_spacing = np.maximum(2 * (np.atleast_1d(previous_lower_mean) - mean) / (var + np.atleast_1d(previous_var)), 0.0)
+    upper_edges = mean[:, None] + sd[:, None] * norm.ppf(np.arange(1, bins) / bins)
+    epsilons = np.atleast_1d(np.asarray(epsilon, dtype=float))[:, None]
 
     def violation(d):
-        slack = d[:, None] - upper_edges
-        tail = np.where(slack < 0, 1.0, waiting_time_tail(slack, mean[:, None], sd[:, None], theta[:, None], process, rate))
-        return (tail.sum(axis=1) + 1.0) / bins
+        slack = np.maximum(d[..., None] - upper_edges, 0.0)
+        external = np.nan_to_num(waiting_time_tail(slack, mean[:, None], sd[:, None], theta_external[:, None], process, rate), nan=1.0)
+        spacing = np.where(theta_spacing[:, None] > 0, np.exp(-theta_spacing[:, None] * slack), 1.0)
+        tail = np.where(d[..., None] - upper_edges < 0, 1.0, np.minimum(external, spacing))
+        return (tail.sum(axis=-1) + 1.0) / bins
 
-    low, high = mean.copy(), mean + 60.0
-    for _ in range(60):
+    low = np.broadcast_to(mean, (len(epsilons), len(mean))).copy()
+    high = low + 60.0
+    for _ in range(iterations):
         middle = 0.5 * (low + high)
-        too_small = violation(middle) > epsilon
+        too_small = violation(middle) > epsilons
         low, high = np.where(too_small, middle, low), np.where(too_small, high, middle)
-    return np.where(np.isnan(theta), np.inf, high)
+    bounds = np.where(np.isnan(theta_external) & (theta_spacing <= 0), np.inf, high)
+    return bounds[0] if np.ndim(epsilon) == 0 else bounds
+
+
+def martingale_propagated_node_bounds(path_beliefs, path_lower_means, process, rate, epsilon, jitter=0.1, bins=4000, iterations=30):
+    """martingale_propagated_node_bound for every node of a path; one row per node, one column per configuration.
+    path_lower_means: the lower (optimistic) mean of every node, used for the spacing it gives the next node."""
+    return np.array([martingale_propagated_node_bound(mean, var, None if k == 0 else path_lower_means[k - 1],
+                                                      None if k == 0 else path_beliefs[k - 1][1], process, rate, epsilon,
+                                                      jitter, bins, iterations)
+                     for k, (mean, var) in enumerate(path_beliefs)])
 
 
 # ------------------------------------------------------------------------------
@@ -180,3 +245,16 @@ def simulate_chain(mean_execution, noise_levels, process, rate, n_items, item_co
 
     kept_items = slice(int(warmup_share * n_items), None)
     return np.stack(node_latencies, axis=-1)[:, kept_items], (entering - arrivals)[:, kept_items]
+
+
+def quantile_with_lower_bound(samples, level, n_batches=10, confidence=0.95):
+    """Quantile of every row of `samples` (configurations, items in time order) and the lower edge of its two-sided
+    confidence interval at `confidence`, from batch means: the items are split into n_batches consecutive blocks, the
+    quantile is computed per block, and the standard error is the spread of the block quantiles / sqrt(n_batches).
+    Consecutive latencies in a queue are correlated, so the blocks must be long: fewer, longer blocks keep the interval
+    valid near saturation, where busy periods are long. A bound counts as covering a configuration unless it lies below
+    the lower edge, i.e. unless the simulation shows that it is below the true quantile."""
+    estimate = np.quantile(samples, level, axis=-1)
+    block_quantiles = np.stack([np.quantile(block, level, axis=-1) for block in np.array_split(samples, n_batches, axis=-1)], axis=-1)
+    standard_error = block_quantiles.std(axis=-1, ddof=1) / np.sqrt(n_batches)
+    return estimate, estimate - student_t.ppf(0.5 + confidence / 2, n_batches - 1) * standard_error

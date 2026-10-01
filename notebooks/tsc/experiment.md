@@ -117,7 +117,7 @@ For every scenario: $\rho \in \{0.2, 0.5, 0.8\}$ as the main levels. E2 adds a f
 ### E5 – Depth and topology
 - **Question:** how does the looseness grow along a chain and in a hierarchy?
 - **Grid:** chains $K \in \{1, 2, 3, 5, 10\}$ and a fan-in tree (aggregators → gateway → cloud) for S2; compare
-  - (a) every node assumes the external arrival process (current PPG),
+  - (a) every node assumes the external arrival process (union bound over SNC node bounds),
   - (b) propagated departure bounds (each node's output bound is the next node's arrival model),
   - (c) the measured-nodes union-bound oracle as the reference for the best achievable tightness.
 - **Expected:** (b) closes most of the gap between (a) and (c).
