@@ -35,6 +35,8 @@ service chains under resource constraints. Results feed papers (ICSOC, TSC, Summ
   non-parametric methods for tail-latency analysis. Explain what a result *means*, not
   just the number.
 - **Plots:** see the `paper-figure` skill.
+- **Language:** always use American English (markdown cells, comments, plot labels, answers):
+  "modeled", "color", "utilization", "behavior", not the British spellings.
 - **Explanations (markdown cells, comments, answers):** write so a reader can follow
   without guessing.
   - Define every symbol and term where it first appears: what it is, its unit, and

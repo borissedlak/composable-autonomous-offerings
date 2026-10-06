@@ -1,11 +1,14 @@
-"""All baselines of `method_v2.ipynb`, i.e. everything that is not part of the proposed method (the node bounds
-of the method are in `snc_bounds.py`; every strategy of the method composes them with the union bound). The notebook only calls these functions.
+"""All baselines of `method_v2.ipynb`, i.e. everything that is not part of the proposed method (the node bounds and
+compositions with a guarantee are in `snc_bounds.py`: the union bound over each node bound, and the network service
+curve). The notebook only calls these functions.
 
 1. Execution times only (no queue): a bound on one execution time (Section 6a) and the joint Gaussian quantile of the
-   sum of execution times (Section 7b).
-2. Compositions of latency bounds without a guarantee: the independent SNC convolution (Section 7b).
+   sum of execution times (Section 7c).
+2. Compositions of latency bounds without a guarantee: the independent SNC convolution (Section 7c).
 3. Deep GP baselines (DGP Basic, DGP Advanced): the composition of the previous paper (`rejected_paper.pdf`).
-4. Oracles that compose *measured* node latencies, to separate the cost of the node bounds from that of the composition,
+4. Fluxion-style baseline: modular learning of latency quantiles, composed into an inference graph (Liang et al.,
+   NSDI 2023).
+5. Oracles that compose *measured* node latencies, to separate the cost of the node bounds from that of the composition,
    and the paired test of the independence assumption.
 
 Units: execution times and latencies in seconds; `epsilon` / `alpha` is the violation probability.
@@ -20,7 +23,9 @@ import gpytorch
 import numpy as np
 import torch
 from scipy.stats import t as student_t
+from sklearn.exceptions import ConvergenceWarning
 
+from service_gp import train_gp_models
 from snc_bounds import latency_bound_from_moment, log_latency_moment, snc_latency_bound
 
 
@@ -61,7 +66,8 @@ def joint_gaussian_quantile(node_means, node_stds, z_score):
 # 2. Compositions of latency bounds without a guarantee
 # ==============================================================================
 def independent_snc_convolution(path_beliefs, epsilon, **workload):
-    """Multiplies the node latency MGFs and optimizes one theta: only valid for independent nodes."""
+    """Multiplies the node latency MGFs and optimizes one theta: only valid for independent nodes. It equals the
+    network service curve (network_service_bound in snc_bounds.py) with all Hoelder exponents 1."""
     return latency_bound_from_moment(sum(log_latency_moment(*belief, **workload) for belief in path_beliefs), epsilon)
 
 
@@ -254,7 +260,87 @@ def train_chain_dgp(rows, seed=0, n_samples=2000, cache_dir=None, **layer_option
 
 
 # ==============================================================================
-# 4. Oracles from measured node latencies (configurations, items, nodes)
+# 4. Fluxion-style baseline: modular learning of latency quantiles
+# ==============================================================================
+# Follows Fluxion (Liang et al., "On Modular Learning of Distributed Systems for Predicting End-to-End Latency",
+# NSDI 2023). Fluxion models every service with "learning assignments": one regression model per service and per latency
+# metric (e.g. the p90), whose inputs are the knobs of the service and a spectrum of latency percentiles of the services it
+# depends on. The assignments are wired into an "inference graph" along the service dependencies, and the end-to-end
+# prediction is the output of the last assignment after a traversal that passes point predictions along the edges.
+#
+# Mapping to the chain of `method_v2.ipynb`:
+# - In Fluxion's RPC call graphs, the latency of a caller contains the latency of its callees. The counterpart in a
+#   pipeline is the cumulative latency L_k of an item from entering the chain until it leaves the service at position k
+#   (as for the DGP baselines), which contains L_{k-1}. So the assignments of position k depend on those of position k-1.
+# - One assignment per position and per quantile level in `levels`: a GP (Matern 5/2 as in Fluxion's evaluation; the GP
+#   of service_gp.py) with inputs (configuration x, the quantiles of L_{k-1} at all `levels`) and the quantile of L_k at
+#   one level as output. Position 1 has no dependency and takes x only.
+# - One training row per training configuration ("benchmark" in Fluxion): the quantiles measured on a traced chain run at
+#   that configuration, which includes queueing. Like DGP Advanced, the composition must be traced before it can be
+#   predicted. At inference, the measured upstream quantiles are replaced by the predictions of position k-1.
+#
+# Left out, because they have nothing to act on here: the request rate as an input (Fluxion's "observable state"; the
+# arrival rate is the same in every training and test run), input selection (the spectrum has only a few levels), output
+# weighting over models from different time periods, and service-vertices that aggregate replicas.
+# The output is a point prediction of a quantile, not a guarantee: nothing keeps it above the true quantile.
+
+class FluxionChain:
+    """Inference graph of a chain: assignments[k][j] predicts the levels[j] quantile of the cumulative latency (s) after
+    position k + 1; a chain of depth K uses the first K positions."""
+
+    def __init__(self, assignments, levels):
+        self.assignments, self.levels = assignments, np.asarray(levels, dtype=float)
+
+    def quantiles(self, x_cfgs, depth):
+        """Predicted quantiles (configurations, levels) of the end-to-end latency after `depth` services, by graph
+        traversal: every position receives the point predictions of the position before it. Every position of the chain
+        runs with the same configuration."""
+        x_cfgs = np.atleast_2d(x_cfgs)
+        upstream = None
+        for models in self.assignments[:depth]:
+            inputs = x_cfgs if upstream is None else np.column_stack([x_cfgs, upstream])
+            upstream = np.column_stack([model.predict(inputs) for model in models])
+        return upstream
+
+    def latency_bound(self, x_cfgs, epsilon, depth):
+        """Predicted (1 - epsilon) quantile of the end-to-end latency, per configuration. Not a guarantee. 1 - epsilon
+        must be one of the trained levels: Fluxion needs one assignment per metric it predicts."""
+        match = np.flatnonzero(np.isclose(self.levels, 1 - epsilon))
+        if len(match) == 0:
+            raise ValueError(f"no assignment was trained for the quantile level {1 - epsilon:g}; trained levels: {self.levels}")
+        return self.quantiles(x_cfgs, depth)[:, match[0]]
+
+
+def fluxion_training_rows(x_cfgs, node_latencies, levels):
+    """Rows of the Fluxion-style baseline from traced chain runs. node_latencies: (configurations, items, positions)
+    measured latency of every item at every service. Row i of every position is configuration i; the targets
+    (configurations, levels) are the quantiles of the cumulative latency after that position over the items of the run,
+    and the inputs are the configuration and the targets of the position before. Returns one (inputs, targets) pair per
+    position."""
+    quantiles = np.quantile(np.cumsum(node_latencies, axis=2), levels, axis=1)   # (levels, configurations, positions)
+    rows = []
+    for k in range(quantiles.shape[2]):
+        inputs = x_cfgs if k == 0 else np.column_stack([x_cfgs, quantiles[:, :, k - 1].T])
+        rows.append((inputs, quantiles[:, :, k].T))
+    return rows
+
+
+def train_fluxion_chain(rows, levels) -> FluxionChain:
+    """Trains one learning assignment per position and quantile level, each on its own rows only (modular: replacing a
+    service retrains the assignments of its position), and returns the inference graph of the chain."""
+    assignments = []
+    with warnings.catch_warnings():
+        # the kernel bounds of service_gp.py are set for single execution times; a quantile over a whole traced run is
+        # almost free of noise, so the fitted noise level ends at its lower bound and scikit-learn warns for every model
+        warnings.simplefilter("ignore", ConvergenceWarning)
+        for inputs, targets in rows:
+            models = train_gp_models(inputs, dict(enumerate(targets.T)), range(len(levels)))
+            assignments.append([models[j] for j in range(len(levels))])
+    return FluxionChain(assignments, levels)
+
+
+# ==============================================================================
+# 5. Oracles from measured node latencies (configurations, items, nodes)
 # ==============================================================================
 def union_bound_oracle(node_latencies, epsilon):
     """Measured node quantiles at epsilon / K, added: the best any union bound over nodes can do, per configuration."""

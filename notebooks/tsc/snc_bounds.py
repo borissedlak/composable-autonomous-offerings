@@ -119,6 +119,55 @@ def propagated_node_bounds(path_beliefs, process, rate, epsilon, jitter=0.1, n_m
 
 
 # ------------------------------------------------------------------------------
+# Network service curve with Hoelder's inequality (one bound for the whole chain, any dependence between nodes)
+# ------------------------------------------------------------------------------
+def network_log_moment(path_beliefs, process, rate, jitter=0.1, theta=THETA_GRID, holder_exponents=None, iterations=50):
+    """ln of prod_k M~_k(theta) / (1 - M~_k(theta) E[exp(-theta T)]), one row per configuration, where M~_k is node k's
+    Gaussian execution-time MGF with its variance multiplied by the Hoelder exponent p_k (sum_k 1/p_k = 1).
+    holder_exponents: one fixed p_k per node; None tunes them per configuration and theta (see network_service_bound)."""
+    n_nodes = len(path_beliefs)
+    mean = np.stack([np.atleast_1d(m)[:, None] for m, _ in path_beliefs])   # (nodes, configurations, 1)
+    var = np.stack([np.atleast_1d(v)[:, None] for _, v in path_beliefs])
+    log_r = log_interarrival_mgf(process, rate, jitter, theta)
+
+    def node_moments(share):
+        # share = 1 / p_k; returns the log latency moment and rho of every node (inf where rho >= 1)
+        log_mgf = theta * mean + 0.5 * theta ** 2 * var / share
+        log_rho = np.minimum(log_mgf + log_r, 0.0)
+        with np.errstate(divide="ignore"):
+            moment = np.where(log_mgf + log_r < 0, log_mgf - np.log(-np.expm1(log_rho)), np.inf)
+        return moment, np.exp(log_rho)
+
+    if holder_exponents is not None:
+        assert np.isclose(sum(1 / p for p in holder_exponents), 1) or all(p == 1 for p in holder_exponents), \
+            "Hoelder exponents need sum(1 / p_k) = 1"
+        share = np.reshape(1 / np.asarray(holder_exponents, dtype=float), (-1, 1, 1))
+        return node_moments(share)[0].sum(axis=0)
+    # Tuned exponents: minimizing sum_k moment_k over the shares q_k = 1 / p_k (sum 1) is convex; its optimality
+    # condition gives q_k proportional to sigma_k / sqrt(1 - rho_k), solved by a damped fixed-point iteration. Any shares
+    # that sum to 1 give a valid bound, so the result is the smaller of the tuned and the equal (p_k = K) shares.
+    equal = node_moments(np.full((n_nodes, 1, 1), 1 / n_nodes))[0].sum(axis=0)
+    share = np.full(np.broadcast_shapes(mean.shape, theta.shape), 1 / n_nodes)
+    for _ in range(iterations):
+        rho = node_moments(share)[1]
+        weight = np.sqrt(var / np.maximum(1 - rho, 1e-12))
+        share = np.maximum(0.5 * share + 0.5 * weight / weight.sum(axis=0), 1e-300)
+    return np.minimum(equal, node_moments(share)[0].sum(axis=0))
+
+
+def network_service_bound(path_beliefs, process, rate, epsilon, jitter=0.1, theta=THETA_GRID, holder_exponents=None):
+    """End-to-end latency bound of a chain of FIFO nodes from its network service process (Section 7b), one value per
+    configuration. The end-to-end latency is a maximum over paths through (item, node); a union bound over the paths and
+    one Chernoff step give e^(-theta d) * prod_k M~_k(theta) / (1 - M~_k(theta) E[e^(-theta T)]). Hoelder's inequality,
+    E[prod_k e^(theta S_k)] <= prod_k E[e^(p_k theta S_k)]^(1/p_k) with sum_k 1/p_k = 1, makes it hold for any dependence
+    between the nodes; for Gaussian execution times it multiplies node k's variance by p_k.
+    holder_exponents: fixed p_k per node (all ones gives the independent SNC convolution, not a guarantee); None tunes
+    them per configuration and theta."""
+    return latency_bound_from_moment(network_log_moment(path_beliefs, process, rate, jitter, theta, holder_exponents),
+                                     epsilon, theta)
+
+
+# ------------------------------------------------------------------------------
 # Martingale bound (Kingman; Pollaczek-Khinchine refinement for Poisson arrivals)
 # ------------------------------------------------------------------------------
 def martingale_theta(mean, var, process, rate, jitter=0.1, theta=THETA_GRID):
