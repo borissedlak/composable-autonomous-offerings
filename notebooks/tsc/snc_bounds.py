@@ -265,12 +265,14 @@ def martingale_propagated_node_bounds(path_beliefs, path_lower_means, process, r
 # ------------------------------------------------------------------------------
 # Ground truth: simulated chain of FIFO servers
 # ------------------------------------------------------------------------------
-def simulate_chain(mean_execution, noise_levels, process, rate, n_items, item_correlation, rng, jitter=0.1, warmup_share=0.1):
+def simulate_chain(mean_execution, noise_levels, process, rate, n_items, item_correlation, rng, jitter=0.1, warmup_share=0.1,
+                   return_arrivals=False):
     """Simulates a chain of FIFO single-server services, vectorized over configurations.
     mean_execution: (configurations, nodes) mean execution time of every node (s); noise_levels: std per node (s).
     The execution-time noise of an item is shared across nodes with correlation item_correlation.
     Returns per-node latencies (configurations, items, nodes) and end-to-end latencies (configurations, items);
-    the first warmup_share of items is dropped."""
+    the first warmup_share of items is dropped. With return_arrivals, the times (s) at which the kept items entered the
+    chain (configurations, items) are returned as a third value."""
     mean_execution = np.atleast_2d(mean_execution)
     n_cfgs = len(mean_execution)
     arrivals = np.cumsum(sample_interarrival_times(process, rate, (n_cfgs, n_items), rng, jitter), axis=1)
@@ -293,7 +295,8 @@ def simulate_chain(mean_execution, noise_levels, process, rate, n_items, item_co
         entering = leaving
 
     kept_items = slice(int(warmup_share * n_items), None)
-    return np.stack(node_latencies, axis=-1)[:, kept_items], (entering - arrivals)[:, kept_items]
+    results = np.stack(node_latencies, axis=-1)[:, kept_items], (entering - arrivals)[:, kept_items]
+    return (*results, arrivals[:, kept_items]) if return_arrivals else results
 
 
 def quantile_with_lower_bound(samples, level, n_batches=10, confidence=0.95):

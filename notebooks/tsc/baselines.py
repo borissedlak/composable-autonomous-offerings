@@ -8,7 +8,9 @@ curve). The notebook only calls these functions.
 3. Deep GP baselines (DGP Basic, DGP Advanced): the composition of the previous paper (`rejected_paper.pdf`).
 4. Fluxion-style baseline: modular learning of latency quantiles, composed into an inference graph (Liang et al.,
    NSDI 2023).
-5. Oracles that compose *measured* node latencies, to separate the cost of the node bounds from that of the composition,
+5. Replay of monitored node latencies: the composition of Geebelen et al. (Information Sciences, 2014), which builds the
+   latencies of a composition from latencies that were monitored at every service on its own.
+6. Oracles that compose *measured* node latencies, to separate the cost of the node bounds from that of the composition,
    and the paired test of the independence assumption.
 
 Units: execution times and latencies in seconds; `epsilon` / `alpha` is the violation probability.
@@ -340,7 +342,87 @@ def train_fluxion_chain(rows, levels) -> FluxionChain:
 
 
 # ==============================================================================
-# 5. Oracles from measured node latencies (configurations, items, nodes)
+# 5. Replay of monitored node latencies (Geebelen et al.)
+# ==============================================================================
+# Follows Geebelen et al., "QoS prediction for web service compositions using kernel-based quantile estimation with online
+# adaptation of the constant offset", Information Sciences 268 (2014). Their method has two steps:
+# 1. Aggregation: every elementary service is monitored on its own, which gives one time series of response times per
+#    service. The response times of a composition are built by replaying these series through the workflow: an execution
+#    that starts at time t takes the response time the first service had at t, enters the second service when the first
+#    has finished, takes the response time the second service had at that moment, and so on (a sequence adds, a parallel
+#    block takes the maximum). The composition itself is never executed.
+# 2. Prediction: a quantile regressor is fitted to the replayed series and predicts the quantile the SLO asks for.
+#
+# Mapping to the chain of `method_v2.ipynb`:
+# - Monitoring: one run per service and training configuration in which the service is alone and receives the arrival
+#   process of the workload; the run records the arrival time and the latency (waiting + execution) of every item.
+#   A service that occurs at several positions of a chain is replayed from the same monitored series at every position,
+#   as in the paper, where one service can occur twice in a workflow.
+# - Replay: `replay_composite_latencies`; "the response time the service had at time t" is the latency of the monitored
+#   item that arrived closest to t.
+# - Prediction: the paper predicts the quantile over time from a kernel quantile regression (pinball loss) with time
+#   features. Here the quantile is predicted over configurations, in two stages that estimate the same conditional
+#   quantile: the empirical quantile of the replayed latencies of every training configuration, and a GP (service_gp.py)
+#   from the configuration to that quantile. One regressor per composition and quantile level, trained on first use:
+#   as the paper states, every change of the composition needs a new regressor.
+#
+# Left out: the online adaptation of the constant offset, which raises or lowers the prediction after every observed
+# response time, so that the violation frequency converges to the target over a long stream. The evaluation of the
+# notebook has no such stream: every held-out configuration is predicted once. The parallel, switch and loop patterns of
+# the paper do not occur in a chain.
+# The replay keeps what each service did on its own. It does not contain what the composition changes: a downstream
+# service receives the departures of the upstream one and not the arrival process it was monitored with, and the same item
+# passes through all services. The output is a point prediction of a quantile, not a guarantee.
+
+def replay_composite_latencies(arrivals_by_service, latencies_by_service, path):
+    """Latencies (s) of a chain, built from runs that monitored every service on its own (Geebelen et al., step 1).
+    arrivals_by_service[s], latencies_by_service[s]: (configurations, items) arrival time (s, increasing along the items)
+    and latency (s) of every monitored item of service s; path: the service at every position of the chain.
+    One replayed execution starts at every monitored arrival of the first service. Returns (configurations, items);
+    executions that leave the period in which all services were monitored are NaN (the paper marks them "unknown")."""
+    start = arrivals_by_service[path[0]]
+    period_start = np.max([arrivals_by_service[s][:, 0] for s in set(path)], axis=0)[:, None]
+    period_end = np.min([arrivals_by_service[s][:, -1] for s in set(path)], axis=0)[:, None]
+    time = np.where(start >= period_start, start, np.nan)
+    for s_name in path:
+        arrivals, latencies = arrivals_by_service[s_name], latencies_by_service[s_name]
+        for i in range(len(time)):
+            lookup = np.nan_to_num(time[i], nan=arrivals[i, 0])
+            after = np.clip(np.searchsorted(arrivals[i], lookup), 1, arrivals.shape[1] - 1)
+            closest = np.where(lookup - arrivals[i, after - 1] <= arrivals[i, after] - lookup, after - 1, after)
+            time[i] = time[i] + latencies[i, closest]
+        time = np.where(time <= period_end, time, np.nan)
+    return time - start
+
+
+class ReplayComposition:
+    """Replay of monitored node latencies with a quantile regressor over configurations (Geebelen et al., steps 1 and 2).
+    x_cfgs: (configurations, features) the monitored configurations; arrivals_by_service, latencies_by_service: as in
+    replay_composite_latencies. No composition is executed, neither for training nor for prediction."""
+
+    def __init__(self, x_cfgs, arrivals_by_service, latencies_by_service):
+        self.x_cfgs, self.arrivals, self.latencies = np.atleast_2d(x_cfgs), arrivals_by_service, latencies_by_service
+        self.regressors = {}   # (path, quantile level) -> GP from the configuration to the replayed quantile
+
+    def monitored_quantiles(self, path, level):
+        """`level` quantile of the replayed latencies of the chain `path`, per monitored configuration."""
+        return np.nanquantile(replay_composite_latencies(self.arrivals, self.latencies, path), level, axis=1)
+
+    def latency_bound(self, x_cfgs, epsilon, path):
+        """Predicted (1 - epsilon) quantile of the end-to-end latency of the chain `path`, per configuration. Not a
+        guarantee. The regressor of a (path, epsilon) pair is trained on first use."""
+        key = (tuple(path), 1 - epsilon)
+        if key not in self.regressors:
+            with warnings.catch_warnings():
+                # as for the Fluxion-style baseline: a quantile over a whole run is almost free of noise, so the fitted
+                # noise level ends at its lower bound and scikit-learn warns
+                warnings.simplefilter("ignore", ConvergenceWarning)
+                self.regressors[key] = train_gp_models(self.x_cfgs, {0: self.monitored_quantiles(path, 1 - epsilon)}, [0])[0]
+        return self.regressors[key].predict(np.atleast_2d(x_cfgs))
+
+
+# ==============================================================================
+# 6. Oracles from measured node latencies (configurations, items, nodes)
 # ==============================================================================
 def union_bound_oracle(node_latencies, epsilon):
     """Measured node quantiles at epsilon / K, added: the best any union bound over nodes can do, per configuration."""
