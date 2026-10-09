@@ -263,6 +263,54 @@ def martingale_propagated_node_bounds(path_beliefs, path_lower_means, process, r
 
 
 # ------------------------------------------------------------------------------
+# Martingale bound in closed form (Kingman's bound with a Gaussian execution time)
+# ------------------------------------------------------------------------------
+def martingale_closed_form_node_bound(mean, var, process, rate, epsilon, jitter=0.1, previous_lower_mean=None, previous_var=None,
+                                      iterations=40):
+    """Smallest d with P(Q + X > d) <= epsilon from a closed formula, per configuration; inf for overloaded nodes.
+    Q is the waiting time and X ~ N(mean, var) the item's own execution time (s), independent of Q.
+    1. Waiting time: Kingman's martingale bound P(Q > w) <= exp(-theta w) for w >= 0, with theta the decay rate of
+       martingale_theta (the largest grid theta with rho(theta) <= 1; any smaller theta is valid as well).
+    2. Latency: P(Q + X > d) = E_X[P(Q > d - X)] <= E_X[min(1, exp(-theta (d - X)))], which for a Gaussian X is
+       P(X > d) + exp(-theta (d - mean) + theta^2 var / 2) * Phi((d - mean - theta var) / sd), with Phi the standard
+       normal distribution function. No discretization of X is needed; d is found by bisection on this formula.
+    With previous_lower_mean and previous_var (the optimistic mean and the variance of the node before, see
+    martingale_propagated_node_bound), the node receives the departures of that node: the waiting time then also obeys
+    exp(-theta_s w) with theta_s = 2 (mean_prev - mean) / (var + var_prev), and the smaller of two exponential tails is
+    the one with the larger rate, so theta = max(theta, theta_s). The assumptions are those of the numerical bounds
+    (martingale_node_bound, martingale_propagated_node_bound).
+    Unlike martingale_node_bound it does not use the Pollaczek-Khinchine refinement for Poisson arrivals (a waiting-time
+    tail that starts at the share of items that wait, not at 1), so for Poisson arrivals it is somewhat larger.
+    The bisection over [mean, mean + 60 s] returns its upper end, so it can only err upwards, by 60 s / 2^iterations."""
+    mean, var = np.atleast_1d(mean).astype(float), np.atleast_1d(var).astype(float)
+    sd, theta = np.sqrt(var), martingale_theta(mean, var, process, rate, jitter)
+    if previous_lower_mean is not None:
+        theta_spacing = 2 * (np.atleast_1d(previous_lower_mean) - mean) / (var + np.atleast_1d(previous_var))
+        theta = np.fmax(theta, np.where(theta_spacing > 0, theta_spacing, np.nan))   # fmax ignores a nan on one side
+    rate_of_decay = np.nan_to_num(theta, nan=1.0)   # placeholder where there is no valid rate; those entries become inf below
+
+    def tail(d):   # bound on P(Q + X > d); the second term in log space, because theta^2 var can be very large
+        waits = np.exp(-rate_of_decay * (d - mean) + 0.5 * rate_of_decay ** 2 * var + norm.logcdf((d - mean - rate_of_decay * var) / sd))
+        return norm.sf((d - mean) / sd) + waits
+
+    low, high = mean.copy(), mean + 60.0
+    for _ in range(iterations):
+        middle = 0.5 * (low + high)
+        too_small = tail(middle) > epsilon
+        low, high = np.where(too_small, middle, low), np.where(too_small, high, middle)
+    return np.where(np.isnan(theta), np.inf, high)
+
+
+def martingale_closed_form_node_bounds(path_beliefs, path_lower_means, process, rate, epsilon, jitter=0.1):
+    """martingale_closed_form_node_bound for every node of a path, each node receiving the departures of the node before
+    it; one row per node, one column per configuration. path_lower_means: the lower (optimistic) mean of every node."""
+    return np.array([martingale_closed_form_node_bound(mean, var, process, rate, epsilon, jitter,
+                                                       None if k == 0 else path_lower_means[k - 1],
+                                                       None if k == 0 else path_beliefs[k - 1][1])
+                     for k, (mean, var) in enumerate(path_beliefs)])
+
+
+# ------------------------------------------------------------------------------
 # Ground truth: simulated chain of FIFO servers
 # ------------------------------------------------------------------------------
 def simulate_chain(mean_execution, noise_levels, process, rate, n_items, item_correlation, rng, jitter=0.1, warmup_share=0.1,

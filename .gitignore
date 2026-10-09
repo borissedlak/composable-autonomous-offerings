@@ -2,3 +2,4 @@
 *.joblib
 # cached Deep GP baselines (notebooks/tsc/method_v2.ipynb), retrained when missing
 statics/dgp/
+/statics/papers/review/

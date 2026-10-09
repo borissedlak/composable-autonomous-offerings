@@ -1,7 +1,8 @@
 """Gaussian Process model of one service's execution time, used by `method_v2.ipynb` (Section 2).
 
-`ScaledGPRegressor` wraps scikit-learn's GaussianProcessRegressor with feature scaling and splits the predictive variance
-into its epistemic part Var(f(x)) and its aleatoric part sigma_n^2 (the WhiteKernel noise), both in physical units (s^2).
+`ScaledGPRegressor` wraps scikit-learn's GaussianProcessRegressor with feature scaling and returns its standard
+prediction (mean and predictive standard deviation). The predictive variance can be split into its epistemic part
+Var(f(x)) and its aleatoric part sigma_n^2 (the WhiteKernel noise), both in physical units (s^2).
 """
 import numpy as np
 from scipy.stats import norm
@@ -15,8 +16,9 @@ class ScaledGPRegressor:
     Wrapper around GaussianProcessRegressor that handles feature (X) scaling
     and leverages native `normalize_y=True` for target scaling.
 
-    Explicitly decomposes total predictive variance V[Y(x)] into:
-    - Epistemic uncertainty: Var(f(x))
+    predict() is the standard GP prediction: the mean and the predictive standard deviation of one new observation,
+    V[Y(x)] = Var(f(x)) + sigma_n^2. On request it also returns the two parts of that variance:
+    - Epistemic uncertainty: Var(f(x)) = V[Y(x)] - sigma_n^2
     - Aleatoric uncertainty: sigma_n^2 (from WhiteKernel, unscaled to physical units)
     """
     def __init__(self, kernel, n_restarts_optimizer=5, random_state=42):
@@ -36,29 +38,22 @@ class ScaledGPRegressor:
     def predict(self, X, return_std=False, return_variance_components=False):
         X_scaled = self.x_scaler.transform(X)
 
-        # Epistemic standard deviation sqrt(Var(f(x))) - natively unscaled by sklearn
-        mu, std_epistemic = self.gp.predict(X_scaled, return_std=True)
-        var_epistemic = std_epistemic ** 2
-
-        # Extract target scaling factor (sigma_y) used internally when normalize_y=True
-        y_std = getattr(self.gp, '_y_train_std', 1.0)
-        y_var_scale = y_std ** 2
-
-        # Extract aleatoric noise level sigma_n^2 and convert from scaled space to physical units
-        if hasattr(self.gp.kernel_, 'k2') and hasattr(self.gp.kernel_.k2, 'noise_level'):
-            var_aleatoric_scaled = self.gp.kernel_.k2.noise_level
-            var_aleatoric = np.full_like(var_epistemic, var_aleatoric_scaled * y_var_scale)
-        else:
-            var_aleatoric = np.zeros_like(var_epistemic)
-
-        # Total variance V[Y(x)] = Var(f(x)) + sigma_n^2 (all in physical units)
-        var_total = var_epistemic + var_aleatoric
-        std_total = np.sqrt(var_total)
+        # Standard GP prediction: mean and predictive standard deviation of one new observation, natively unscaled by
+        # sklearn. The kernel contains a WhiteKernel, so this standard deviation already includes the noise of one item.
+        mu, std = self.gp.predict(X_scaled, return_std=True)
 
         if return_variance_components:
-            return mu, std_total, var_epistemic, var_aleatoric
+            # Noise level sigma_n^2 of the WhiteKernel, converted from the scaled target to physical units
+            y_var_scale = getattr(self.gp, '_y_train_std', 1.0) ** 2
+            if hasattr(self.gp.kernel_, 'k2') and hasattr(self.gp.kernel_.k2, 'noise_level'):
+                var_aleatoric = np.full_like(mu, self.gp.kernel_.k2.noise_level * y_var_scale)
+            else:
+                var_aleatoric = np.zeros_like(mu)
+            # What remains of the predictive variance is Var(f(x)), the uncertainty about the mean function
+            var_epistemic = np.maximum(std ** 2 - var_aleatoric, 0.0)
+            return mu, std, var_epistemic, var_aleatoric
         if return_std:
-            return mu, std_total
+            return mu, std
 
         return mu
 
