@@ -1,13 +1,18 @@
-"""Latency bounds for chains of FIFO single-server services, and a simulator of such chains.
+"""Latency bounds for chains of FIFO single-server services.
 
-Shared by `method_v2.ipynb` and `why_poisson_is_loose.ipynb`. Every function takes the arrival process explicitly:
-`process` is "poisson" (exponential gaps with mean 1/rate) or "periodic" (gaps of (1/rate) * (1 + U(-jitter, jitter))).
+Shared by the notebooks of this folder. Every function takes the arrival process explicitly: `process` is "poisson"
+(exponential gaps with mean 1/rate), "periodic" (gaps of (1/rate) * (1 + U(-jitter, jitter))) or "gamma"
+(gamma-distributed gaps with mean 1/rate and squared coefficient of variation cv2 = variance / mean^2; cv2 = 1 is the
+Poisson process, a smaller cv2 spaces the arrivals more evenly and a larger one makes them burstier). Only the functions
+that take `cv2` know the gamma process.
 Execution times are Gaussian with the given mean and variance (s, s^2); bounds are latencies in seconds that are
 exceeded with probability at most `epsilon`. Vectorized functions take one mean/variance per configuration.
+The simulator that provides the ground truth is in `simulation.py`.
 """
 import numpy as np
 from scipy.special import logsumexp
-from scipy.stats import norm, t as student_t
+from scipy.stats import norm
+
 
 THETA_GRID = np.logspace(-1, 5, 4000)   # MGF parameter theta (1/s) over which every bound is optimized
 
@@ -15,19 +20,13 @@ THETA_GRID = np.logspace(-1, 5, 4000)   # MGF parameter theta (1/s) over which e
 # ------------------------------------------------------------------------------
 # Arrival processes
 # ------------------------------------------------------------------------------
-def sample_interarrival_times(process, rate, shape, rng, jitter=0.1):
-    if process == "poisson":
-        return rng.exponential(1.0 / rate, shape)
-    if process == "periodic":
-        assert 0 <= jitter < 1, "jitter must be in [0, 1)"
-        return (1.0 / rate) * (1 + rng.uniform(-jitter, jitter, shape))
-    raise ValueError(f"unknown arrival process {process!r}")
-
-
-def log_interarrival_mgf(process, rate, jitter=0.1, theta=THETA_GRID):
+def log_interarrival_mgf(process, rate, jitter=0.1, theta=THETA_GRID, cv2=1.0):
     """ln E[exp(-theta T)] of one gap T between arrivals."""
     if process == "poisson":
         return np.log(rate / (rate + theta))
+    if process == "gamma":
+        # a gamma gap with shape 1 / cv2 and scale cv2 / rate has E[exp(-theta T)] = (1 + theta * scale)^(-shape)
+        return -np.log1p(theta * cv2 / rate) / cv2
     if process == "periodic":
         shortest_gap = (1 - jitter) / rate
         if jitter == 0:
@@ -121,14 +120,14 @@ def propagated_node_bounds(path_beliefs, process, rate, epsilon, jitter=0.1, n_m
 # ------------------------------------------------------------------------------
 # Network service curve with Hoelder's inequality (one bound for the whole chain, any dependence between nodes)
 # ------------------------------------------------------------------------------
-def network_log_moment(path_beliefs, process, rate, jitter=0.1, theta=THETA_GRID, holder_exponents=None, iterations=50):
+def network_log_moment(path_beliefs, process, rate, jitter=0.1, theta=THETA_GRID, holder_exponents=None, iterations=50, cv2=1.0):
     """ln of prod_k M~_k(theta) / (1 - M~_k(theta) E[exp(-theta T)]), one row per configuration, where M~_k is node k's
     Gaussian execution-time MGF with its variance multiplied by the Hoelder exponent p_k (sum_k 1/p_k = 1).
     holder_exponents: one fixed p_k per node; None tunes them per configuration and theta (see network_service_bound)."""
     n_nodes = len(path_beliefs)
     mean = np.stack([np.atleast_1d(m)[:, None] for m, _ in path_beliefs])   # (nodes, configurations, 1)
     var = np.stack([np.atleast_1d(v)[:, None] for _, v in path_beliefs])
-    log_r = log_interarrival_mgf(process, rate, jitter, theta)
+    log_r = log_interarrival_mgf(process, rate, jitter, theta, cv2)
 
     def node_moments(share):
         # share = 1 / p_k; returns the log latency moment and rho of every node (inf where rho >= 1)
@@ -155,24 +154,44 @@ def network_log_moment(path_beliefs, process, rate, jitter=0.1, theta=THETA_GRID
     return np.minimum(equal, node_moments(share)[0].sum(axis=0))
 
 
-def network_service_bound(path_beliefs, process, rate, epsilon, jitter=0.1, theta=THETA_GRID, holder_exponents=None):
+def network_service_bound(path_beliefs, process, rate, epsilon, jitter=0.1, theta=THETA_GRID, holder_exponents=None, cv2=1.0):
     """End-to-end latency bound of a chain of FIFO nodes from its network service process (Section 7b), one value per
     configuration. The end-to-end latency is a maximum over paths through (item, node); a union bound over the paths and
     one Chernoff step give e^(-theta d) * prod_k M~_k(theta) / (1 - M~_k(theta) E[e^(-theta T)]). Hoelder's inequality,
     E[prod_k e^(theta S_k)] <= prod_k E[e^(p_k theta S_k)]^(1/p_k) with sum_k 1/p_k = 1, makes it hold for any dependence
     between the nodes; for Gaussian execution times it multiplies node k's variance by p_k.
-    holder_exponents: fixed p_k per node (all ones gives the independent SNC convolution, not a guarantee); None tunes
-    them per configuration and theta."""
-    return latency_bound_from_moment(network_log_moment(path_beliefs, process, rate, jitter, theta, holder_exponents),
+    holder_exponents: fixed p_k per node; None tunes them per configuration and theta. All ones gives the independent
+    SNC convolution, which skips the Hoelder step: a guarantee only if the execution times of an item are independent
+    between the nodes. cv2: squared coefficient of variation of the gaps between arrivals (gamma arrivals only)."""
+    return latency_bound_from_moment(network_log_moment(path_beliefs, process, rate, jitter, theta, holder_exponents, cv2=cv2),
                                      epsilon, theta)
+
+
+def network_bound_terms(path_beliefs, process, rate, epsilon, jitter=0.1, theta=THETA_GRID, cv2=1.0):
+    """The three terms of network_service_bound for independent nodes (all Hoelder exponents 1), at the theta that
+    minimizes their sum, per configuration (s): the pessimistic execution time sum_k ln M_k(theta) / theta, the queueing
+    term sum_k -ln(1 - rho_k(theta)) / theta, and the price of confidence ln(1 / epsilon) / theta. The fourth value is
+    that theta (1/s). The three terms add up to network_service_bound(..., holder_exponents=[1] * K); all are inf where
+    a node is overloaded at every theta."""
+    mean = np.stack([np.atleast_1d(m)[:, None] for m, _ in path_beliefs])   # (nodes, configurations, 1)
+    var = np.stack([np.atleast_1d(v)[:, None] for _, v in path_beliefs])
+    log_mgf = theta * mean + 0.5 * theta ** 2 * var
+    log_rho = log_mgf + log_interarrival_mgf(process, rate, jitter, theta, cv2)
+    stable = np.all(log_rho < 0, axis=0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        queueing = np.where(stable, -np.log(-np.expm1(np.minimum(log_rho, 0.0))).sum(axis=0), np.inf) / theta
+    execution, confidence = log_mgf.sum(axis=0) / theta, np.broadcast_to(-np.log(epsilon) / theta, queueing.shape)
+    best = np.argmin(execution + queueing + confidence, axis=-1)
+    pick = lambda term: np.take_along_axis(term, best[:, None], axis=-1)[:, 0]
+    return pick(execution), pick(queueing), pick(confidence), theta[best]
 
 
 # ------------------------------------------------------------------------------
 # Martingale bound (Kingman; Pollaczek-Khinchine refinement for Poisson arrivals)
 # ------------------------------------------------------------------------------
-def martingale_theta(mean, var, process, rate, jitter=0.1, theta=THETA_GRID):
+def martingale_theta(mean, var, process, rate, jitter=0.1, theta=THETA_GRID, cv2=1.0):
     """Largest grid theta below the first crossing of rho(theta) = 1; nan if there is none (overloaded node)."""
-    log_rho = theta * mean[:, None] + 0.5 * theta ** 2 * var[:, None] + log_interarrival_mgf(process, rate, jitter, theta)
+    log_rho = theta * mean[:, None] + 0.5 * theta ** 2 * var[:, None] + log_interarrival_mgf(process, rate, jitter, theta, cv2)
     crossing = np.where(np.any(log_rho >= 0, axis=1), np.argmax(log_rho >= 0, axis=1), len(theta))
     return np.where(crossing > 0, theta[np.maximum(crossing - 1, 0)], np.nan)
 
@@ -266,7 +285,7 @@ def martingale_propagated_node_bounds(path_beliefs, path_lower_means, process, r
 # Martingale bound in closed form (Kingman's bound with a Gaussian execution time)
 # ------------------------------------------------------------------------------
 def martingale_closed_form_node_bound(mean, var, process, rate, epsilon, jitter=0.1, previous_lower_mean=None, previous_var=None,
-                                      iterations=40):
+                                      iterations=40, cv2=1.0):
     """Smallest d with P(Q + X > d) <= epsilon from a closed formula, per configuration; inf for overloaded nodes.
     Q is the waiting time and X ~ N(mean, var) the item's own execution time (s), independent of Q.
     1. Waiting time: Kingman's martingale bound P(Q > w) <= exp(-theta w) for w >= 0, with theta the decay rate of
@@ -283,7 +302,7 @@ def martingale_closed_form_node_bound(mean, var, process, rate, epsilon, jitter=
     tail that starts at the share of items that wait, not at 1), so for Poisson arrivals it is somewhat larger.
     The bisection over [mean, mean + 60 s] returns its upper end, so it can only err upwards, by 60 s / 2^iterations."""
     mean, var = np.atleast_1d(mean).astype(float), np.atleast_1d(var).astype(float)
-    sd, theta = np.sqrt(var), martingale_theta(mean, var, process, rate, jitter)
+    sd, theta = np.sqrt(var), martingale_theta(mean, var, process, rate, jitter, cv2=cv2)
     if previous_lower_mean is not None:
         theta_spacing = 2 * (np.atleast_1d(previous_lower_mean) - mean) / (var + np.atleast_1d(previous_var))
         theta = np.fmax(theta, np.where(theta_spacing > 0, theta_spacing, np.nan))   # fmax ignores a nan on one side
@@ -301,60 +320,10 @@ def martingale_closed_form_node_bound(mean, var, process, rate, epsilon, jitter=
     return np.where(np.isnan(theta), np.inf, high)
 
 
-def martingale_closed_form_node_bounds(path_beliefs, path_lower_means, process, rate, epsilon, jitter=0.1):
+def martingale_closed_form_node_bounds(path_beliefs, path_lower_means, process, rate, epsilon, jitter=0.1, cv2=1.0):
     """martingale_closed_form_node_bound for every node of a path, each node receiving the departures of the node before
     it; one row per node, one column per configuration. path_lower_means: the lower (optimistic) mean of every node."""
     return np.array([martingale_closed_form_node_bound(mean, var, process, rate, epsilon, jitter,
                                                        None if k == 0 else path_lower_means[k - 1],
-                                                       None if k == 0 else path_beliefs[k - 1][1])
+                                                       None if k == 0 else path_beliefs[k - 1][1], cv2=cv2)
                      for k, (mean, var) in enumerate(path_beliefs)])
-
-
-# ------------------------------------------------------------------------------
-# Ground truth: simulated chain of FIFO servers
-# ------------------------------------------------------------------------------
-def simulate_chain(mean_execution, noise_levels, process, rate, n_items, item_correlation, rng, jitter=0.1, warmup_share=0.1,
-                   return_arrivals=False):
-    """Simulates a chain of FIFO single-server services, vectorized over configurations.
-    mean_execution: (configurations, nodes) mean execution time of every node (s); noise_levels: std per node (s).
-    The execution-time noise of an item is shared across nodes with correlation item_correlation.
-    Returns per-node latencies (configurations, items, nodes) and end-to-end latencies (configurations, items);
-    the first warmup_share of items is dropped. With return_arrivals, the times (s) at which the kept items entered the
-    chain (configurations, items) are returned as a third value."""
-    mean_execution = np.atleast_2d(mean_execution)
-    n_cfgs = len(mean_execution)
-    arrivals = np.cumsum(sample_interarrival_times(process, rate, (n_cfgs, n_items), rng, jitter), axis=1)
-    shared_size = rng.standard_normal((n_cfgs, n_items))
-
-    entering = arrivals
-    node_latencies = []
-    for k, noise_level in enumerate(noise_levels):
-        own_noise = rng.standard_normal((n_cfgs, n_items))
-        z = item_correlation * shared_size + np.sqrt(1 - item_correlation ** 2) * own_noise
-        execution = np.maximum(mean_execution[:, k][:, None] + noise_level * z, 0.0)
-
-        # an item starts when it has arrived and the previous item has left
-        leaving = np.empty_like(entering)
-        previous_leaving = np.zeros(n_cfgs)
-        for i in range(n_items):
-            previous_leaving = np.maximum(entering[:, i], previous_leaving) + execution[:, i]
-            leaving[:, i] = previous_leaving
-        node_latencies.append(leaving - entering)
-        entering = leaving
-
-    kept_items = slice(int(warmup_share * n_items), None)
-    results = np.stack(node_latencies, axis=-1)[:, kept_items], (entering - arrivals)[:, kept_items]
-    return (*results, arrivals[:, kept_items]) if return_arrivals else results
-
-
-def quantile_with_lower_bound(samples, level, n_batches=10, confidence=0.95):
-    """Quantile of every row of `samples` (configurations, items in time order) and the lower edge of its two-sided
-    confidence interval at `confidence`, from batch means: the items are split into n_batches consecutive blocks, the
-    quantile is computed per block, and the standard error is the spread of the block quantiles / sqrt(n_batches).
-    Consecutive latencies in a queue are correlated, so the blocks must be long: fewer, longer blocks keep the interval
-    valid near saturation, where busy periods are long. A bound counts as covering a configuration unless it lies below
-    the lower edge, i.e. unless the simulation shows that it is below the true quantile."""
-    estimate = np.quantile(samples, level, axis=-1)
-    block_quantiles = np.stack([np.quantile(block, level, axis=-1) for block in np.array_split(samples, n_batches, axis=-1)], axis=-1)
-    standard_error = block_quantiles.std(axis=-1, ddof=1) / np.sqrt(n_batches)
-    return estimate, estimate - student_t.ppf(0.5 + confidence / 2, n_batches - 1) * standard_error

@@ -1,5 +1,6 @@
 #/notebooks/summersoc/2_gp_models.joblib
 *.joblib
-# cached Deep GP baselines (notebooks/tsc/method_v2.ipynb), retrained when missing
+# cached Deep GP baselines (notebooks/tsc/1_method_v2.ipynb), retrained when missing
 statics/dgp/
 /statics/papers/review/
+__pycache__/

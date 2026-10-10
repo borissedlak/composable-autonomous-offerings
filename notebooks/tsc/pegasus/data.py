@@ -1,4 +1,4 @@
-"""Data of the experiments in `evaluation.ipynb`, from one of two sources (`data_source` in the notebook):
+"""Data of the experiments in `2_evaluation.ipynb`, from one of two sources (`data_source` in the notebook):
 
 - "synthetic": services whose mean execution time is a known function of the configuration (CPU, quality,
   parallelism), and a simulated chain of FIFO single-server queues as ground truth. A seeded generator provides as
@@ -12,11 +12,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from snc_bounds import quantile_with_lower_bound, simulate_chain
+from .simulation import execution_times, quantile_with_lower_bound, simulate_chain
 
 # Synthetic service types. The mean execution time (s) of a service at the configuration (CPU, quality, parallelism) is
 # base + cpu / CPU + quality * quality_knob ** power; noise is the standard deviation of one execution time (s).
-# Every service type is drawn from these ranges, which span the three hand-made services of method_v2.ipynb. The slowest
+# Every service type is drawn from these ranges, which span the three hand-made services of 1_method_v2.ipynb. The slowest
 # possible service takes 0.012 + 0.040 / 0.5 + 0.030 * 2 ** 2 = 0.212 s at the slowest configuration (CPU 0.5, quality 2).
 GENERATED_RANGES = dict(base=(0.006, 0.012), cpu=(0.025, 0.040), quality=(0.015, 0.030), power=(1.5, 2.0), noise=(0.001, 0.006))
 
@@ -43,7 +43,7 @@ class ChainData:
     """Everything an experiment needs about one chain. Fields that a source cannot provide are None; the methods that
     need them are then left out."""
     path: list                      # service at every position of the chain
-    workload: dict                  # arrival process of the chain: process, rate (items/s), jitter
+    workload: dict                  # arrival process of the chain: process, rate (items/s), jitter; cv2 for gamma arrivals
     x_train: np.ndarray             # (training configurations, features)
     y_train: dict                   # service -> one measured execution time per training configuration
     x_test: np.ndarray              # (held-out configurations, features)
@@ -75,18 +75,25 @@ def _simulate(x_cfgs, path, workload, n_items, item_correlation, rng, service_se
                           item_correlation=item_correlation, rng=rng, **workload, **options)
 
 
-def _execution_times(x_train, services, rng, service_seed):
-    """One noisy execution time per service and training configuration."""
+def _execution_times(x_train, services, rng, service_seed, tail=0.0):
+    """One noisy execution time per service and training configuration; tail: shape of the noise (execution_times)."""
     specs = {s: synthetic_service(s, service_seed) for s in services}
-    return {s: true_demand(x_train, specs[s]) + rng.normal(0, specs[s]["noise"], len(x_train)) for s in services}
+    return {s: execution_times(true_demand(x_train, specs[s]), specs[s]["noise"], rng.standard_normal(len(x_train)), tail)
+            for s in services}
 
 
 def synthetic_chain_data(path: list, level: float, coverage_check: dict, seed: int, arrival_process: str = "poisson",
-                         arrival_rate: float = 4.0, arrival_jitter: float = 0.2, item_correlation: float = 0.7,
+                         arrival_rate: float = 4.0, arrival_jitter: float = 0.2, item_correlation: float = 0.0,
                          n_train: int = 50, n_test: int = 100, n_items: int = 5000, n_trace_items: int = 2000,
-                         n_extra: int = 0, service_seed: int = 0) -> ChainData:
+                         n_extra: int = 0, service_seed: int = 0, arrival_cv2: float = 1.0, execution_tail: float = 0.0) -> ChainData:
     """Simulated data of the chain `path` (service types "s1", "s2", ...; none may occur twice), with the defaults of
-    `method_v2.ipynb`. service_seed: seed of the generated service types (synthetic_service).
+    `1_method_v2.ipynb` except for item_correlation. service_seed: seed of the generated service types (synthetic_service).
+    item_correlation: correlation of an item's execution-time noise between the services of the chain (simulate_chain);
+    0 makes the execution times of an item independent between the services, which the SNC version of Pegasus assumes.
+    arrival_cv2: squared coefficient of variation of the gaps between arrivals; only the arrival process "gamma" uses it.
+    execution_tail: shape of the execution-time noise of every service (execution_times in simulation.py): 0 is
+    Gaussian, a larger value gives a heavier right tail at the same mean execution time. It applies to the training
+    data and to every simulated run.
     Training: n_train configurations with one execution time per service. Ground truth: the chain simulated with
     n_items items at n_test held-out configurations; `level` is the latency quantile and coverage_check the arguments
     of its confidence interval (quantile_with_lower_bound). The training configurations are also traced on the chain
@@ -97,33 +104,36 @@ def synthetic_chain_data(path: list, level: float, coverage_check: dict, seed: i
     rng_train, rng_test, rng_traces, rng_monitoring, rng_extra = (np.random.default_rng(s) for s in np.random.SeedSequence(seed).spawn(5))
     assert len(set(path)) == len(path), "a chain must not repeat a service type"
     workload = dict(process=arrival_process, rate=arrival_rate, jitter=arrival_jitter)
+    if arrival_process == "gamma":   # only the gamma process has this parameter, and only the functions that know the process take it
+        workload["cv2"] = arrival_cv2
     services = sorted(path, key=service_index)   # fixed order of the random draws: the data of a service is the same in every chain
 
     x_train = sample_configurations(n_train, rng_train)
-    y_train = _execution_times(x_train, services, rng_train, service_seed)
+    y_train = _execution_times(x_train, services, rng_train, service_seed, execution_tail)
 
     x_test = sample_configurations(n_test, rng_test)
-    node_latencies, latencies = _simulate(x_test, path, workload, n_items, item_correlation, rng_test, service_seed)
+    node_latencies, latencies = _simulate(x_test, path, workload, n_items, item_correlation, rng_test, service_seed, tail=execution_tail)
     measured, measured_low = quantile_with_lower_bound(latencies, level, **coverage_check)
 
-    trace_node_latencies, _ = _simulate(x_train, path, workload, n_trace_items, item_correlation, rng_traces, service_seed)
+    trace_node_latencies, _ = _simulate(x_train, path, workload, n_trace_items, item_correlation, rng_traces, service_seed, tail=execution_tail)
     monitored_arrivals, monitored_latencies = {}, {}
     for s in services:
         monitored, _, monitored_arrivals[s] = _simulate(x_train, [s], workload, n_trace_items, item_correlation,
-                                                        rng_monitoring, service_seed, return_arrivals=True)
+                                                        rng_monitoring, service_seed, return_arrivals=True, tail=execution_tail)
         monitored_latencies[s] = monitored[:, :, 0]
 
     x_extra, extra_monitored_latencies = None, None
     if n_extra > 0:
         x_extra = sample_configurations(n_extra, rng_extra)
-        extra_monitored_latencies = {s: _simulate(x_extra, [s], workload, n_trace_items, item_correlation, rng_extra, service_seed)[0][:, :, 0]
+        extra_monitored_latencies = {s: _simulate(x_extra, [s], workload, n_trace_items, item_correlation, rng_extra, service_seed,
+                                                  tail=execution_tail)[0][:, :, 0]
                                      for s in services}
 
     return ChainData(path, workload, x_train, y_train, x_test, measured, measured_low, node_latencies,
                      trace_node_latencies, monitored_arrivals, monitored_latencies, x_extra, extra_monitored_latencies)
 
 
-def synthetic_training_data(services: list, workload: dict, n_train: int, seed, item_correlation: float = 0.7,
+def synthetic_training_data(services: list, workload: dict, n_train: int, seed, item_correlation: float = 0.0,
                             n_trace_items: int = 2000, service_seed: int = 0) -> tuple:
     """A further set of single-service training data, independent of the one in synthetic_chain_data: n_train
     configurations with one execution time per service, and every service monitored alone under `workload` at these

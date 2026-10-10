@@ -1,4 +1,4 @@
-"""Gaussian Process model of one service's execution time, used by `method_v2.ipynb` (Section 2).
+"""Gaussian Process model of one service's execution time, used by `1_method_v2.ipynb` (Section 2).
 
 `ScaledGPRegressor` wraps scikit-learn's GaussianProcessRegressor with feature scaling and returns its standard
 prediction (mean and predictive standard deviation). The predictive variance can be split into its epistemic part

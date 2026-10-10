@@ -28,8 +28,9 @@ Every section that involves methods or baselines has three parts, in this order.
 - **Directly after it, the cell that computes it**: a few lines that call the
   implementation and store the result (in the container of the setup cell or in
   clearly named variables). No plotting, no comparison.
-- Implementations live in modules, never in the notebook: methods in
-  `snc_bounds.py`, baselines in `baselines.py`, models in `service_gp.py`.
+- Implementations live in modules, never in the notebook. For `notebooks/tsc/` that is the
+  package `pegasus/`: methods in `bounds.py`, baselines in `baselines.py` (per service)
+  and `baselines_chain.py` (trained on runs of the chain), models in `service_gp.py`.
 - A method that does not apply in this section (e.g. propagated arrivals for a
   single service) gets one sentence saying so instead of a cell.
 
