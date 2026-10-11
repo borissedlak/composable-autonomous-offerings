@@ -1,4 +1,4 @@
-"""Baselines of `1_method_v2.ipynb` that are not per-service models: everything that is neither part of the proposed
+"""Baselines of `1_method_synthetic.ipynb` that are not per-service models: everything that is neither part of the proposed
 method (the node bounds and compositions with a guarantee are in `bounds.py`) nor a per-service baseline of the
 evaluation (`baselines.py`). The notebook only calls these functions.
 
@@ -251,7 +251,7 @@ def train_chain_dgp(rows, seed=0, n_samples=2000, cache_dir=None, **layer_option
 # depends on. The assignments are wired into an "inference graph" along the service dependencies, and the end-to-end
 # prediction is the output of the last assignment after a traversal that passes point predictions along the edges.
 #
-# Mapping to the chain of `1_method_v2.ipynb`:
+# Mapping to the chain of `1_method_synthetic.ipynb`:
 # - In Fluxion's RPC call graphs, the latency of a caller contains the latency of its callees. The counterpart in a
 #   pipeline is the cumulative latency L_k of an item from entering the chain until it leaves the service at position k
 #   (as for the DGP baselines), which contains L_{k-1}. So the assignments of position k depend on those of position k-1.
@@ -333,7 +333,7 @@ def train_fluxion_chain(rows, levels) -> FluxionChain:
 #    block takes the maximum). The composition itself is never executed.
 # 2. Prediction: a quantile regressor is fitted to the replayed series and predicts the quantile the SLO asks for.
 #
-# Mapping to the chain of `1_method_v2.ipynb`:
+# Mapping to the chain of `1_method_synthetic.ipynb`:
 # - Monitoring: one run per service and training configuration in which the service is alone and receives the arrival
 #   process of the workload; the run records the arrival time and the latency (waiting + execution) of every item.
 #   A service that occurs at several positions of a chain is replayed from the same monitored series at every position,

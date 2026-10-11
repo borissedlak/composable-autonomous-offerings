@@ -73,6 +73,25 @@ def simulate_chain(mean_execution, noise_levels, process, rate, n_items, item_co
     return (*results, arrivals[:, kept_items]) if return_arrivals else results
 
 
+def fifo_chain_latencies(arrivals, execution):
+    """Latencies of a chain of FIFO single-server services for given arrival and execution times, vectorized over
+    configurations. arrivals: (configurations, items) times at which the items enter the chain (s, increasing);
+    execution: (configurations, items, nodes) execution time of every item at every node (s), e.g. measured ones.
+    Returns per-node latencies (configurations, items, nodes) and end-to-end latencies (configurations, items)."""
+    entering = np.asarray(arrivals, dtype=float)
+    node_latencies = []
+    for k in range(execution.shape[-1]):
+        # an item starts when it has arrived and the previous item has left
+        leaving = np.empty_like(entering)
+        previous_leaving = np.zeros(len(entering))
+        for i in range(entering.shape[1]):
+            previous_leaving = np.maximum(entering[:, i], previous_leaving) + execution[:, i, k]
+            leaving[:, i] = previous_leaving
+        node_latencies.append(leaving - entering)
+        entering = leaving
+    return np.stack(node_latencies, axis=-1), entering - arrivals
+
+
 # ------------------------------------------------------------------------------
 # Measured quantile
 # ------------------------------------------------------------------------------

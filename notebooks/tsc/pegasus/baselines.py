@@ -12,6 +12,7 @@ on its own; none sees a run of the chain. They differ in what is measured per se
 The baselines that are trained on runs of the chain are in `baselines_chain.py`.
 Units: execution times and latencies in seconds; `epsilon` / `alpha` is the violation probability.
 """
+import time
 import warnings
 from contextlib import contextmanager
 
@@ -20,7 +21,7 @@ import torch
 from scipy.stats import norm
 from sklearn.exceptions import ConvergenceWarning
 
-from .service_gp import train_gp_models
+from .service_gp import MIN_LENGTH_SCALE, configurations_of, train_gp_models
 
 
 # ==============================================================================
@@ -74,40 +75,57 @@ class ServiceDNN:
         return (mean, np.full_like(mean, self.residual_std)) if return_std else mean
 
 
-def train_dnn_models(x_train: np.ndarray, y_train_dict: dict, service_names: list, seed: int = 0) -> dict:
+def train_dnn_models(x_train, y_train_dict: dict, service_names: list, seed: int = 0) -> dict:
     """One ServiceDNN per service, the counterpart of train_gp_models in service_gp.py."""
-    return {name: ServiceDNN(x_train, np.asarray(y_train_dict[name]), seed=seed + k) for k, name in enumerate(service_names)}
+    return {name: ServiceDNN(configurations_of(x_train, name), np.asarray(y_train_dict[name]), seed=seed + k)
+            for k, name in enumerate(service_names)}
 
 
 # ==============================================================================
 # 2. Latency quantile per service under load
 # ==============================================================================
-def _service_quantile_models(x_train, monitored_latencies, services, level):
-    """GP (service_gp.py) from the configuration to the `level` latency quantile of every service monitored alone."""
+def _service_quantile_models(x_train, monitored_latencies, services, level, log_target=False):
+    """GP (service_gp.py) from the configuration to the `level` latency quantile of every service monitored alone.
+    A training configuration at which a service could not be monitored (its latencies are nan, e.g. because the
+    service is overloaded there) is left out for that service. log_target (the standard for real data): the GP is
+    trained on the natural logarithm of the quantile, so that its prediction, exp(GP), is positive and its error is
+    relative, and its length scale has the lower limit MIN_LENGTH_SCALE of service_gp.py."""
     targets = {s: np.quantile(monitored_latencies[s], level, axis=1) for s in services}
+    if log_target:
+        targets = {s: np.log(targets[s]) for s in services}
+    monitored = {s: ~np.isnan(targets[s]) for s in services}
+    x_train = {s: configurations_of(x_train, s)[monitored[s]] for s in services}
+    targets = {s: targets[s][monitored[s]] for s in services}
     with warnings.catch_warnings():
         # as for the Fluxion-style baseline: a quantile over a whole run is almost free of noise, so the fitted noise
         # level ends at its lower bound and scikit-learn warns
         warnings.simplefilter("ignore", ConvergenceWarning)
-        return train_gp_models(x_train, targets, services), targets
+        return train_gp_models(x_train, targets, services, MIN_LENGTH_SCALE if log_target else None), targets
 
 
-def summed_service_quantiles(x_train: np.ndarray, monitored_latencies: dict, path: list, epsilon: float,
-                             x_test: np.ndarray) -> np.ndarray:
+def summed_service_quantiles(x_train, monitored_latencies: dict, path: list, epsilon: float,
+                             x_test, return_seconds: bool = False, log_target: bool = False):
     """Sum over the services of `path` of their predicted (1 - epsilon) latency quantile, per configuration of x_test.
     monitored_latencies[s]: (training configurations, items) latency (s) of every item of service s monitored alone under
     the arrival process of the workload. One GP per service predicts the quantile from the configuration: the modular
     learning of latency quantiles of Fluxion (part 4), with every model trained on its own service only. Not a guarantee:
-    a point prediction per service, and the quantile of a sum is not the sum of the quantiles."""
+    a point prediction per service, and the quantile of a sum is not the sum of the quantiles.
+    With return_seconds, the time it took to train the models (s) is returned as a second value. log_target: see
+    _service_quantile_models."""
     services = sorted(set(path))
-    models, _ = _service_quantile_models(x_train, monitored_latencies, services, 1 - epsilon)
-    predicted = {s: models[s].predict(np.atleast_2d(x_test)) for s in services}
-    return sum(predicted[s] for s in path)
+    started = time.perf_counter()
+    models, _ = _service_quantile_models(x_train, monitored_latencies, services, 1 - epsilon, log_target)
+    training_seconds = time.perf_counter() - started
+    predicted = {s: models[s].predict(np.atleast_2d(configurations_of(x_test, s))) for s in services}
+    if log_target:
+        predicted = {s: np.exp(predicted[s]) for s in services}
+    total = sum(predicted[s] for s in path)
+    return (total, training_seconds) if return_seconds else total
 
 
-def conformal_service_bounds(x_train: np.ndarray, monitored_latencies: dict, path: list, epsilon: float, x_test: np.ndarray,
-                             miscoverage: float, n_calibration: int = 0, seed: int = 0, x_calibration: np.ndarray = None,
-                             calibration_latencies: dict = None) -> np.ndarray:
+def conformal_service_bounds(x_train, monitored_latencies: dict, path: list, epsilon: float, x_test,
+                             miscoverage: float, n_calibration: int = 0, seed: int = 0, x_calibration=None,
+                             calibration_latencies: dict = None, return_seconds: bool = False, log_target: bool = False):
     """Split-conformal latency bound per service with the violation probability split over the services (the union
     bound), summed over `path`, per configuration of x_test.
     Per service: n_calibration training configurations, drawn at random, are set aside. A GP on the remaining ones
@@ -119,23 +137,35 @@ def conformal_service_bounds(x_train: np.ndarray, monitored_latencies: dict, pat
     services the union bound leaves 1 - K * miscoverage. It assumes that a service behaves in the chain as it did
     alone, in particular that it receives the arrival process it was monitored with.
     With x_calibration and calibration_latencies (further configurations monitored in the same way), the model is
-    trained on all training configurations and calibrated on those instead; n_calibration is then not used."""
+    trained on all training configurations and calibrated on those instead; n_calibration is then not used.
+    With return_seconds, the time it took to train and calibrate the models (s) is returned as a second value.
+    log_target: see _service_quantile_models; the predicted quantile is then exp(GP) and needs no lower limit."""
     services, n_nodes = sorted(set(path)), len(path)
+    started = time.perf_counter()
     if x_calibration is None:
-        order = np.random.default_rng(seed).permutation(len(x_train))
-        fit, calibrate = order[:-n_calibration], order[-n_calibration:]
-        x_calibration, calibration_latencies = x_train[calibrate], {s: monitored_latencies[s][calibrate] for s in services}
-        x_train, monitored_latencies = x_train[fit], {s: monitored_latencies[s][fit] for s in services}
-    models, _ = _service_quantile_models(x_train, monitored_latencies, services, 1 - epsilon / n_nodes)
-    predict = lambda s, x: np.maximum(models[s].predict(np.atleast_2d(x)), 1e-9)   # a latency is positive
-    rank = int(np.ceil((len(x_calibration) + 1) * (1 - miscoverage)))
-    bounds = {}
+        # every service draws its split with the same seed: services that share their training configurations share the split
+        order = {s: np.random.default_rng(seed).permutation(len(configurations_of(x_train, s))) for s in services}
+        fit, calibrate = {s: order[s][:-n_calibration] for s in services}, {s: order[s][-n_calibration:] for s in services}
+        x_calibration = {s: configurations_of(x_train, s)[calibrate[s]] for s in services}
+        calibration_latencies = {s: monitored_latencies[s][calibrate[s]] for s in services}
+        x_train = {s: configurations_of(x_train, s)[fit[s]] for s in services}
+        monitored_latencies = {s: monitored_latencies[s][fit[s]] for s in services}
+    models, _ = _service_quantile_models(x_train, monitored_latencies, services, 1 - epsilon / n_nodes, log_target)
+    if log_target:
+        predict = lambda s, x: np.exp(models[s].predict(np.atleast_2d(x)))
+    else:
+        predict = lambda s, x: np.maximum(models[s].predict(np.atleast_2d(x)), 1e-9)   # a latency is positive
+    corrections = {}
     for s in services:
         measured = np.quantile(calibration_latencies[s], 1 - epsilon / n_nodes, axis=1)
-        scores = np.sort(measured / predict(s, x_calibration))
-        correction = scores[rank - 1] if rank <= len(scores) else np.inf
-        bounds[s] = predict(s, x_test) * correction
-    return sum(bounds[s] for s in path)
+        monitored = ~np.isnan(measured)   # calibration configurations at which the service could be monitored
+        scores = np.sort(measured[monitored] / predict(s, configurations_of(x_calibration, s)[monitored]))
+        rank = int(np.ceil((len(scores) + 1) * (1 - miscoverage)))
+        corrections[s] = scores[rank - 1] if rank <= len(scores) else np.inf
+    training_seconds = time.perf_counter() - started
+    bounds = {s: predict(s, configurations_of(x_test, s)) * corrections[s] for s in services}
+    total = sum(bounds[s] for s in path)
+    return (total, training_seconds) if return_seconds else total
 
 
 # ==============================================================================

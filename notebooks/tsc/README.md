@@ -7,8 +7,9 @@ modeled on their own.
 
 | Notebook | What it is |
 |---|---|
-| `1_method_v2.ipynb` | The method: GP model per service, node bounds, compositions, and the baselines of the method section. |
-| `2_evaluation.ipynb` | The paper's evaluation (Section V): setup, coverage and tightness experiments B.1 to B.6, outline of C. |
+| `1_method_synthetic.ipynb` | The method: GP model per service, node bounds, compositions, and the baselines of the method section. |
+| `1_method_real.ipynb` | The method on real services: the same steps as `1_method_synthetic.ipynb` on the testbed campaign (training on run statistics, emulated queueing), without the sections that need a synthetic system. |
+| `2_evaluation.ipynb` | The paper's evaluation (Section V): setup, coverage and tightness experiments B.1 to B.6 on synthetic or real data (`data_source`), outline of C. |
 | `explain_1_why_chernoff_mgf.ipynb` | Why the bounds use moment generating functions and Chernoff bounds, and which alternatives exist. |
 | `explain_2_why_poisson_is_loose.ipynb` | Why the SNC node bound is loose under Poisson arrivals. |
 | `explain_3_how_pegasus_bounds_compose.ipynb` | The two versions of Pegasus (per-node union bound, SNC): the math from one queue upward, strengths and weaknesses. |
@@ -29,12 +30,13 @@ The notebooks only call these functions; no method is implemented inside a noteb
 | `service_gp.py` | The GP model of one service's execution time, and the belief the bounds take from it. |
 | `baselines.py` | Per-service baselines of the evaluation: GP Sum, DNN Sum, Kingman formula, Quantile Union, Conformal, Oracle. |
 | `baselines_chain.py` | Baselines of the method notebook that need runs of the chain: Deep GP, Fluxion-style, replay; independence tests. |
-| `data.py` | Data of the evaluation: the seeded generator of synthetic services and the simulated chain data. |
+| `data.py` | Data of the evaluation: the seeded generator of synthetic services, the simulated chain data, and the entry points for both data sources. |
+| `real_data.py` | The real data source: reader of the testbed campaign in `statics/results_milos/`, and the emulation that replays its measured processing times through FIFO queues. |
 | `evaluation.py` | What the experiments of the evaluation share: model fitting, the comparison of all methods, coverage, figures. |
 
 Dependencies point one way: `bounds` and `simulation` depend on nothing here; `service_gp` on nothing; `baselines` on
-`service_gp`; `baselines_chain` on `baselines`, `bounds` and `service_gp`; `data` on `simulation`; `evaluation` on
-`baselines`, `bounds` and `service_gp`.
+`service_gp`; `baselines_chain` on `baselines`, `bounds` and `service_gp`; `data` on `simulation`; `real_data` on `data` and
+`simulation`; `evaluation` on `baselines`, `bounds` and `service_gp`.
 
 ## `archive/`
 

@@ -7,6 +7,7 @@ Poisson process, a smaller cv2 spaces the arrivals more evenly and a larger one 
 that take `cv2` know the gamma process.
 Execution times are Gaussian with the given mean and variance (s, s^2); bounds are latencies in seconds that are
 exceeded with probability at most `epsilon`. Vectorized functions take one mean/variance per configuration.
+`rate` is one number, or one arrival rate per configuration (real data: every run of a chain has its own rate).
 The simulator that provides the ground truth is in `simulation.py`.
 """
 import numpy as np
@@ -21,7 +22,11 @@ THETA_GRID = np.logspace(-1, 5, 4000)   # MGF parameter theta (1/s) over which e
 # Arrival processes
 # ------------------------------------------------------------------------------
 def log_interarrival_mgf(process, rate, jitter=0.1, theta=THETA_GRID, cv2=1.0):
-    """ln E[exp(-theta T)] of one gap T between arrivals."""
+    """ln E[exp(-theta T)] of one gap T between arrivals, one value per theta; with one rate per configuration, one
+    row per configuration."""
+    rate = np.asarray(rate, dtype=float)
+    if rate.ndim:
+        rate = rate[:, None]
     if process == "poisson":
         return np.log(rate / (rate + theta))
     if process == "gamma":
@@ -86,12 +91,13 @@ def propagated_node_moments(path_beliefs, process, rate, jitter=0.1, n_max=200, 
     (the rest by a geometric tail). path_lower_means: the lower (optimistic) mean of every node, used where its execution
     times space the items for the next node (a faster node spaces them less); defaults to the means of path_beliefs."""
     n = np.arange(n_max + 1)
-    external = n * log_interarrival_mgf(process, rate, jitter, theta)[:, None]
+    external_all = n * log_interarrival_mgf(process, rate, jitter, theta)[..., None]   # (theta, n), or (configurations, theta, n)
     n_cfgs = len(np.atleast_1d(path_beliefs[0][0]))
     moments = np.empty((len(path_beliefs), n_cfgs, len(theta)))
     for start in range(0, n_cfgs, chunk):
         cfgs = slice(start, start + chunk)
-        log_spacing = external[None]
+        external = external_all if external_all.ndim == 2 else external_all[cfgs]
+        log_spacing = external[None] if external.ndim == 2 else external
         for k, (mean, var) in enumerate(path_beliefs):
             lower = mean if path_lower_means is None else path_lower_means[k]
             mean, var, lower = np.atleast_1d(mean)[cfgs, None], np.atleast_1d(var)[cfgs, None], np.atleast_1d(lower)[cfgs, None]
@@ -103,7 +109,7 @@ def propagated_node_moments(path_beliefs, process, rate, jitter=0.1, n_max=200, 
             with np.errstate(invalid="ignore"):
                 via_service = n * log_mgf_negative[..., None]
                 via_arrivals = np.nan_to_num(log_spacing + log_mgf_negative[..., None] + moment[..., None], nan=np.inf)
-            log_spacing = np.minimum(np.minimum(np.minimum(via_service, via_arrivals), external[None]), 0.0)
+            log_spacing = np.minimum(np.minimum(np.minimum(via_service, via_arrivals), external[None] if external.ndim == 2 else external), 0.0)
     return moments
 
 
@@ -198,7 +204,7 @@ def martingale_theta(mean, var, process, rate, jitter=0.1, theta=THETA_GRID, cv2
 
 def waiting_time_tail(w, mean, sd, theta, process, rate):
     """Bound on P(Q > w) for the waiting time Q, w >= 0: Pollaczek-Khinchine refinement for Poisson arrivals,
-    Kingman's exp(-theta w) otherwise."""
+    Kingman's exp(-theta w) otherwise. One rate per configuration must have the shape of mean, sd and theta (one column)."""
     w = np.maximum(w, 0.0)
     kingman = np.exp(-theta * w)
     if process != "poisson":
@@ -220,12 +226,13 @@ def martingale_node_bound(mean, var, process, rate, epsilon, jitter=0.1, bins=40
     [mean, mean + 60 s] returns its upper end, so it can only err upwards, by at most 60 s / 2^iterations (56 ns for 30)."""
     mean, var = np.atleast_1d(mean).astype(float), np.atleast_1d(var).astype(float)
     sd, theta = np.sqrt(var), martingale_theta(mean, var, process, rate, jitter)
+    rate_column = np.asarray(rate, dtype=float)[:, None] if np.ndim(rate) else rate   # one rate per configuration: one row each
     upper_edges = mean[:, None] + sd[:, None] * norm.ppf(np.arange(1, bins) / bins)
     epsilons = np.atleast_1d(np.asarray(epsilon, dtype=float))[:, None]          # (epsilons, 1)
 
     def violation(d):                                                              # d: (epsilons, configurations)
         slack = d[..., None] - upper_edges
-        tail = np.where(slack < 0, 1.0, waiting_time_tail(slack, mean[:, None], sd[:, None], theta[:, None], process, rate))
+        tail = np.where(slack < 0, 1.0, waiting_time_tail(slack, mean[:, None], sd[:, None], theta[:, None], process, rate_column))
         return (tail.sum(axis=-1) + 1.0) / bins
 
     low = np.broadcast_to(mean, (len(epsilons), len(mean))).copy()
@@ -248,6 +255,7 @@ def martingale_propagated_node_bound(mean, var, previous_lower_mean, previous_va
     scalar or a sequence, as in martingale_node_bound."""
     mean, var = np.atleast_1d(mean).astype(float), np.atleast_1d(var).astype(float)
     sd, theta_external = np.sqrt(var), martingale_theta(mean, var, process, rate, jitter)
+    rate_column = np.asarray(rate, dtype=float)[:, None] if np.ndim(rate) else rate   # one rate per configuration: one row each
     if previous_lower_mean is None:
         theta_spacing = np.zeros_like(mean)
     else:
@@ -257,7 +265,7 @@ def martingale_propagated_node_bound(mean, var, previous_lower_mean, previous_va
 
     def violation(d):
         slack = np.maximum(d[..., None] - upper_edges, 0.0)
-        external = np.nan_to_num(waiting_time_tail(slack, mean[:, None], sd[:, None], theta_external[:, None], process, rate), nan=1.0)
+        external = np.nan_to_num(waiting_time_tail(slack, mean[:, None], sd[:, None], theta_external[:, None], process, rate_column), nan=1.0)
         spacing = np.where(theta_spacing[:, None] > 0, np.exp(-theta_spacing[:, None] * slack), 1.0)
         tail = np.where(d[..., None] - upper_edges < 0, 1.0, np.minimum(external, spacing))
         return (tail.sum(axis=-1) + 1.0) / bins
