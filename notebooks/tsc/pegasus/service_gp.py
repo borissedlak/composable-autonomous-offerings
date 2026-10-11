@@ -71,9 +71,10 @@ def configurations_of(x, service: str) -> np.ndarray:
 MIN_LENGTH_SCALE = 0.3
 
 
-def train_gp_models(X_train, y_train_dict: dict, service_names: list, min_length_scale: float = None) -> dict:
+def train_gp_models(X_train, y_train_dict: dict, service_names: list, min_length_scale: float = None, n_restarts_optimizer: int = 5) -> dict:
     """Fits ScaledGPRegressor models for each service. X_train: one array for all services or one per service
-    (configurations_of). min_length_scale: lower limit of the length scale (default: that of scikit-learn, 1e-5)."""
+    (configurations_of). min_length_scale: lower limit of the length scale (default: that of scikit-learn, 1e-5).
+    n_restarts_optimizer: restarts of the hyperparameter search from random starting points."""
     models = {}
     length_scale_bounds = (1e-5, 1e5) if min_length_scale is None else (min_length_scale, 1e5)
     for name in service_names:
@@ -82,7 +83,7 @@ def train_gp_models(X_train, y_train_dict: dict, service_names: list, min_length
             WhiteKernel(noise_level=1e-3, noise_level_bounds=(1e-5, 1e-1))
         )
 
-        model = ScaledGPRegressor(kernel=kernel, n_restarts_optimizer=5, random_state=42)
+        model = ScaledGPRegressor(kernel=kernel, n_restarts_optimizer=n_restarts_optimizer, random_state=42)
         model.fit(configurations_of(X_train, name), y_train_dict[name])
         models[name] = model
 

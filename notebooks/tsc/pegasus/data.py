@@ -83,9 +83,12 @@ def synthetic_execution_moments(path: list, x: np.ndarray, service_seed: int = 0
     return mean, np.broadcast_to([service["noise"] ** 2 for service in services], mean.shape).copy()
 
 
+CONFIGURATION_RANGES = ((0.5, 2.0), (0.5, 2.0), (1.0, 4.0))   # range of CPU, quality and parallelism in the synthetic system
+
+
 def sample_configurations(n: int, rng: np.random.Generator) -> np.ndarray:
     """n configurations drawn uniformly from the range of the synthetic system: CPU, quality, parallelism."""
-    return np.column_stack([rng.uniform(0.5, 2.0, n), rng.uniform(0.5, 2.0, n), rng.uniform(1.0, 4.0, n)])
+    return np.column_stack([rng.uniform(low, high, n) for low, high in CONFIGURATION_RANGES])
 
 
 def _simulate(x_cfgs, path, workload, n_items, item_correlation, rng, service_seed, **options):
@@ -100,6 +103,12 @@ def _execution_times(x_train, services, rng, service_seed, tail=0.0):
     specs = {s: synthetic_service(s, service_seed) for s in services}
     return {s: execution_times(true_demand(x_train, specs[s]), specs[s]["noise"], rng.standard_normal(len(x_train)), tail)
             for s in services}
+
+
+def synthetic_execution_times(x: np.ndarray, services: list, rng: np.random.Generator, service_seed: int = 0) -> dict:
+    """One measured execution time (s) of every synthetic service at every configuration of x, service -> array: what
+    a benchmark of these configurations gives (Gaussian execution times)."""
+    return _execution_times(x, services, rng, service_seed)
 
 
 def synthetic_chain_data(path: list, level: float, coverage_check: dict, seed: int, arrival_process: str = "poisson",
