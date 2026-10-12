@@ -1,4 +1,4 @@
-The evaluation notebook[2_evaluation.ipynb](2_evaluation.ipynb) already carries most of the experiments needed for the 
+The evaluation notebook [2_evaluation.ipynb](2_evaluation.ipynb) already carries most of the experiments needed for the 
 paper, however, we need new data. For  this we use the existing structure, run some new experiments in the background, 
 and swap the data. In particular, we need the following experiments and also a folder structure that follow this.
 
@@ -9,6 +9,8 @@ are frames in the queue, the workers collect them one by one to process them.
 
 The standard case is that we have an arrival rate that sits around 50% utilization and poisson arrivals, so there is queuing.
 
+50% utilization would be that processing at the slowest service takes 10ms, and we have an arrival every 20ms at the first service.
+
 ### B1 (Base Case)
 
 We need three types of applications, with at least 5 instances (i.e., different service chains) each. I want one Computer
@@ -16,7 +18,13 @@ Vision (CV) application, one that does audio processing, and another one that do
 The idea is that we have 5 instances of each application that consist of different services (e.g., detectors, processors),
 and we predict the performance of this chain while using only the data from the other 4 instances (folds). This means that
 every service must appear in at least 2 different instances so that we have runtime data available.
-No individual benchmarks are required anymore. We need at least 300 runs per instance, we can add more later.
+No individual benchmarks are required anymore. We need at least 100/200/300 runs per instance, we can add more later.
+
+Ideally chains are more than services long.
+
+Chain 1: (object detection (Yolo n up to l)) --> transformation
+Chain 2: (face detector (models 1,2,3,4)) --> transformation
+Chain 5: object --> face
 
 ### B2 (Varying levels of evidence)
 
@@ -32,12 +40,14 @@ need the ground truth so we have to run all these different hierarchies separate
 https://www.sciencedirect.com/science/article/pii/S0167739X25001736
 https://arxiv.org/abs/2505.08145
 
+Could also be some hierarchical map-reduce.
+
 ### B4 (Varying arrival rates and pattern)
 
 This is an extension of B1, because we select one application (e.g., the CV) and conduct an experiment with different
 arrival rates and pattern. This means we sweep the lambda arrivals from low to high utilization, e.g., from 0.1 up to 1.0,
 with 3 to 4 ticks. Additionally, in a separate experiment, we sweep also the squared coefficient of arrivals so that we either 
-have completely periodic arrivals, periodic with some jitter, poisson (Ca² = 1) or batches with (Ca² = 2 or 4).
+have completely periodic arrivals (Ca² = 0), periodic with some jitter(Ca² = 0.3), poisson (Ca² = 1) or batches with (Ca² = 2 or 4).
 
 ### B5 (Varying tail behavior)
 
@@ -48,11 +58,11 @@ Skipped for now.
 Can be answered with B1 already.
 
 
-### C1 (Varying tail behavior)
+### C1 ()
 
 Can be answered with B1 already.
 
 
-### C2 (Varying percentiles)
+### C2 ()
 
 Can be answered with B1 already.
