@@ -18,6 +18,12 @@ and we predict the performance of this chain while using only the data from the 
 every service must appear in at least 2 different instances so that we have runtime data available.
 No individual benchmarks are required anymore. We need at least 300 runs per instance, we can add more later.
 
+Ideally we create application instances where each service has a quality knobs, and we always tune it to the same value.
+This means that in the CV or the audio applications, we have a resolution that determines every step, and the whole chain
+is always configured in one quality. So for instance, in run #1, we configure the CV pipeline to work with 500px across
+all services, and in run #2 we choose 700px. As before, we can draw these configurations through random uniform sampling,
+but just as a constraint that within one run, all services have the same quality level.
+
 ### B2 (Varying levels of evidence)
 
 Can be answered with B1 already.
