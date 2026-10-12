@@ -3,7 +3,9 @@ paper, however, we need new data. For  this we use the existing structure, run s
 and swap the data. In particular, we need the following experiments and also a folder structure that follow this.
 
 Importantly, the services must now support a queue each that accumulates frames until infinity if they are not processed
-and also each frame is released immediately (or reported in our simulation) to the next service.
+and also each frame is released immediately (or reported in our simulation) to the next service. This we can simulate 
+through a counter of how many data frames are supposedly in the queue: each service starts from 0, and as soon as there
+are frames in the queue, the workers collect them one by one to process them.
 
 The standard case is that we have an arrival rate that sits around 50% utilization and poisson arrivals, so there is queuing.
 
