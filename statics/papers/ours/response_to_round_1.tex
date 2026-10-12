@@ -1,0 +1,298 @@
+\documentclass{article}
+%% Language and font encodings
+\usepackage[english]{babel}
+\usepackage{times} % make the section title in Times New Roman
+\usepackage{booktabs}
+\usepackage{tabu}
+\usepackage[T1]{fontenc}
+\usepackage{enumitem}
+%% Sets page size and margins
+\usepackage[a4paper,top=1cm,bottom=1.7cm,left=1.7cm,right=1.7cm,marginparwidth=1.75cm]{geometry}
+
+%% Useful packages
+\usepackage{amsmath, amsfonts, amssymb, mathtools, cuted}
+\usepackage{graphicx}
+\usepackage[colorinlistoftodos]{todonotes}
+\usepackage[colorlinks=true, allcolors=blue]{hyperref}
+\usepackage{indentfirst}
+\usepackage{graphicx,titling}
+\usepackage{subfigure}
+\usepackage{float}
+\usepackage{threeparttable} 
+\usepackage{multirow}
+\usepackage{url}
+\usepackage{amsthm}
+\usepackage{thmtools}
+\usepackage{etoolbox}
+\usepackage{mdframed}
+
+\usepackage[most]{tcolorbox}
+
+\definecolor{green}{rgb}{0.64, 0.76, 0.68}
+\definecolor{blond}{rgb}{0.98, 0.94, 0.75}
+\definecolor{lightblue}{RGB}{173,216,230}
+
+\newcommand\hlgreen{\bgroup\markoverwith
+{\textcolor{green}{\rule[-.5ex]{2pt}{2.5ex}}}\ULon}
+
+\newcommand\hlblue{\bgroup\markoverwith
+{\textcolor{lightblue}{\rule[-.5ex]{2pt}{2.5ex}}}\ULon}
+
+\title{Response to Reviewers' Comments}
+\date{\vspace{-5ex}}
+\author{\vspace{-5ex}}
+
+% =========================================================================
+% EFFICIENT CUSTOM MACROS & ENVIRONMENTS
+% =========================================================================
+\newtcbtheorem[auto counter, number within = section]{cmt}{Comment}{
+    breakable,
+    colbacktitle = black!60!white, 
+    colframe = black!60!white,
+    colback = black!5!white,
+    fonttitle=\bfseries,
+    before skip=0.4cm,
+    after skip=0.2cm
+}{t}
+
+% Standardized Response Macro: Handles formatting and vertical spacing uniformly
+\newcommand{\Response}[1][]{%
+    \noindent\underline{\textbf{Response:}}\par\vspace{0.2cm}%
+    #1\par\vspace{0.6cm}%
+}
+% =========================================================================
+
+\begin{document}
+ 
+\maketitle
+
+\noindent \textbf{Title: }\texttt{Building Probabilistic Performance Guarantees for Composable Computing Services} \\
+\noindent \textbf{Submission ID: } \texttt{34}\\
+\noindent \textbf{Authors: } \texttt{[Insert Authors Here]}\\
+
+% \hrulespace
+
+% =========================================================================
+% SECTION 1: REVIEWER 1
+% =========================================================================
+\section{Response to Reviewer 1} 
+
+\begin{cmt*}{Summary}{}
+The paper introduces a stochastic approach based on Gaussian Processes (GP) to account for uncertainty in distributed systems when services are chained. The proposed method is evaluated across three distinct use cases: QR code detection, LiDAR processing, and object detection.  
+
+The paper presents an interesting perspective on handling uncertainty when predicting task execution times in composable and distributed systems. However, several areas require further clarification and strengthening before publication.
+\end{cmt*}
+\Response
+
+\begin{cmt}{Baseline Comparison}{}
+The evaluation would be significantly stronger if it included a clear comparison with more traditional modeling techniques. Specifically, the authors should compare their Gaussian Process approach against standard baselines, such as methods rooted in Queueing Theory.
+\end{cmt}
+
+\Response Ok, some baselines, that we can do
+
+\url{https://www.youtube.com/watch?v=Hda5tMrLJqc}
+
+\begin{cmt}{Dynamic Workloads}{}
+There is a concern regarding how the Gaussian Process model handles dynamic workloads, as data scarcity in fluctuating environments can degrade model accuracy.
+\end{cmt}
+\Response
+
+I think that \textit{model inaccuracy under data scarcity} would be exactly what the Gaussian process can compensate. The external dynamism in the environment should not affect the internal processing capacity. If the goal is to give a precise estimate of the overall throughput, you will naturally have to model unexplored arrival rates well. This we can do \textbf{statically} by safeguarding that extrapolated configurations are still valid, and \textbf{dynamically}, by exploring areas with high uncertainty. As a future analysis, we could also analyze \textbf{heteroscedastic GPs}, which support different degrees of noise across the model.
+
+
+\begin{cmt}{Polynomial Relationship Assumption}{}
+The paper states that the proposed approach is applicable when a polynomial relationship exists between resource usage and throughput. However, in practical distributed systems, this relationship is rarely polynomial and is more commonly logarithmic or exponential. 
+
+The authors need to provide a more detailed discussion on the limitations of this assumption. Please support the validity of the polynomial assumption using either empirical evidence from your experiments or relevant theoretical references.
+\end{cmt}
+
+\Response
+
+From a queuing theory perspective, which the reviewer likely takes, it is correct that the number of resources has commonly a logarithmic impact on the waiting time. Regardless of the formal structure, we can easily support it with empirical evidence.
+
+
+\begin{cmt}{Minor: Figure Legibility}{}
+Figures 4-6 are currently too small, blurry, and difficult to read. Please increase their resolution and scaling to improve legibility.
+\end{cmt}
+\Response
+
+ok sir!
+
+\newpage
+% =========================================================================
+% SECTION 2: REVIEWER 2
+% =========================================================================
+\section{Response to Reviewer 2}
+
+\begin{cmt*}{Summary and Strengths}{}
+The paper focuses on predicting service performance across unexplored configuration spaces where exhaustive benchmarking would be infeasible. It proposes a framework based on Gaussian Processes that models performance probabilistically for individual services and composes them into multi-stage pipelines using Decoupled Variational Inference. Experiments on three real services show promising but mixed performance predictions and introduce a readiness score for a safe configuration offering.
+
+\textbf{Strengths:}
+\begin{itemize}[noitemsep,topsep=0pt]
+    \item The paper focuses on a real challenge of exponential configuration spaces, making exhaustive benchmarking infeasible in modern service-oriented and edge computing environments.
+    \item Using Decoupled Variational Inference to compose GP models seems like a good potential solution that preserves provider autonomy without requiring a centralised orchestrator (provided it is properly specified).
+    \item The introduced readiness score is an actionable metric that concretely links expected benefit to SLO violation risk for service providers.
+    \item The deployment of the prototype with real services.
+\end{itemize}
+\end{cmt*}
+
+\Response
+
+\begin{cmt}{Problem Statement Unification}{}
+Looking at the introduction, it is hard to understand the actual problem being addressed. There seem to be two distinct problems: the exponential configuration space, which makes exhaustive benchmarking infeasible, and the need to support dynamic service composition at machine speed. The transition between the two feels abrupt, leaving the reader to infer the connection. These two have not been unified into a single and clear problem statement.
+\end{cmt}
+\Response
+
+Yes, it's correct that the two are not formally defined; this we can do.
+
+\begin{cmt}{Uncertainty Characterization}{}
+The introduction uses ``uncertainty'' to motivate the work, but its use seems ambiguous. In my understanding, it has been used to cover at least two different things: we haven't sampled a given configuration, so we don't know its performance, and the runtime environment is inherently stochastic due to shared infrastructure and fluctuating workloads. The paper conflates these without distinction, which matters because they have different implications for how a model should be designed and how guarantees should be interpreted.
+\end{cmt}
+\Response
+
+I also agree, but how could our model distinguish between them? And how relevant is it really? (Similar to R1C2)
+
+
+\begin{cmt}{Suitability of Probabilistic Performance Guarantees (PPGs)}{}
+The ``problem'' and the proposal's suitability are not well connected. For example, the introduction moves directly from the ``problem description'' to proposing PPGs; the suitability of PPGs is asserted rather than argued for: there is no explanation of why a probabilistic framing is preferable to, say, deterministic worst-case bounds or conservative over-provisioning. 
+\end{cmt}
+\Response
+
+Also a good point; I think the best strategy here is to do some hypothesis about how and why our method should be better than some baselines. Suppose we have baselines...
+
+\begin{cmt}{Motivation and Extrapolation Behavior of Gaussian Processes}{}
+The choice of Gaussian Processes is similarly unmotivated; the three properties listed in the introduction are generic and fail to argue why GPs are specifically suited to this problem over alternatives such as Bayesian neural networks or random forests with uncertainty estimates. 
+%
+Specifically, ``Allows extrapolating from existing knowledge'' seems like the most questionable claim. GPs are known to be reliable interpolators within the observed data range, but their extrapolation behavior is governed by the kernel and prior, and can be unreliable outside the training distribution. As the paper targets the latter (unseen configurations), making this claim feels like overselling. The paper later mentions other specific advantages of GPs in the methodology, and they seem more reasonable. I think the paper would benefit from having a stronger introduction that establishes the problem and requirements first, before arguing why PPGs and GPs uniquely satisfy them.
+\end{cmt}
+\Response
+
+First, this gives us two baselines, second, we need to rewrite the introduction.
+
+\begin{cmt}{Related Work and Deep GPs}{}
+The section largely presents background and little related work. Even those related works discussed do not really treat services and/or service composition. Also, the distinction from standard Deep Gaussian Processes is asserted on the grounds of autonomy preservation alone, without a technical argument for why this is non-trivial.
+\end{cmt}
+\Response
+
+The first point can be easily extended, the second point I can't really understand right now
+
+\begin{cmt}{Modeling Assumptions (Monotonicity vs. Polynomial)}{}
+The approach relies on a ``core assumption'' that throughput increases monotonically with resources and decreases with quality. This is presented as the core modeling assumption, yet it is not formally enforced anywhere in the approach. The GP itself does not enforce this assumption either; it learns whatever functional relationship the training data exhibits. So, it is unclear how this assumption is technically relevant to the model. I am afraid that Eq. 2 adds no value: it neither formalises the assumption nor specifies the GP.
+
+There is a more consequential assumption that appears only in the Limitations section (Section 3.4). It says that the relationships between resources, quality, and throughput are polynomial; this is far more restrictive and worth discussing upfront.
+\end{cmt}
+\Response
+
+First, I agree that the assumptions (i.e., monotonicity) should be clarified sooner; second, I think that with enforced she means that predictions are not corrected according to these constraints---similar to R1C2, which stressed that configurations will be inaccurate (or invalid) when extrapolating. Altogether, these assumptions should be moved to the problem description.
+
+\begin{cmt}{Decoupled Variational Inference Derivation}{}
+The model composition relies on Decoupled Variational Inference via Variational ELBO. This seems to be a key technical mechanism, and yet it is described only at a conceptual level with no formal derivation. This makes it hard to assess the correctness and difficult to reproduce.
+\end{cmt}
+\Response
+
+Ok, we can add some formalisms. Also this point will have to be discussed in comparison to the baselines (e.g., MC Simulation).
+
+\begin{cmt}{Optimization Terminology}{}
+Section 3.3 states that a solver with gradient descent is used to ``converge towards optimal service configurations''. I think the meaning of this needs a better elaboration, as the use of ``optimal'' appears technically incorrect. Gradient descent is a local optimisation method (it converges to a local optimum, not a global one). The paper partially acknowledges this by running the solver 25 times from random starting positions, but multiple restarts still cannot guarantee global optimality. The result is therefore a locally optimal candidate at best, found on a GP surface that is itself an approximation.
+\end{cmt}
+\Response
+
+the guy is right!
+
+\begin{cmt}{Service Selection and Configuration Space}{}
+I am puzzled by the three services; the paper offers no justification for this choice. Three services is a low number, and there is no argument for why they are representative, or why these three specifically were selected beyond being loosely described as ``diverse''. The evaluation would be more convincing with either principled selection criteria or a broader set of services. This has an impact on the generalisation of the results - whether they would generalise to other service types. Moreover, what is the size of the configuration space with three services?
+\end{cmt}
+\Response
+
+Simple part: give the configuration space. Difficult part: argue why these services or maybe even extend.
+
+\begin{cmt}{Service Composition Realism}{}
+Regarding service composition, the rationale for chaining multiple instances of the same service is not well explained. Is chaining five identical CV services or six identical QR services representative of realistic microservice architectures? Would not instances of the same service type typically run in parallel for load balancing rather than in sequence? Without a clear purpose, it appears to me that these chains are attempts to pad the evaluation.
+\end{cmt}
+\Response
+
+To be fair, the chains were quite fabricated
+
+\begin{cmt}{Manually Injected Bottlenecks}{}
+The throughput bottleneck in the composition experiment is manually injected into the training data rather than observed. Does this make the composition framework essentially evaluated on artificially constructed data? How does this affect validity?
+\end{cmt}
+\Response
+
+Of course this would never affect the validity....or would it? In any case, I can provide a \textit{threads to validity} section.
+
+\begin{cmt}{Hyperparameters and Settings Justification}{}
+It appears to me that some choices around the experiments are given without justification, sensitivity analysis, or ablation. For example, the 5th percentile for uncertainty penalisation, the beta penalty factor (2.5), and the SLSQP optimiser for Pareto inference.
+\end{cmt}
+\Response
+
+true, need to justify these magic numbers
+
+\begin{cmt}{GP Kernel Choice}{}
+The choice of kernel is a critical modeling decision for the GP as it encodes assumptions about smoothness and structure of the learned function. Which kernel is used?
+\end{cmt}
+\Response
+
+some rbf kernel together with something else, but don't ask me why we did so
+
+\begin{cmt}{Baseline Evaluations}{}
+I wonder why an empirical comparison with existing methods (e.g., RL-based autoscalers) is not considered, especially given the small experimental setup.
+\end{cmt}
+\Response
+
+another good idea for a baseline!
+
+\begin{cmt}{CV Service Prediction Errors}{}
+The CV service seems ``special'' as it consistently shows high prediction error across experiments. What is special about this service?
+\end{cmt}
+\Response
+
+Maybe just the internal uncertainty...
+
+\begin{cmt}{Clarity, Notation, and Minor Items}{}
+\begin{itemize}[noitemsep,topsep=0pt]
+    \item ``... autoscaling it has been shown [17] that a large...'' $\rightarrow$ Why a reference in the middle of the sentence?
+    \item The paper uses the word ``physical'' many times with an unclear meaning. For example, ``... configurations, also because physically deploying a solution is costly''. What is meant here by ``physically''? As opposed to what? Another example is ``We evaluated our approach by analyzing three physical services'' $\rightarrow$ I do not understand what a physical service is.
+    \item $m$ in Eq. 1 is not defined.
+    \item DNN acronym not defined.
+    \item Some acronyms are defined multiple times.
+    \item ``... and getting its sd is $O(n^2)$.'' $\rightarrow$ \textit{sd} is not defined.
+    \item Figure 1 does not appear to be that informative to me. It is quite abstract: at least the employed techniques per step could have been depicted, and there could be better matching between the depicted components and subsections.
+\end{itemize}
+\end{cmt}
+\Response
+
+some minor things
+
+\newpage
+% =========================================================================
+% SECTION 3: REVIEWER 3
+% =========================================================================
+\section{Response to Reviewer 3}
+
+\begin{cmt*}{Summary and Strengths}{}
+The paper targets an interesting direction of providing probabilistic guarantee for service quality in terms of personalised SLAs, which makes sense for broad applications that rely on configurable remote services, such as cloud-based services.
+
+\textbf{Strengths:}
+\begin{enumerate}[noitemsep,topsep=0pt]
+    \item The paper is appealing in the research problem and motivation, and proposes the appropriate methodology with a technical solution to address the problem.
+    \item Full source code is provided, well-annotated to facilitate reproduction.
+\end{enumerate}
+\end{cmt*}
+
+\Response
+
+\begin{cmt}{Service Level Scope vs. Composition Workflow}{}
+Performance estimation is more for individual services only -- it feels redundant to mention ``composable services'' at all because the performance is considered at the individual service level, while the style and approaches to service composition are largely untouched, making it unclear how the work applies to more complex Composited Services than that consist of only a sequential workflow.
+\end{cmt}
+\Response
+
+hmmm not sure what to say. Yes, performance is primarily analyzed on an individual level, but the global performance is likewise the performance of the weakest link in the chain.
+
+\begin{cmt}{Lack of State-of-the-Art Baselines}{}
+Experiments are conducted without a comparison with a large pool of SOTA baselines. They have focused on investigating the performance and characteristics of the proposed approach itself. Without such a comparison, it is hard to say how the approach performs when compared with peers or similar approaches either in literature or practice.
+\end{cmt}
+\Response
+
+Same as R1C1 and R2C14
+
+\end{document}

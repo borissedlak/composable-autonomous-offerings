@@ -9,13 +9,14 @@ modeled on their own.
 |---|---|
 | `1_method_synthetic.ipynb` | The method: GP model per service, node bounds, compositions, and the baselines of the method section. |
 | `1_method_real.ipynb` | The method on real services: the same steps as `1_method_synthetic.ipynb` on the testbed campaign (training on run statistics, emulated queueing), without the sections that need a synthetic system. |
-| `2_evaluation.ipynb` | The paper's evaluation (Section V): setup, coverage and tightness experiments B.1 to B.6 on synthetic or real data (`data_source`), outline of C. |
+| `2_evaluation.ipynb` | The paper's evaluation (Section V): setup, coverage and tightness experiments B.1 to B.6 and the iterative experiments C.1 and C.2 on synthetic or real data (`data_source`). |
 | `explain_1_why_chernoff_mgf.ipynb` | Why the bounds use moment generating functions and Chernoff bounds, and which alternatives exist. |
 | `explain_2_why_poisson_is_loose.ipynb` | Why the SNC node bound is loose under Poisson arrivals. |
 | `explain_3_how_pegasus_bounds_compose.ipynb` | The two versions of Pegasus (per-node union bound, SNC): the math from one queue upward, strengths and weaknesses. |
 | `explain_4_how_fluxion_composes.ipynb` | How the Fluxion baseline composes latency percentiles. |
+| `explain_5_what_kingman_inputs_cost.ipynb` | Why the Kingman baseline does not hold in B.1: its queueing formula with predicted, true and pessimistic inputs. |
 
-The two numbered notebooks belong to the paper; the `explain_` notebooks each answer one question and can be read on
+The numbered notebooks belong to the paper; the `explain_` notebooks each answer one question and can be read on
 their own. Start with `explain_3` for the fundamentals of the two bounds.
 
 ## Helper code: `pegasus/`
