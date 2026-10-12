@@ -20,11 +20,11 @@ and we predict the performance of this chain while using only the data from the 
 every service must appear in at least 2 different instances so that we have runtime data available.
 No individual benchmarks are required anymore. We need at least 100/200/300 runs per instance, we can add more later.
 
-Ideally chains are more than services long.
+Ideally chains are around 3 to 6 services long.
 
 Chain 1: (object detection (Yolo n up to l)) --> transformation
 Chain 2: (face detector (models 1,2,3,4)) --> transformation
-Chain 5: object --> face
+Chain 5: object --> face; both are already known from the other
 
 Ideally we create application instances where each service has a quality knobs, and we always tune it to the same value.
 This means that in the CV or the audio applications, we have a resolution that determines every step, and the whole chain
