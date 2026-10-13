@@ -50,6 +50,23 @@ Could also be some hierarchical map-reduce.
 
 #### Proposed experiment for B3
 
+![Overview of the proposed experiment B3](../../figures/tsc/b3_experiment_setup.jpg)
+
+*Overview of the experiment, drawn by [figure_b3_experiment.py](figure_b3_experiment.py)
+([pdf](../../figures/tsc/b3_experiment_setup.pdf)); the paragraphs below give the details of every panel.*
+- *(a) Application.* Boxes are services and arrows show where a result goes; the example tree has three levels. An
+  arriving frame goes to all leaves (detectors) at once, and every transformation service merges the results of its
+  two children.
+- *(b) Merge rule.* A timeline of one frame, called frame k, at one aggregator, with example times in milliseconds
+  on the horizontal axis. The two upper rows show when each child processes frame k, the third row what happens to
+  frame k at the aggregator, and the fourth row what the worker of the aggregator is busy with. Look at the third
+  row: frame k first waits for the result of the slower child, then in the queue until the worker has finished the
+  frame before, and is then processed once, as one item. The three dotted lines are the times that are stored.
+- *(c) Hierarchies.* Every small tree is one hierarchy that is run on its own, with its number of levels and services
+  below it; the narrow trees on the right replace the two largest trees if the testbed has too few cores.
+- *(d) One run.* A bar whose length is the number of frames of a run, to scale: calibration, warm-up, and the measured
+  frames in their consecutive batches.
+
 **Application: hierarchical camera analytics (map-reduce style).** It reuses the services of the CV application of B1,
 so no new service is needed and the training data of every service comes from the B1 runs.
 - *Leaves (map):* the detectors of B1, alternating between the object detector (Yolo n up to l) and the face detector.

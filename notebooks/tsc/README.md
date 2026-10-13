@@ -64,7 +64,9 @@ and `service_gp`; `finetuning` on `baselines`, `baselines_chain`, `evaluation` a
 ## Other files
 
 `new_experiments.md` is the specification of the testbed campaign: which applications, chains, arrival rates and
-arrival patterns the experiments B.1 to B.6, C.1 and C.2 need as real data.
+arrival patterns the experiments B.1 to B.6, C.1 and C.2 need as real data. `figure_b3_experiment.py` draws the
+schematic of the proposed experiment B3 that this file shows (`b3_experiment_setup` in `figures/tsc/`); the script
+needs no data and is run like the figure scripts above.
 
 ## `archive/`
 
