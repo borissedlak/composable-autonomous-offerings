@@ -9,7 +9,7 @@ modeled on their own.
 |---|---|
 | `1_method_synthetic.ipynb` | The method: GP model per service, node bounds, compositions, and the baselines of the method section. |
 | `1_method_real.ipynb` | The method on real services: the same steps as `1_method_synthetic.ipynb` on the testbed campaign (training on run statistics, emulated queueing), without the sections that need a synthetic system. |
-| `2_evaluation.ipynb` | The paper's evaluation (Section V): setup, coverage and tightness experiments B.1 to B.6 and the iterative experiments C.1 and C.2 on synthetic or real data (`data_source`). |
+| `2_evaluation.ipynb` | The paper's evaluation (Section V) on synthetic or real data (`data_source`): setup (A), the coverage and tightness experiments B.1 to B.6 including B.2b (which configuration to benchmark next), and the iterative experiments C.1 (fine-tuning a bound with end-to-end samples) and C.2 (choosing a faster configuration of a chain). A last section holds real-data results that do not fit the paper's structure. |
 | `explain_1_why_chernoff_mgf.ipynb` | Why the bounds use moment generating functions and Chernoff bounds, and which alternatives exist. |
 | `explain_2_why_poisson_is_loose.ipynb` | Why the SNC node bound is loose under Poisson arrivals. |
 | `explain_3_how_pegasus_bounds_compose.ipynb` | The two versions of Pegasus (per-node union bound, SNC): the math from one queue upward, strengths and weaknesses. |
@@ -19,10 +19,21 @@ modeled on their own.
 The numbered notebooks belong to the paper; the `explain_` notebooks each answer one question and can be read on
 their own. Start with `explain_3` for the fundamentals of the two bounds.
 
+## Figure scripts
+
+Scripts that draw one figure of the paper each. Both are drafts: the file names of their outputs end in `_draft`.
+Run a script from `notebooks/tsc/` with the venv, e.g. `../../venv/Scripts/python draft_problem_figure.py`; the
+script writes a `.pdf` and a `.jpg` to `figures/tsc/`.
+
+| Script | Figure | Data | Output in `figures/tsc/` |
+|---|---|---|---|
+| `draft_problem_figure.py` | The two problems the paper addresses (Section II-A): per-service execution times do not add up to the end-to-end tail latency, and an accurate point prediction is not a guarantee. | Real: chain `04e-chain-qr-cv-face` of the testbed campaign, with emulated queueing as in `2_evaluation.ipynb`. | `problem_overview_draft` |
+| `draft_methodology_figure.py` | The methodology overview (Fig. 1): learn one model per service, bound each service as a queue, compose the service bounds for a pipeline that is never executed. | Synthetic: the services `s1`, `s2`, `s3` of `pegasus/data.py`, on a setting chosen for readability; an illustration, not a result of the evaluation. | `methodology_overview_draft` |
+
 ## Helper code: `pegasus/`
 
-The notebooks only call these functions; no method is implemented inside a notebook. Import them as
-`from pegasus.bounds import ...`, with the notebook's working directory at `notebooks/tsc/`.
+The notebooks and figure scripts only call these functions; no method is implemented inside a notebook. Import them
+as `from pegasus.bounds import ...`, with the working directory at `notebooks/tsc/`.
 
 | Module | Contents |
 |---|---|
@@ -34,10 +45,26 @@ The notebooks only call these functions; no method is implemented inside a noteb
 | `data.py` | Data of the evaluation: the seeded generator of synthetic services, the simulated chain data, and the entry points for both data sources. |
 | `real_data.py` | The real data source: reader of the testbed campaign in `statics/results_milos/`, and the emulation that replays its measured processing times through FIFO queues. |
 | `evaluation.py` | What the experiments of the evaluation share: model fitting, the comparison of all methods, coverage, figures. |
-
+| `exploration.py` | Experiment B.2b: sampling strategies that pick the next configuration to benchmark (random, Sobol sequence, and four acquisition functions on the GPs), for the synthetic services and for the measured runs of a real service. |
+| `finetuning.py` | Experiment C.1: split-conformal calibration of a bound with end-to-end samples, and the baselines that are trained on runs of the chain itself (Quantile Sum, Fluxion-style). |
+| `optimization.py` | Experiment C.2: the SLO-fulfillment objective of a chain, and the optimizers that choose the next run with a latency method and refit its models after every evaluated run. |
 Dependencies point one way: `bounds` and `simulation` depend on nothing here; `service_gp` on nothing; `baselines` on
 `service_gp`; `baselines_chain` on `baselines`, `bounds` and `service_gp`; `data` on `simulation`; `real_data` on `data` and
-`simulation`; `evaluation` on `baselines`, `bounds` and `service_gp`.
+`simulation`; `evaluation` on `baselines`, `bounds` and `service_gp`; `exploration` on `data`, `evaluation`, `real_data`
+and `service_gp`; `finetuning` on `baselines`, `baselines_chain`, `evaluation` and `service_gp`; `optimization` on
+`evaluation`.
+
+## Data and outputs outside this folder
+
+| Path | Contents |
+|---|---|
+| `statics/results_milos/` | The testbed campaign that `real_data.py` reads: one folder per experiment (single services, chains, trees, deep chains). The real data source of `1_method_real.ipynb`, `2_evaluation.ipynb`, `explain_5` and `draft_problem_figure.py` needs this folder. The folder is not part of the repository: it is not committed, so a fresh clone does not contain it. |
+| `figures/tsc/` | Outputs of the figure scripts. |
+
+## Other files
+
+`new_experiments.md` is the specification of the testbed campaign: which applications, chains, arrival rates and
+arrival patterns the experiments B.1 to B.6, C.1 and C.2 need as real data.
 
 ## `archive/`
 
