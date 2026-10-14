@@ -17,6 +17,10 @@ modeled on their own.
 | `explain_5_what_kingman_inputs_cost.ipynb` | Why the Kingman baseline does not hold in B.1: its queueing formula with predicted, true and pessimistic inputs. |
 | `explain_6_when_load_changes_execution_times.ipynb` | When the load changes the execution time of a service (CPU throttling, warm-up after idle), shown on the testbed campaign, and two remedies: enough cores for the workers, and a benchmark in the slowest state. |
 
+`prototype_multi_server.ipynb` (branch `multi-server` only) is a prototype outside the paper: every service as a FIFO
+pool of `parallelism` workers instead of one server, execution-time models without `parallelism` as an input (with
+and without the load per worker), and the Pegasus bounds for chains of pools, compared with today's model.
+
 The numbered notebooks belong to the paper; the `explain_` notebooks each answer one question and can be read on
 their own. Start with `explain_3` for the fundamentals of the two bounds.
 
@@ -50,7 +54,8 @@ as `from pegasus.bounds import ...`, with the working directory at `notebooks/ts
 | `finetuning.py` | Experiment C.1: split-conformal calibration of a bound with end-to-end samples, and the baselines that are trained on runs of the chain itself (Quantile Sum, Fluxion-style). |
 | `optimization.py` | Experiment C.2: the SLO-fulfillment objective of a chain, and the optimizers that choose the next run with a latency method and refit its models after every evaluated run. |
 | `load_dependence.py` | `explain_6`: how often a service of the campaign used up its CPU quota, how the processing time of an item depends on the state of its service (next to another item, back to back, after idle), and two simulators (a worker pool under a CPU quota, a service that is slower after idle). |
-Dependencies point one way: `load_dependence` depends on `bounds`, `real_data` and `simulation`; `bounds` and `simulation` depend on nothing here; `service_gp` on nothing; `baselines` on
+| `multi_server.py` | `prototype_multi_server.ipynb`: a chain of FIFO pools (simulator and emulation of the campaign), the bounds of a pool as c single-server lanes, and the execution-time models without `parallelism` as an input. |
+Dependencies point one way: `multi_server` depends on `baselines`, `bounds`, `real_data`, `service_gp` and `simulation`; `load_dependence` depends on `bounds`, `real_data` and `simulation`; `bounds` and `simulation` depend on nothing here; `service_gp` on nothing; `baselines` on
 `service_gp`; `baselines_chain` on `baselines`, `bounds` and `service_gp`; `data` on `simulation`; `real_data` on `data` and
 `simulation`; `evaluation` on `baselines`, `bounds` and `service_gp`; `exploration` on `data`, `evaluation`, `real_data`
 and `service_gp`; `finetuning` on `baselines`, `baselines_chain`, `evaluation` and `service_gp`; `optimization` on
