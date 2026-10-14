@@ -20,9 +20,7 @@ from scipy import stats
 from sklearn.model_selection import GroupKFold
 
 from .real_data import CAMPAIGN, node_configurations
-from sklearn.gaussian_process.kernels import ConstantKernel, Matern, WhiteKernel
-
-from .service_gp import MIN_LENGTH_SCALE, ScaledGPRegressor, train_gp_models
+from .service_gp import MIN_LENGTH_SCALE, train_gp_models
 
 CAMPAIGN_V2 = CAMPAIGN.parent / "results_milos_v2"
 # Input sets: name -> the columns of service_runs that are added to the quality knobs
@@ -94,16 +92,6 @@ def input_features(runs: pd.DataFrame, input_set: str) -> pd.DataFrame:
     return x
 
 
-def fit_ard_gp(x: np.ndarray, y: np.ndarray, n_restarts: int) -> ScaledGPRegressor:
-    """The GP of train_gp_models (Matern 2.5 times a constant, plus white noise, the same bounds and the lower limit
-    MIN_LENGTH_SCALE), but with one length scale per input (automatic relevance determination): the hyperparameter
-    search can give an input that does not matter a long length scale, so that it hardly changes the distance between
-    two configurations. The inputs are standardized, so the length scales are in standard deviations of their input."""
-    kernel = (ConstantKernel(1.0, (1e-2, 1e2)) * Matern(length_scale=np.ones(x.shape[1]), length_scale_bounds=(MIN_LENGTH_SCALE, 1e5), nu=2.5)
-              + WhiteKernel(noise_level=1e-3, noise_level_bounds=(1e-5, 1e-1)))
-    return ScaledGPRegressor(kernel=kernel, n_restarts_optimizer=n_restarts, random_state=42).fit(x, y)
-
-
 def cross_validate(service: str, input_set: str, seeds=(0, 1, 2), n_folds: int = 5, n_restarts: int = 2,
                    campaign: Path = CAMPAIGN, ard: bool = False) -> pd.DataFrame:
     """Grouped k-fold cross-validation of the GP of `service` with the inputs `input_set`, repeated for every seed
@@ -111,7 +99,8 @@ def cross_validate(service: str, input_set: str, seeds=(0, 1, 2), n_folds: int =
     mse (ms^2, of the predicted run mean), var_test (ms^2, variance of the held-out run means) and mse_log (of the
     natural logarithm, approximately the mean squared relative error). The splits depend only on the service and the
     seed, so all input sets are evaluated on the same folds.
-    With ard, the GP has one length scale per input (fit_ard_gp), inputs with the same value in every run are left
+    With ard, the GP has one length scale per input (train_gp_models with ard=True; without, one length scale for all
+    inputs, as in explain_7 and Section 2 of explain_8), inputs with the same value in every run are left
     out, and every row also holds the fitted length scale of every input (columns "length_scale_<input>", in standard
     deviations of the input), the range of every input in the training runs (columns "range_<input>", largest minus
     smallest value, in the same unit) and the fitted signal variance (column "signal_variance", in units of the variance of
@@ -130,10 +119,7 @@ def cross_validate(service: str, input_set: str, seeds=(0, 1, 2), n_folds: int =
         for fold, (train, test) in enumerate(GroupKFold(n_folds).split(y, groups=relabeled)):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")   # convergence warnings of the hyperparameter search
-                if ard:
-                    model = fit_ard_gp(x[train], np.log(y[train]), n_restarts)
-                else:
-                    model = train_gp_models(x[train], {service: np.log(y[train])}, [service], MIN_LENGTH_SCALE, n_restarts)[service]
+                model = train_gp_models(x[train], {service: np.log(y[train])}, [service], MIN_LENGTH_SCALE, n_restarts, ard=ard)[service]
             predicted = np.exp(model.predict(x[test]))
             row = dict(service=service, input_set=input_set, seed=seed, fold=fold, n_test=len(test),
                        mse=np.mean((predicted - y[test]) ** 2), var_test=np.var(y[test]),
@@ -148,7 +134,7 @@ def cross_validate(service: str, input_set: str, seeds=(0, 1, 2), n_folds: int =
 
 
 def range_effect(length_scale, input_range, signal_variance):
-    """How much the GP of fit_ard_gp lets its prediction differ between the smallest and the largest value of one input
+    """How much a GP of train_gp_models with ard=True lets its prediction differ between the smallest and the largest value of one input
     when every other input is fixed: the standard deviation of f(x_max) - f(x_min) under the fitted kernel,
     sqrt(2 * signal_variance * (1 - k(range / length_scale))), with k the Matern correlation (nu = 2.5). Unit: standard
     deviations of ln(run mean) in the training runs. Unlike the length scale alone, it separates an input without effect
