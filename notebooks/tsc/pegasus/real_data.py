@@ -1,15 +1,22 @@
-"""Reader of the testbed campaign in `statics/results_milos/` and the emulation that turns its measurements into chain
-data: the measured processing times of the real services are replayed through a chain of FIFO single-server queues
-(`fifo_chain_latencies` in `simulation.py`).
+"""Reader of the two testbed campaigns, `statics/results_milos/` (CAMPAIGN, the first campaign) and
+`statics/results_milos_v2/` (CAMPAIGN_V2, the B1 experiments of `new_experiments.md`), and the emulation that turns
+their measurements into chain data: the measured processing times of the real services are replayed through a chain of
+FIFO single-server queues (`fifo_chain_latencies` in `simulation.py`). An experiment is named by its folder, and
+campaign_of finds the campaign that holds it.
 
-Why an emulation: every service of the testbed releases its items once per second (`discipline: window`) and
+Why an emulation: in the first campaign every service releases its items once per second (`discipline: window`) and
 processes them with several workers, so the measured latencies consist mostly of the wait for the release and do not
 come from a FIFO single-server queue. The processing times do not depend on that discipline. The emulation therefore
 keeps what is real about the services (how the processing time depends on the configuration, and its distribution)
-and replaces the queueing by the FIFO model that the bounds describe. Its latencies are not testbed measurements.
+and replaces the queueing by the FIFO model that the bounds describe. Its latencies are not testbed measurements. The
+services of the second campaign queue FIFO; the emulation is kept for both, so that the ground truth is computed the
+same way.
 
-Unseen compositions: the methods are trained on a service measured alone or inside pipelines whose topology differs
-from the chain that is evaluated (training_pool); no run of the evaluated topology is used for training.
+Held-out runs (training_exclusion): in the first campaign, the methods are trained on a service measured alone or
+inside pipelines whose topology differs from the chain that is evaluated; no run of the evaluated topology is used for
+training. The second campaign has one topology per application, and every service occurs only in that topology, so
+there the methods are trained on the runs of the other experiments of the campaign that contain the service (e.g. the
+runs with one to four workers for the chain with one worker); no run of the evaluated experiment is used for training.
 
 Folder layout: `<experiment>/<start time>/dataset.csv` has one row per run and node with the configuration and summary
 statistics; `runs/<run>/trace_steps.csv` (pipelines) has one row per request and node; `runs/<run>/<node>/records.csv`
@@ -26,6 +33,7 @@ from .data import ChainData
 from .simulation import fifo_chain_latencies, quantile_with_lower_bound, sample_interarrival_times
 
 CAMPAIGN = Path(__file__).resolve().parents[3] / "statics" / "results_milos"
+CAMPAIGN_V2 = CAMPAIGN.parent / "results_milos_v2"
 POOL_COLUMNS = ("run_id", "experiment", "node", "alone", "mean_s", "spread_s")   # columns of training_pool that are not knobs
 NORMAL_P95 = 1.6449                                                              # 95th percentile of the standard normal distribution
 
@@ -33,9 +41,14 @@ NORMAL_P95 = 1.6449                                                             
 # ------------------------------------------------------------------------------
 # Reading the campaign
 # ------------------------------------------------------------------------------
+def campaign_of(experiment: str) -> Path:
+    """The campaign folder that holds `experiment`: CAMPAIGN_V2 if it has a folder of that name, else CAMPAIGN."""
+    return CAMPAIGN_V2 if (CAMPAIGN_V2 / experiment).is_dir() else CAMPAIGN
+
+
 def experiment_folder(experiment: str) -> Path:
-    """Folder of the one execution of `experiment` (e.g. "04e-chain-qr-cv-face") in the campaign."""
-    folders = sorted(path for path in (CAMPAIGN / experiment).iterdir() if path.is_dir())
+    """Folder of the one execution of `experiment` (e.g. "04e-chain-qr-cv-face" or "b1-vision-1-single")."""
+    folders = sorted(path for path in (campaign_of(experiment) / experiment).iterdir() if path.is_dir())
     assert len(folders) == 1, f"{experiment}: expected one execution, found {len(folders)}"
     return folders[0]
 
@@ -50,21 +63,22 @@ def run_table(experiment: str) -> pd.DataFrame:
 
 def node_configurations(table: pd.DataFrame, node: str) -> pd.DataFrame:
     """Configuration of `node` in every run of `table`, one row per run (index: run_id) and one column per knob
-    (cores, parallelism and the knobs of the service), without the prefix "<node>.". Left out: the service name and
-    the memory limit, which are the same in every run, and "rps", the arrival rate of a source node in a tree, which
-    is a property of the load and not of the service."""
+    (cores, parallelism and the knobs of the service), without the prefix "<node>.". Left out: the service name, the
+    memory limit and the queueing discipline (second campaign only), which are the same in every run, and "rps", the
+    arrival rate of a source node in a tree, which is a property of the load and not of the service."""
     runs = table.drop_duplicates("run_id").set_index("run_id")
-    columns = [column for column in runs.columns if column.startswith(node + ".") and not column.endswith((".service", ".memory", ".rps"))]
+    columns = [column for column in runs.columns
+               if column.startswith(node + ".") and not column.endswith((".service", ".memory", ".discipline", ".rps"))]
     return runs[columns].rename(columns=lambda column: column[len(node) + 1:])
 
 
 @lru_cache(maxsize=None)
-def campaign_nodes() -> pd.DataFrame:
-    """One row per experiment of the campaign and node: experiment, pipeline (the topology as the campaign writes it,
+def campaign_nodes(campaign: Path = CAMPAIGN) -> pd.DataFrame:
+    """One row per experiment of `campaign` and node: experiment, pipeline (the topology as the campaign writes it,
     e.g. "qr->cv cv->face"; the node name for a service measured alone), alone (the experiment measures one service
-    alone), node and service."""
+    alone), node and service. The folders "campaigns" and "results" of the first campaign hold no experiments."""
     rows = []
-    for folder in sorted(path for path in CAMPAIGN.iterdir() if path.is_dir() and path.name[0].isdigit()):
+    for folder in sorted(path for path in campaign.iterdir() if path.is_dir() and path.name not in ("campaigns", "results")):
         table = run_table(folder.name)
         nodes = table.drop_duplicates("node")
         rows += [dict(experiment=folder.name, pipeline=table["pipeline"].iloc[0], alone="->" not in table["pipeline"].iloc[0], node=node, service=service)
@@ -105,17 +119,19 @@ def single_execution_times(experiment: str, run_id: str, node: str):
 # Training runs of a service: alone, or in pipelines of another topology
 # ------------------------------------------------------------------------------
 @lru_cache(maxsize=None)
-def training_pool(service: str, exclude_pipeline: str, sources: tuple = ("alone", "pipeline")) -> pd.DataFrame:
-    """Every run of the campaign that can train a model of `service` (e.g. "cv-analyzer:v1") for a chain with the
+def training_pool(service: str, exclude_pipeline: str = None, sources: tuple = ("alone", "pipeline"), campaign: Path = CAMPAIGN,
+                  exclude_experiment: str = None) -> pd.DataFrame:
+    """Every run of `campaign` that can train a model of `service` (e.g. "cv-analyzer:v1") for a chain with the
     topology exclude_pipeline: runs that measured the service alone and have per-item records ("alone"), and runs of
-    pipelines with any other topology that contain the service ("pipeline"). One row per run with experiment, run_id,
+    pipelines with any other topology that contain the service ("pipeline"). With exclude_experiment instead, only the
+    runs of that experiment are left out (see training_exclusion). One row per run with experiment, run_id,
     node, alone, the knobs of the service, and two statistics of the processing time of the service in that run from
     dataset.csv: mean_s, its mean (s), and spread_s, the standard deviation (s) of a Gaussian with the run's median and
     95th percentile, (p95 - median) / 1.645, which is less sensitive to single extreme items than the sample standard
     deviation; a run whose p95 does not exceed its median gets a spread of one microsecond. Experiments that do not vary
     every knob of the service are left out, because the value of the missing knob is not stored."""
-    nodes = campaign_nodes()
-    nodes = nodes[(nodes["service"] == service) & (nodes["pipeline"] != exclude_pipeline)]
+    nodes = campaign_nodes(campaign)
+    nodes = nodes[(nodes["service"] == service) & (nodes["pipeline"] != exclude_pipeline) & (nodes["experiment"] != exclude_experiment)]
     knobs = max((set(node_configurations(run_table(row.experiment), row.node).columns) for row in nodes.itertuples()), key=len)
     parts = []
     for row in nodes.itertuples():
@@ -137,6 +153,15 @@ def training_pool(service: str, exclude_pipeline: str, sources: tuple = ("alone"
     return pd.concat(parts, ignore_index=True)
 
 
+def training_exclusion(experiment: str) -> dict:
+    """The arguments of training_pool that hold out the chain `experiment`: in the first campaign every run with its
+    topology, in the second campaign (one topology per application) every run of the experiment itself."""
+    campaign = campaign_of(experiment)
+    if campaign == CAMPAIGN_V2:
+        return dict(campaign=campaign, exclude_experiment=experiment)
+    return dict(campaign=campaign, exclude_pipeline=chain_path(experiment)[2])
+
+
 def run_execution_times(run) -> np.ndarray:
     """Measured processing times (s) of the service in one run of training_pool (a row of that table)."""
     if run.alone:
@@ -148,10 +173,10 @@ def run_execution_times(run) -> np.ndarray:
 def feature_names(experiment: str) -> dict:
     """Names of the columns of x_train and x_test in real_chain_data, per node of the chain `experiment`: the knobs of
     the service, and one name "<knob>_<value>" per value of a knob that is a word."""
-    path, service_of, pipeline = chain_path(experiment)
+    path, service_of = chain_path(experiment)[:2]
     names = {}
     for node in path:
-        pool = training_pool(service_of[node], pipeline)
+        pool = training_pool(service_of[node], **training_exclusion(experiment))
         names[node] = list(pd.get_dummies(pool[[column for column in pool.columns if column not in POOL_COLUMNS]], dtype=float).columns)
     return names
 
@@ -237,7 +262,7 @@ def emulate_services_alone(experiment: str, rates: np.ndarray, n_items: int, see
 
 def real_replay_data(experiment: str, seed, utilization: float = 0.5, n_train: int = 50, n_trace_items: int = 2000) -> tuple:
     """Training data of the replay baseline (ReplayComposition in baselines_chain.py) for the chain `experiment`, from
-    runs of its services alone or in pipelines of another topology; no run of the chain is used.
+    the runs that training_exclusion allows; no run of the chain is used.
     A *training composition* puts one training run of every service of the chain together: the j-th of n_train runs
     that are drawn at random per service from training_pool. Its arrival rate is `utilization` / (mean processing time
     of its busiest service), as for the runs of the chain. Every service of a training composition is then monitored
@@ -248,11 +273,11 @@ def real_replay_data(experiment: str, seed, utilization: float = 0.5, n_train: i
     service -> (training compositions, items); and x_test, the same features for every valid run of the chain."""
     rng = np.random.default_rng(seed)
     chain = run_table(experiment)
-    path, service_of, pipeline = chain_path(experiment)
+    path, service_of = chain_path(experiment)[:2]
     runs = list(chain["run_id"].unique())
     features_train, features_test, times = [], [], {}
     for node in path:
-        pool = training_pool(service_of[node], pipeline)
+        pool = training_pool(service_of[node], **training_exclusion(experiment))
         chosen = pool.iloc[rng.choice(len(pool), size=n_train, replace=False)]
         knobs = [column for column in pool.columns if column not in POOL_COLUMNS]
         x_train, x_test = encode_configurations(chosen[knobs], node_configurations(chain, node).loc[runs])
@@ -294,7 +319,8 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
                     arrival_cv2: float = 1.0, n_train: int = 50, n_items: int = 5000, n_trace_items: int = 2000,
                     sources: tuple = ("alone", "pipeline"), train_seed=None, arrival_rate: float = None) -> ChainData:
     """Data of one chain of the campaign (`experiment`, e.g. "04e-chain-qr-cv-face") for the experiments of
-    `2_evaluation.ipynb`. The chain is an unseen composition: no run with its topology is used for training.
+    `2_evaluation.ipynb`. No run of the chain is used for training (training_exclusion): in the first campaign the chain is
+    an unseen composition (no run with its topology is used), in the second campaign an unseen experiment.
 
     Ground truth (per valid run of the chain): the processing times that the run measured for every request at every
     service are replayed through a chain of FIFO queues (emulate_runs, n_items items). Every run has its own arrival
@@ -310,7 +336,8 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
     run at which the service would be busy 95% of the time or more is not monitored (its latencies are nan).
 
     Training (per service): n_train runs drawn at random from training_pool, i.e. from runs of the service alone and
-    of pipelines with another topology (`sources` restricts the pool to one of the two). The configuration of a run is
+    of pipelines with another topology, or in the second campaign from the other experiments that contain the service
+    (`sources` restricts the pool to runs alone or in pipelines). The configuration of a run is
     one training configuration. Its target is the mean processing time of the run (y_train), not one item: a run
     measured many items, and their mean is a far less noisy observation of the mean execution time. The scatter of
     single items, which one item per run would have told the model, comes from the spread of the run instead
@@ -330,7 +357,7 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
         rng_train, rng_monitoring = (np.random.default_rng(s) for s in np.random.SeedSequence(train_seed).spawn(2))
     arrival_options = {"cv2": arrival_cv2} if arrival_process == "gamma" else {}
     chain = run_table(experiment)
-    path, service_of, pipeline = chain_path(experiment)
+    path, service_of = chain_path(experiment)[:2]
 
     # ground truth: every valid run of the chain at its own arrival rate
     runs = list(chain["run_id"].unique())
@@ -343,10 +370,10 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
     measured, measured_low = np.where(overloaded, np.inf, measured), np.where(overloaded, np.inf, measured_low)
     workload = dict(process=arrival_process, rate=rates if arrival_rate is None else float(arrival_rate), jitter=0.1, **arrival_options)
 
-    # training data: every service from runs alone and from pipelines of another topology
+    # training data: every service from the runs that training_exclusion allows
     x_train, y_train, y_train_spread, x_test, x_train_load, x_test_load, monitored_latencies = {}, {}, {}, {}, {}, {}, {}
     for node in path:
-        pool = training_pool(service_of[node], pipeline, tuple(sources))
+        pool = training_pool(service_of[node], sources=tuple(sources), **training_exclusion(experiment))
         assert len(pool) >= n_train, f"{service_of[node]}: {len(pool)} training runs available, {n_train} needed"
         chosen = pool.iloc[np.sort(rng_train.choice(len(pool), size=n_train, replace=False))]
         knobs = [column for column in pool.columns if column not in POOL_COLUMNS]
