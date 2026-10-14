@@ -111,6 +111,24 @@ def handling_overhead(experiment: str, run_id: str, node: str) -> float:
     return float(np.median(idle["started_at_ns"] - idle["arrived_at_ns"])) / 1e9
 
 
+def training_busy_worker_shares(experiment: str) -> dict:
+    """Per node of the chain `experiment`: for every pipeline run of its training pool (training_pool), the share of the
+    requests of the measurement phase that arrived while at least one other worker of the node was busy (records.csv).
+    A low share means that a request almost always has all cores of the service to itself, whatever its workers."""
+    path, service_of = chain_path(experiment)[:2]
+    shares = {}
+    for node in path:
+        pool = training_pool(service_of[node], **training_exclusion(experiment))
+        shares[node] = []
+        for run in pool[~pool["alone"]].itertuples():
+            records = pd.read_csv(experiment_folder(run.experiment) / "runs" / run.run_id / run.node / "records.csv",
+                                  usecols=["admission_phase", "outcome", "workers_busy_at_arrival"])
+            measured = records[(records["admission_phase"] == "measure") & (records["outcome"] == "completed")]
+            shares[node].append(float(np.mean(measured["workers_busy_at_arrival"] >= 1)))
+        shares[node] = np.array(shares[node])
+    return shares
+
+
 def chain_execution_times(experiment: str, run_id: str, path: list) -> np.ndarray:
     """Measured execution time (s) of every request at every node of `path` in one run of a chain, (requests, nodes),
     in the order in which the requests entered the chain: its processing time, plus in the second campaign the handling
