@@ -95,12 +95,30 @@ def pipeline_steps(experiment: str, run_id: str) -> pd.DataFrame:
     return steps.assign(processing_s=steps["processing_ms"] / 1e3)
 
 
+@lru_cache(maxsize=None)
+def handling_overhead(experiment: str, run_id: str, node: str) -> float:
+    """Handling overhead (s) of `node` in one run of the second campaign: the time from the arrival of a request until
+    its processing starts, for the requests of the measurement phase that found the service idle (no request queued,
+    no worker busy; records.csv), median over those requests. The testbed takes about this time for every request, also
+    with an empty queue, so it is not queueing; execution times count it as part of the execution (chain_execution_times,
+    run_execution_times, training_pool). 0 in the first campaign, where it is not separated from the wait for the
+    release once per second."""
+    if campaign_of(experiment) != CAMPAIGN_V2:
+        return 0.0
+    records = pd.read_csv(experiment_folder(experiment) / "runs" / run_id / node / "records.csv")
+    idle = records[(records["admission_phase"] == "measure") & (records["outcome"] == "completed") & (records["queue_length_at_arrival"] == 0)
+                   & (records["workers_busy_at_arrival"] == 0)]
+    return float(np.median(idle["started_at_ns"] - idle["arrived_at_ns"])) / 1e9
+
+
 def chain_execution_times(experiment: str, run_id: str, path: list) -> np.ndarray:
-    """Measured processing time (s) of every request at every node of `path` in one run of a chain, (requests, nodes),
-    in the order in which the requests entered the chain. Only requests that completed at every node are kept."""
+    """Measured execution time (s) of every request at every node of `path` in one run of a chain, (requests, nodes),
+    in the order in which the requests entered the chain: its processing time, plus in the second campaign the handling
+    overhead of the node in that run (handling_overhead). Only requests that completed at every node are kept."""
     steps = pipeline_steps(experiment, run_id)
     order = steps[steps["node"] == path[0]]["request_id"]
-    return steps.pivot(index="request_id", columns="node", values="processing_s").loc[order, path].dropna().to_numpy()
+    processing = steps.pivot(index="request_id", columns="node", values="processing_s").loc[order, path].dropna().to_numpy()
+    return processing + np.array([handling_overhead(experiment, run_id, node) for node in path])
 
 
 def single_execution_times(experiment: str, run_id: str, node: str):
@@ -126,7 +144,8 @@ def training_pool(service: str, exclude_pipeline: str = None, sources: tuple = (
     pipelines with any other topology that contain the service ("pipeline"). With exclude_experiment instead, only the
     runs of that experiment are left out (see training_exclusion). One row per run with experiment, run_id,
     node, alone, the knobs of the service, and two statistics of the processing time of the service in that run from
-    dataset.csv: mean_s, its mean (s), and spread_s, the standard deviation (s) of a Gaussian with the run's median and
+    dataset.csv: mean_s, its mean (s; in the second campaign plus the handling overhead, so that it is the mean execution
+    time), and spread_s, the standard deviation (s) of a Gaussian with the run's median and
     95th percentile, (p95 - median) / 1.645, which is less sensitive to single extreme items than the sample standard
     deviation; a run whose p95 does not exceed its median gets a spread of one microsecond. Experiments that do not vary
     every knob of the service are left out, because the value of the missing knob is not stored."""
@@ -147,8 +166,9 @@ def training_pool(service: str, exclude_pipeline: str = None, sources: tuple = (
         table = run_table(row.experiment)
         statistics = table[table["node"] == row.node].set_index("run_id").loc[configurations.index]
         spread = (statistics["processing_p95_ms"] - statistics["processing_p50_ms"]) / NORMAL_P95 / 1e3
+        overhead = np.array([handling_overhead(row.experiment, run_id, row.node) for run_id in configurations.index])
         parts.append(configurations.reset_index().assign(experiment=row.experiment, node=row.node, alone=row.alone,
-                                                         mean_s=statistics["processing_mean_ms"].to_numpy() / 1e3,
+                                                         mean_s=statistics["processing_mean_ms"].to_numpy() / 1e3 + overhead,
                                                          spread_s=np.maximum(spread.to_numpy(), 1e-6)))
     return pd.concat(parts, ignore_index=True)
 
@@ -163,11 +183,12 @@ def training_exclusion(experiment: str) -> dict:
 
 
 def run_execution_times(run) -> np.ndarray:
-    """Measured processing times (s) of the service in one run of training_pool (a row of that table)."""
+    """Measured execution times (s) of the service in one run of training_pool (a row of that table): processing times,
+    plus in the second campaign the handling overhead of the service in that run."""
     if run.alone:
         return single_execution_times(run.experiment, run.run_id, run.node)
     steps = pipeline_steps(run.experiment, run.run_id)
-    return steps[steps["node"] == run.node]["processing_s"].to_numpy()
+    return steps[steps["node"] == run.node]["processing_s"].to_numpy() + handling_overhead(run.experiment, run.run_id, run.node)
 
 
 def feature_names(experiment: str) -> dict:
@@ -181,15 +202,17 @@ def feature_names(experiment: str) -> dict:
     return names
 
 
-def configuration_grid(x_train: np.ndarray, names: list, knob_a: str, knob_b: str, n_grid: int = 30) -> tuple:
+def configuration_grid(x_train: np.ndarray, names: list, knob_a: str, knob_b: str, n_grid: int = 30, x_fixed: np.ndarray = None) -> tuple:
     """A grid over two knobs of a service for plotting a model: knob_a and knob_b vary between their smallest and
     largest value among the training configurations x_train (columns `names`), and every other knob is fixed at its
-    most frequent training value. Returns the two (n_grid, n_grid) arrays of the grid, the configurations of all grid
-    points (n_grid * n_grid, features), and a dictionary other knob -> its fixed value."""
+    most frequent value among x_fixed (by default x_train; e.g. the held-out configurations, to show the model where
+    it is evaluated). Returns the two (n_grid, n_grid) arrays of the grid, the configurations of all grid points
+    (n_grid * n_grid, features), and a dictionary other knob -> its fixed value."""
     a, b = names.index(knob_a), names.index(knob_b)
     grid_a, grid_b = np.meshgrid(np.linspace(x_train[:, a].min(), x_train[:, a].max(), n_grid),
                                  np.linspace(x_train[:, b].min(), x_train[:, b].max(), n_grid))
-    most_frequent = [values[np.argmax(counts)] for values, counts in (np.unique(column, return_counts=True) for column in x_train.T)]
+    x_fixed = x_train if x_fixed is None else x_fixed
+    most_frequent = [values[np.argmax(counts)] for values, counts in (np.unique(column, return_counts=True) for column in x_fixed.T)]
     x_grid = np.tile(most_frequent, (n_grid * n_grid, 1)).astype(float)
     x_grid[:, a], x_grid[:, b] = grid_a.ravel(), grid_b.ravel()
     return grid_a, grid_b, x_grid, {name: value for k, (name, value) in enumerate(zip(names, most_frequent)) if k not in (a, b)}
@@ -363,7 +386,8 @@ def chain_run_statistics(experiment: str) -> tuple:
     chain = run_table(experiment)
     path, runs = chain_path(experiment)[0], list(chain["run_id"].unique())
     rows = [chain[chain["node"] == node].set_index("run_id").loc[runs] for node in path]
-    mean = np.column_stack([row["processing_mean_ms"].to_numpy() for row in rows]) / 1e3
+    overhead = np.array([[handling_overhead(experiment, run_id, node) for node in path] for run_id in runs])
+    mean = np.column_stack([row["processing_mean_ms"].to_numpy() for row in rows]) / 1e3 + overhead
     spread = np.column_stack([(row["processing_p95_ms"] - row["processing_p50_ms"]).to_numpy() for row in rows]) / NORMAL_P95 / 1e3
     return mean, np.maximum(spread, 1e-6)
 
