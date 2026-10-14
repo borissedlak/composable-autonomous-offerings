@@ -1,13 +1,13 @@
 """Reader of the two testbed campaigns, `statics/results_milos/` (CAMPAIGN, the first campaign) and
 `statics/results_milos_v2/` (CAMPAIGN_V2, the B1 experiments of `new_experiments.md`), and the emulation that turns
 their measurements into chain data: the measured processing times of the real services are replayed through a chain of
-FIFO single-server queues (`fifo_chain_latencies` in `simulation.py`); the second campaign needs no emulation, its
-latencies are measured (chain_run_latencies). An experiment is named by its folder, and
+FIFO queues, every service with the number of workers of its configuration (`parallelism`; `fifo_chain_latencies` in
+`simulation.py`); the second campaign needs no emulation, its latencies are measured (chain_run_latencies). An experiment is named by its folder, and
 campaign_of finds the campaign that holds it.
 
 Why an emulation: in the first campaign every service releases its items once per second (`discipline: window`) and
 processes them with several workers, so the measured latencies consist mostly of the wait for the release and do not
-come from a FIFO single-server queue. The processing times do not depend on that discipline. The emulation therefore
+come from a FIFO queue. The processing times do not depend on that discipline. The emulation therefore
 keeps what is real about the services (how the processing time depends on the configuration, and its distribution)
 and replaces the queueing by the FIFO model that the bounds describe. Its latencies are not testbed measurements. The
 services of the second campaign queue FIFO, so its measured latencies are used as they are.
@@ -17,6 +17,8 @@ inside pipelines whose topology differs from the chain that is evaluated; no run
 training. The second campaign has one topology per application, and every service occurs only in that topology, so
 there the methods are trained on the runs of the other experiments of the campaign that contain the service (e.g. the
 runs with one to four workers for the chain with one worker); no run of the evaluated experiment is used for training.
+Alternatively (split_runs), the runs of one experiment of the second campaign are split: a part trains the models, the
+rest is held out.
 
 Folder layout: `<experiment>/<start time>/dataset.csv` has one row per run and node with the configuration and summary
 statistics; `runs/<run>/trace_steps.csv` (pipelines) has one row per request and node; `runs/<run>/<node>/records.csv`
@@ -111,14 +113,16 @@ def handling_overhead(experiment: str, run_id: str, node: str) -> float:
     return float(np.median(idle["started_at_ns"] - idle["arrived_at_ns"])) / 1e9
 
 
-def training_busy_worker_shares(experiment: str) -> dict:
-    """Per node of the chain `experiment`: for every pipeline run of its training pool (training_pool), the share of the
-    requests of the measurement phase that arrived while at least one other worker of the node was busy (records.csv).
-    A low share means that a request almost always has all cores of the service to itself, whatever its workers."""
+def training_busy_worker_shares(experiment: str, training_runs: list = None) -> dict:
+    """Per node of the chain `experiment`: for every pipeline run of its training pool (training_pool, or the training
+    runs of split_runs), the share of the requests of the measurement phase that arrived while at least one other worker
+    of the node was busy (records.csv). A low share means that a request almost always has all cores of the service to
+    itself, whatever its workers."""
     path, service_of = chain_path(experiment)[:2]
     shares = {}
     for node in path:
-        pool = training_pool(service_of[node], **training_exclusion(experiment))
+        pool = (training_pool(service_of[node], **training_exclusion(experiment)) if training_runs is None
+                else split_training_pool(service_of[node], experiment, training_runs))
         shares[node] = []
         for run in pool[~pool["alone"]].itertuples():
             records = pd.read_csv(experiment_folder(run.experiment) / "runs" / run.run_id / run.node / "records.csv",
@@ -236,6 +240,11 @@ def configuration_grid(x_train: np.ndarray, names: list, knob_a: str, knob_b: st
     return grid_a, grid_b, x_grid, {name: value for k, (name, value) in enumerate(zip(names, most_frequent)) if k not in (a, b)}
 
 
+def encoded_names(training: pd.DataFrame, in_chain: pd.DataFrame) -> list:
+    """Names of the columns of encode_configurations(training, in_chain), in their order."""
+    return list(pd.get_dummies(pd.concat([training, in_chain[training.columns]]), dtype=float).columns)
+
+
 def encode_configurations(training: pd.DataFrame, in_chain: pd.DataFrame) -> tuple:
     """Feature matrices of one service from its configurations in the training runs and in the evaluated chain, with
     the same columns in the same order: numeric knobs as they are, and one 0/1 column per value of a knob that is a
@@ -249,11 +258,12 @@ def encode_configurations(training: pd.DataFrame, in_chain: pd.DataFrame) -> tup
 # Emulation
 # ------------------------------------------------------------------------------
 def emulate_runs(execution: list, rates: np.ndarray, n_items: int, rng: np.random.Generator, process: str = "poisson",
-                 warmup_share: float = 0.1, **arrival_options) -> tuple:
-    """Latencies of chains of FIFO single-server services whose execution times are measured ones, for several runs at
-    once. execution: one array (requests, nodes) of measured processing times (s) per run, see chain_execution_times; a
+                 warmup_share: float = 0.1, workers: np.ndarray = None, **arrival_options) -> tuple:
+    """Latencies of chains of FIFO services whose execution times are measured ones, for several runs at once.
+    execution: one array (requests, nodes) of measured processing times (s) per run, see chain_execution_times; a
     single service is a chain with one node. rates: arrival rate (items/s) of every run, for the arrival process
-    `process` (as in simulation.py; arrival_options: jitter, cv2).
+    `process` (as in simulation.py; arrival_options: jitter, cv2). workers: (runs, nodes) workers of every node in every
+    run, default one each (fifo_chain_latencies).
     The n_items items of an emulated run draw their execution times from the measured requests of that run with
     replacement, a whole request at a time: the times of one request at the different nodes stay together, and
     consecutive items are independent. Returns per-node latencies (runs, items, nodes) and end-to-end latencies (runs,
@@ -263,7 +273,7 @@ def emulate_runs(execution: list, rates: np.ndarray, n_items: int, rng: np.rando
     drawn = np.stack([times[rng.integers(len(times), size=n_items)] for times in execution])
     gaps = sample_interarrival_times(process, np.asarray(rates, dtype=float)[:, None], (len(execution), n_items), rng, **arrival_options)
     arrivals = np.cumsum(gaps, axis=1)
-    node_latencies, latencies = fifo_chain_latencies(arrivals, drawn)
+    node_latencies, latencies = fifo_chain_latencies(arrivals, drawn, workers)
     kept = slice(int(warmup_share * n_items), None)
     results = node_latencies[:, kept], latencies[:, kept]
     return (*results, arrivals[:, kept]) if return_arrivals else results
@@ -285,11 +295,30 @@ def chain_execution_moments(experiment: str) -> tuple:
     return np.array([run_times.mean(axis=0) for run_times in times]), np.array([run_times.var(axis=0) for run_times in times])
 
 
-def chain_run_execution_times(experiment: str) -> list:
-    """Measured processing times (s) of every valid run of the chain `experiment`, one array (requests, nodes) per run,
-    in the order of the runs in real_chain_data."""
+def chain_runs(experiment: str, runs: list = None) -> list:
+    """The runs of the chain `experiment` that real_chain_data holds out, in its order: every valid run, or `runs`
+    (e.g. the held-out runs of split_runs)."""
+    return list(run_table(experiment)["run_id"].unique()) if runs is None else list(runs)
+
+
+def chain_run_workers(experiment: str, runs: list = None) -> np.ndarray:
+    """Number of workers (the knob `parallelism`) of every node of the chain `experiment` in every run of chain_runs,
+    (runs, nodes); 1 for a node without that knob."""
+    chain = run_table(experiment)
+    configurations = [node_configurations(chain, node).loc[chain_runs(experiment, runs)] for node in chain_path(experiment)[0]]
+    return np.column_stack([c["parallelism"].to_numpy() if "parallelism" in c else np.ones(len(c)) for c in configurations]).astype(int)
+
+
+def run_workers(chosen: pd.DataFrame) -> np.ndarray:
+    """Number of workers of the service in every run of a table of training_pool (one per row); 1 without the knob."""
+    return chosen["parallelism"].to_numpy().astype(int) if "parallelism" in chosen else np.ones(len(chosen), dtype=int)
+
+
+def chain_run_execution_times(experiment: str, runs: list = None) -> list:
+    """Measured processing times (s) of every run of chain_runs, one array (requests, nodes) per run, in the order of
+    the runs in real_chain_data."""
     path = chain_path(experiment)[0]
-    return [chain_execution_times(experiment, run_id, path) for run_id in run_table(experiment)["run_id"].unique()]
+    return [chain_execution_times(experiment, run_id, path) for run_id in chain_runs(experiment, runs)]
 
 
 # ------------------------------------------------------------------------------
@@ -313,11 +342,26 @@ def measured_latencies(experiment: str, run_id: str, path: list) -> tuple:
             (arrived.loc[order].to_numpy() - traces["entered_at_ns"].iloc[0]) / 1e9)
 
 
-def chain_run_latencies(experiment: str) -> list:
-    """measured_latencies of every valid run of the chain `experiment` (second campaign), in the order of the runs in
-    real_chain_data."""
+def chain_run_latencies(experiment: str, runs: list = None) -> list:
+    """measured_latencies of every run of chain_runs (second campaign), in the order of the runs in real_chain_data."""
     path = chain_path(experiment)[0]
-    return [measured_latencies(experiment, run_id, path) for run_id in run_table(experiment)["run_id"].unique()]
+    return [measured_latencies(experiment, run_id, path) for run_id in chain_runs(experiment, runs)]
+
+
+def split_runs(experiment: str, n_train: int, seed) -> tuple:
+    """The runs of one experiment of the second campaign, split into n_train training runs drawn at random and the
+    held-out rest, both sorted: (training runs, held-out runs). A training run trains the model of every service of the
+    chain (split_training_pool); a held-out run is one held-out configuration of the chain."""
+    runs = np.array(chain_runs(experiment))
+    chosen = np.zeros(len(runs), dtype=bool)
+    chosen[np.random.default_rng(seed).choice(len(runs), size=n_train, replace=False)] = True
+    return list(runs[chosen]), list(runs[~chosen])
+
+
+def split_training_pool(service: str, experiment: str, training_runs: list, sources: tuple = ("alone", "pipeline")) -> pd.DataFrame:
+    """training_pool of `service` restricted to the training runs of split_runs in `experiment`."""
+    pool = training_pool(service, sources=sources, campaign=CAMPAIGN_V2)
+    return pool[(pool["experiment"] == experiment) & pool["run_id"].isin(training_runs)].reset_index(drop=True)
 
 
 def arrival_rates(experiment: str) -> pd.Series:
@@ -336,35 +380,40 @@ def measured_quantiles(samples: list, level: float, coverage_check: dict) -> tup
 
 def emulate_services_alone(experiment: str, rates: np.ndarray, n_items: int, seed) -> np.ndarray:
     """Latencies (s) of every service of the chain `experiment` when it is alone, (runs, items, services): for every
-    valid run, the processing times that the run measured at a service are replayed through one FIFO queue under
-    Poisson arrivals at the arrival rate of that run (rates, items/s). Every service has its own arrivals."""
-    times = chain_run_execution_times(experiment)
+    valid run, the processing times that the run measured at a service are replayed through one FIFO queue with the
+    workers of the service in that run, under Poisson arrivals at the arrival rate of that run (rates, items/s). Every
+    service has its own arrivals."""
+    times, workers = chain_run_execution_times(experiment), chain_run_workers(experiment)
     rng = np.random.default_rng(seed)
-    return np.stack([emulate_runs([run_times[:, [k]] for run_times in times], rates, n_items, rng)[1] for k in range(times[0].shape[1])], axis=-1)
+    return np.stack([emulate_runs([run_times[:, [k]] for run_times in times], rates, n_items, rng, workers=workers[:, [k]])[1]
+                     for k in range(times[0].shape[1])], axis=-1)
 
 
-def real_replay_data(experiment: str, seed, utilization: float = 0.5, n_train: int = 50, n_trace_items: int = 2000) -> tuple:
+def real_replay_data(experiment: str, seed, utilization: float = 0.5, n_train: int = 50, n_trace_items: int = 2000, split: tuple = None) -> tuple:
     """Training data of the replay baseline (ReplayComposition in baselines_chain.py) for the chain `experiment`, from
     the runs that training_exclusion allows; no run of the chain is used.
     A *training composition* puts one training run of every service of the chain together: the j-th of n_train runs
     that are drawn at random per service from training_pool. Its arrival rate is `utilization` / (mean processing time
-    of its busiest service), as for the runs of the chain. Every service of a training composition is then monitored
-    alone: its measured processing times are replayed through one FIFO queue under Poisson arrivals at that rate
-    (n_trace_items items).
+    of its busiest service per worker), as for the runs of the chain. Every service of a training composition is then
+    monitored alone: its measured processing times are replayed through one FIFO queue with the workers of its run under
+    Poisson arrivals at that rate (n_trace_items items).
     Second campaign: every training run contains every service of the chain, so a training composition is one
     training run, drawn once for all services, and nothing is emulated: the monitored arrival times and latencies of a
     service are the ones measured at that service in that run (its first n_trace_items requests, or as many as the
     shortest of the drawn runs has), and the arrival rate is the one the campaign set (arrival_rates); `utilization` is
     not used.
+    split: (training runs, held-out runs) of split_runs; the training compositions are then drawn from the training runs
+    of the experiment, and x_test holds the held-out runs.
     Returns x_train (training compositions, features): the configurations of all services next to each other and
     log10 of the arrival rate; the arrival times and the latencies (s) of the monitored items, each a dictionary
-    service -> (training compositions, items); and x_test, the same features for every valid run of the chain."""
+    service -> (training compositions, items); and x_test, the same features for every held-out run of the chain."""
     rng = np.random.default_rng(seed)
     chain = run_table(experiment)
     path, service_of = chain_path(experiment)[:2]
-    runs = list(chain["run_id"].unique())
+    runs = chain_runs(experiment, None if split is None else split[1])
     measured = campaign_of(experiment) == CAMPAIGN_V2
-    pools = {node: training_pool(service_of[node], **training_exclusion(experiment)) for node in path}
+    pools = {node: (training_pool(service_of[node], **training_exclusion(experiment)) if split is None
+                    else split_training_pool(service_of[node], experiment, split[0])) for node in path}
     if measured:
         drawn = pools[path[0]].iloc[rng.choice(len(pools[path[0]]), size=n_train, replace=False)][["experiment", "run_id"]]
     features_train, features_test, times, chosen_runs = [], [], {}, {}
@@ -388,11 +437,12 @@ def real_replay_data(experiment: str, seed, utilization: float = 0.5, n_train: i
             latencies[node] = np.stack([run[1][:n_items, 0] for run in monitored[node]])
             arrivals[node] = np.stack([run[2][:n_items, 0] for run in monitored[node]])
     else:
-        rates = utilization / np.max([[run_times.mean() for run_times in times[node]] for node in path], axis=0)
-        test_rates = utilization / np.array([run_times.mean(axis=0).max() for run_times in chain_run_execution_times(experiment)])
+        rates = utilization / np.max([[run_times.mean() / w for run_times, w in zip(times[node], run_workers(chosen_runs[node]))] for node in path], axis=0)
+        test_rates = utilization / np.array([(run_times.mean(axis=0) / w).max() for run_times, w in zip(chain_run_execution_times(experiment),
+                                                                                                      chain_run_workers(experiment))])
         for node in path:
             _, latencies[node], arrivals[node] = emulate_runs([run_times[:, None] for run_times in times[node]], rates, n_trace_items, rng,
-                                                              return_arrivals=True)
+                                                              workers=run_workers(chosen_runs[node])[:, None], return_arrivals=True)
     return (np.column_stack(features_train + [np.log10(rates)]), arrivals, latencies,
             np.column_stack(features_test + [np.log10(test_rates)]))
 
@@ -410,18 +460,17 @@ def chain_run_statistics(experiment: str) -> tuple:
     return mean, np.maximum(spread, 1e-6)
 
 
-def chain_tail_ratios(experiment: str) -> np.ndarray:
-    """How heavy the tail of the measured processing times is in every valid run of the chain `experiment`, in the
-    order of the runs in real_chain_data: the 99th percentile / the median of the processing time, for the service of
-    the run at which that ratio is largest. 1 would be a processing time without any scatter."""
-    path = chain_path(experiment)[0]
-    times = [chain_execution_times(experiment, run_id, path) for run_id in run_table(experiment)["run_id"].unique()]
+def chain_tail_ratios(experiment: str, runs: list = None) -> np.ndarray:
+    """How heavy the tail of the measured processing times is in every run of chain_runs, in the order of the runs in
+    real_chain_data: the 99th percentile / the median of the processing time, for the service of the run at which that
+    ratio is largest. 1 would be a processing time without any scatter."""
+    times = chain_run_execution_times(experiment, runs)
     return np.array([np.max(np.quantile(run_times, 0.99, axis=0) / np.quantile(run_times, 0.5, axis=0)) for run_times in times])
 
 
 def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, utilization: float = 0.5, arrival_process: str = "poisson",
                     arrival_cv2: float = 1.0, n_train: int = 50, n_items: int = 5000, n_trace_items: int = 2000,
-                    sources: tuple = ("alone", "pipeline"), train_seed=None, arrival_rate: float = None) -> ChainData:
+                    sources: tuple = ("alone", "pipeline"), train_seed=None, arrival_rate: float = None, split: tuple = None) -> ChainData:
     """Data of one chain of the campaign (`experiment`, e.g. "04e-chain-qr-cv-face") for the experiments of
     `2_evaluation.ipynb`. No run of the chain is used for training (training_exclusion): in the first campaign the chain is
     an unseen composition (no run with its topology is used), in the second campaign an unseen experiment.
@@ -429,20 +478,23 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
     Ground truth, second campaign (per valid run of the chain): the services queue FIFO, so the ground truth is the
     quantile of the measured end-to-end latencies of the run (chain_run_latencies), at the Poisson arrival rate that the
     campaign set for the run (arrival_rates); `utilization`, n_items, arrival_process and arrival_rate are not used
-    for it, and node_latencies is None, because the runs measured different numbers of requests.
+    for it. The runs measured different numbers of requests, so node_latencies holds the measured latencies of the
+    first requests of every run at every service, as many as the shortest run has.
 
     Ground truth, first campaign (per valid run of the chain): the processing times that the run measured for every request at every
-    service are replayed through a chain of FIFO queues (emulate_runs, n_items items). Every run has its own arrival
-    rate: `utilization` / (mean processing time of its busiest service), so that the busiest service of every run is
-    busy for the share `utilization` of the time. The rates of the campaign are not used, because they were chosen for
+    service are replayed through a chain of FIFO queues, every service with the workers of its configuration in the run
+    (emulate_runs, n_items items). Every run has its own arrival rate: `utilization` / (mean processing time per worker
+    of its busiest service, i.e. the mean processing time divided by the workers), so that every worker of the busiest
+    service of every run is busy for the share `utilization` of the time. The rates of the campaign are not used, because they were chosen for
     services that release their items once per second. `level` is the latency quantile and coverage_check the
     arguments of its confidence interval.
 
     arrival_rate (items/s): if given, every run and every monitored training run gets this one arrival rate instead,
     and `utilization` is not used; workload["rate"] is then that number. This is the workload of an optimization,
     where the configuration is chosen for a given load. A run of the chain whose busiest service is overloaded at
-    that rate (rate * mean processing time >= 1) has no latency quantile: its measured quantile is inf. A training
-    run at which the service would be busy 95% of the time or more is not monitored (its latencies are nan).
+    that rate (rate * mean processing time / workers >= 1) has no latency quantile: its measured quantile is inf. A
+    training run at which every worker of the service would be busy 95% of the time or more is not monitored (its
+    latencies are nan).
 
     Training (per service): n_train runs drawn at random from training_pool, i.e. from runs of the service alone and
     of pipelines with another topology, or in the second campaign from the other experiments that contain the service
@@ -453,16 +505,22 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
     (y_train_spread, see training_pool).
 
     For the baselines that need a service monitored under load, the processing times of every training run are replayed
-    through one FIFO queue (n_trace_items items) at an arrival rate that gives the service a utilization drawn
-    uniformly between a tenth of `utilization` and `utilization`: in the chain every service is at most as busy as the
+    through one FIFO queue with the workers of the run (n_trace_items items) at an arrival rate that gives every worker
+    of the service a utilization drawn uniformly between a tenth of `utilization` and `utilization`: in the chain every service is at most as busy as the
     busiest one. Because the arrival rate differs from run to run, these baselines get log10(rate) as a further input
     (x_train_load, x_test_load). In the second campaign, the monitored latencies of a training run are the ones
     measured at the service in that run (its first n_trace_items requests, or as many as the shortest run has), at the
     arrival rate of that run.
 
+    split (second campaign): (training runs, held-out runs) of split_runs. The held-out runs are the held-out
+    configurations, and the n_train training runs of every service are drawn from the training runs of the experiment
+    instead of the other experiments (split_training_pool).
+
     seed: seed of the ground truth and, unless train_seed is given, of the training data; with train_seed, another
     training set is drawn for the same ground truth. x_train and x_test are dictionaries service -> configurations,
-    because every service has its own knobs and runs; workload["rate"] has one arrival rate per run of the chain."""
+    because every service has its own knobs and runs; workload["rate"] has one arrival rate per run of the chain.
+    workers_column: the column of x_test of every service that holds its number of workers (parallelism), None for a
+    service without that knob."""
     rng_train, rng_test, rng_monitoring = (np.random.default_rng(s) for s in np.random.SeedSequence(seed).spawn(3))
     if train_seed is not None:
         rng_train, rng_monitoring = (np.random.default_rng(s) for s in np.random.SeedSequence(train_seed).spawn(2))
@@ -470,19 +528,23 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
     chain = run_table(experiment)
     path, service_of = chain_path(experiment)[:2]
 
-    # ground truth: every valid run of the chain at its own arrival rate
-    runs = list(chain["run_id"].unique())
+    # ground truth: every held-out run of the chain at its own arrival rate
+    runs = chain_runs(experiment, None if split is None else split[1])
     measured_campaign = campaign_of(experiment) == CAMPAIGN_V2
+    assert split is None or measured_campaign, "split_runs is for experiments of the second campaign"
     if measured_campaign:   # the services queue FIFO: the measured latencies are the ground truth
         assert arrival_rate is None and arrival_process == "poisson", "the second campaign measured Poisson arrivals at the rate of every run"
         rates = arrival_rates(experiment).loc[runs].to_numpy()
-        measured, measured_low = measured_quantiles([run[0] for run in chain_run_latencies(experiment)], level, coverage_check)
-        node_latencies = None   # the runs measured different numbers of requests; chain_run_latencies has them per run
+        run_latencies = chain_run_latencies(experiment, runs)
+        measured, measured_low = measured_quantiles([run[0] for run in run_latencies], level, coverage_check)
+        shortest = min(len(node) for _, node, _ in run_latencies)
+        node_latencies = np.stack([node[:shortest] for _, node, _ in run_latencies])   # (runs, requests, nodes)
     else:
         execution = [chain_execution_times(experiment, run_id, path) for run_id in runs]
-        busiest_mean = np.array([times.mean(axis=0).max() for times in execution])
+        workers = chain_run_workers(experiment, runs)
+        busiest_mean = np.array([(times.mean(axis=0) / w).max() for times, w in zip(execution, workers)])   # per worker
         rates = utilization / busiest_mean if arrival_rate is None else np.full(len(runs), float(arrival_rate))
-        node_latencies, latencies = emulate_runs(execution, rates, n_items, rng_test, arrival_process, **arrival_options)
+        node_latencies, latencies = emulate_runs(execution, rates, n_items, rng_test, arrival_process, workers=workers, **arrival_options)
         measured, measured_low = quantile_with_lower_bound(latencies, level, **coverage_check)
         overloaded = rates * busiest_mean >= 1
         measured, measured_low = np.where(overloaded, np.inf, measured), np.where(overloaded, np.inf, measured_low)
@@ -490,12 +552,16 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
 
     # training data: every service from the runs that training_exclusion allows
     x_train, y_train, y_train_spread, x_test, x_train_load, x_test_load, monitored_latencies = {}, {}, {}, {}, {}, {}, {}
+    workers_column = {}
     for node in path:
-        pool = training_pool(service_of[node], sources=tuple(sources), **training_exclusion(experiment))
+        pool = (training_pool(service_of[node], sources=tuple(sources), **training_exclusion(experiment)) if split is None
+                else split_training_pool(service_of[node], experiment, split[0], tuple(sources)))
         assert len(pool) >= n_train, f"{service_of[node]}: {len(pool)} training runs available, {n_train} needed"
         chosen = pool.iloc[np.sort(rng_train.choice(len(pool), size=n_train, replace=False))]
         knobs = [column for column in pool.columns if column not in POOL_COLUMNS]
         x_train[node], x_test[node] = encode_configurations(chosen[knobs], node_configurations(chain, node).loc[runs])
+        names = encoded_names(chosen[knobs], node_configurations(chain, node).loc[runs])
+        workers_column[node] = names.index("parallelism") if "parallelism" in names else None
         times = [run_execution_times(run) for run in chosen.itertuples()]
         y_train[node], y_train_spread[node] = chosen["mean_s"].to_numpy(), chosen["spread_s"].to_numpy()
         if measured_campaign:   # the latencies of the service as measured in the training run, at the rate of that run
@@ -503,14 +569,15 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
             monitored = [measured_latencies(run.experiment, run.run_id, [run.node])[1][:, 0] for run in chosen.itertuples()]
             monitored_latencies[node] = np.stack([series[:min(n_trace_items, *map(len, monitored))] for series in monitored])
         else:
+            mean_per_worker = np.array([run_times.mean() for run_times in times]) / run_workers(chosen)
             if arrival_rate is None:
-                monitored_rates = np.array([rng_monitoring.uniform(0.1, 1.0) * utilization / run_times.mean() for run_times in times])
+                monitored_rates = np.array([rng_monitoring.uniform(0.1, 1.0) * utilization / mean for mean in mean_per_worker])
             else:
                 monitored_rates = np.full(n_train, float(arrival_rate))
             monitored_latencies[node] = emulate_runs([run_times[:, None] for run_times in times], monitored_rates, n_trace_items, rng_monitoring,
-                                                     arrival_process, **arrival_options)[1]
-            monitored_latencies[node][monitored_rates * np.array([run_times.mean() for run_times in times]) >= 0.95] = np.nan
+                                                     arrival_process, workers=run_workers(chosen)[:, None], **arrival_options)[1]
+            monitored_latencies[node][monitored_rates * mean_per_worker >= 0.95] = np.nan
         x_train_load[node] = np.column_stack([x_train[node], np.log10(monitored_rates)])
         x_test_load[node] = np.column_stack([x_test[node], np.log10(rates)])
     return ChainData(path, workload, x_train, y_train, x_test, measured, measured_low, node_latencies, monitored_latencies=monitored_latencies,
-                     y_train_spread=y_train_spread, x_train_load=x_train_load, x_test_load=x_test_load)
+                     y_train_spread=y_train_spread, x_train_load=x_train_load, x_test_load=x_test_load, workers_column=workers_column)

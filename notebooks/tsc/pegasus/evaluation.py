@@ -17,6 +17,7 @@ from .baselines import (conformal_service_bounds, joint_gaussian_quantile, queue
 from .service_gp import (RunStatisticsModel, configurations_of, execution_time_belief, run_statistics_belief, train_gp_models,
                          train_run_statistics_models)
 from .bounds import martingale_closed_form_node_bounds, network_service_bound
+from .data import path_workers
 
 PROPOSED = "Pegasus per node (ours)"   # union bound over the node bounds
 PROPOSED_SNC = "Pegasus SNC (ours)"    # one bound for the whole chain from its network service curve
@@ -68,9 +69,11 @@ def pegasus_bound(data, models: dict, alpha: float) -> np.ndarray:
     held-out configuration (s). The waiting time at a service is bounded by Kingman's martingale bound exp(-theta w);
     with a Gaussian execution time, the latency bound of the service follows from one formula. The first service
     receives the external arrivals; every later one receives the departures of the service before it, which cannot be
-    closer together than that service's execution times. Every position of the chain gets its own node bound."""
+    closer together than that service's execution times. Every position of the chain gets its own node bound. A service
+    with several workers is bounded by cyclic assignment (bounds.py) and gives the next service no minimum spacing."""
     K = len(data.path)
-    return martingale_closed_form_node_bounds(models["beliefs"], models["lower_means"], epsilon=alpha / K, **data.workload).sum(axis=0)
+    return martingale_closed_form_node_bounds(models["beliefs"], models["lower_means"], epsilon=alpha / K, path_workers=path_workers(data),
+                                              **data.workload).sum(axis=0)
 
 
 def pegasus_snc_bound(data, models: dict, alpha: float) -> np.ndarray:
@@ -78,7 +81,8 @@ def pegasus_snc_bound(data, models: dict, alpha: float) -> np.ndarray:
     Chernoff step on the product of the services' latency moments bounds the end-to-end latency at the full violation
     probability alpha, instead of alpha / K per service. Multiplying the moments requires that the execution times of
     an item are independent between the services, so no Hoelder step is applied (all exponents 1)."""
-    return network_service_bound(models["beliefs"], epsilon=alpha, holder_exponents=[1] * len(data.path), **data.workload)
+    return network_service_bound(models["beliefs"], epsilon=alpha, holder_exponents=[1] * len(data.path), path_workers=path_workers(data),
+                                 **data.workload)
 
 
 def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alpha: float, confidence: float,
@@ -98,6 +102,7 @@ def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alph
     of the latency quantile, like the GP of the mean execution time (fit_services): the latency of a real service
     differs by orders of magnitude between its configurations."""
     K, workload = len(data.path), data.workload
+    workers_by_position = path_workers(data) or [1] * K
     log_target = data.y_train_spread is not None
     x_load, x_test_load = (x_train, data.x_test) if x_train_load is None else (x_train_load, data.x_test_load)
     predictions = lambda fitted: [fitted[s].predict(configurations_of(data.x_test, s), return_std=True) for s in data.path]
@@ -108,8 +113,8 @@ def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alph
         (PROPOSED_SNC, "proposed", gp_seconds, lambda: pegasus_snc_bound(data, models, alpha)),
         ("GP Sum", "baseline", gp_seconds, lambda: joint_gaussian_quantile(*zip(*predictions(models["gp"])), norm.ppf(1 - alpha))),
         ("DNN Sum", "baseline", dnn_seconds, lambda: joint_gaussian_quantile(*zip(*predictions(models["dnn"])), norm.ppf(1 - alpha))),
-        ("Kingman", "baseline", gp_seconds, lambda: sum(queueing_formula_latency(mean, std ** 2, epsilon=alpha, **workload)
-                                                        for mean, std in predictions(models["gp"]))),
+        ("Kingman", "baseline", gp_seconds, lambda: sum(queueing_formula_latency(mean, std ** 2, epsilon=alpha, workers=workers, **workload)
+                                                        for (mean, std), workers in zip(predictions(models["gp"]), workers_by_position))),
     ]
     if monitored_latencies is not None:   # these two train their own models and measure that time themselves (None here)
         candidates.append(("Quantile Union", "baseline", None, lambda: summed_service_quantiles(
@@ -150,7 +155,9 @@ def queueing_formula_inputs(data, models: dict, true_mean: np.ndarray, true_var:
     predicted_mean = np.column_stack([mean for mean, _ in predictions])
     predicted_var = np.column_stack([std ** 2 for _, std in predictions])
     pessimistic_mean = np.column_stack([mean for mean, _ in models["beliefs"]])
-    formula = lambda mean, var: sum(queueing_formula_latency(mean[:, k], var[:, k], epsilon=alpha, **data.workload) for k in range(len(data.path)))
+    workers = path_workers(data) or [1] * len(data.path)
+    formula = lambda mean, var: sum(queueing_formula_latency(mean[:, k], var[:, k], epsilon=alpha, workers=workers[k], **data.workload)
+                                    for k in range(len(data.path)))
     variants = {"predicted mean, predicted variance (the baseline)": formula(predicted_mean, predicted_var),
                 "predicted mean, true variance": formula(predicted_mean, true_var),
                 "true mean, predicted variance": formula(true_mean, predicted_var),
