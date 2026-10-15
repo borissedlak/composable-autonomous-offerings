@@ -18,7 +18,8 @@ training. The second campaign has one topology per application, and every servic
 there the methods are trained on the runs of the other experiments of the campaign that contain the service (e.g. the
 runs with one to four workers for the chain with one worker); no run of the evaluated experiment is used for training.
 Alternatively (split_runs), the runs of one experiment of the second campaign are split: a part trains the models, the
-rest is held out.
+rest is held out. With unthrottled=True, only the runs in which no container of the chain was throttled take part
+(unthrottled_runs).
 
 Folder layout: `<experiment>/<start time>/dataset.csv` has one row per run and node with the configuration and summary
 statistics; `runs/<run>/trace_steps.csv` (pipelines) has one row per request and node; `runs/<run>/<node>/records.csv`
@@ -348,11 +349,20 @@ def chain_run_latencies(experiment: str, runs: list = None) -> list:
     return [measured_latencies(experiment, run_id, path) for run_id in chain_runs(experiment, runs)]
 
 
-def split_runs(experiment: str, n_train: int, seed) -> tuple:
+def unthrottled_runs(experiment: str) -> list:
+    """The runs of chain_runs in which no service was throttled: throttled_fraction (the share of the CPU scheduling
+    periods of the run in which the container had used up its CPU quota) is 0 at every node. In such a run the
+    execution times do not contain waits for the next period of the quota, which the bounds do not model."""
+    throttled = run_table(experiment).groupby("run_id")["throttled_fraction"].max()
+    return [run_id for run_id in chain_runs(experiment) if throttled[run_id] == 0]
+
+
+def split_runs(experiment: str, n_train: int, seed, unthrottled: bool = False) -> tuple:
     """The runs of one experiment of the second campaign, split into n_train training runs drawn at random and the
     held-out rest, both sorted: (training runs, held-out runs). A training run trains the model of every service of the
-    chain (split_training_pool); a held-out run is one held-out configuration of the chain."""
-    runs = np.array(chain_runs(experiment))
+    chain (split_training_pool); a held-out run is one held-out configuration of the chain. unthrottled: split only the
+    runs of unthrottled_runs; the other runs are neither trained on nor held out."""
+    runs = np.array(unthrottled_runs(experiment) if unthrottled else chain_runs(experiment))
     chosen = np.zeros(len(runs), dtype=bool)
     chosen[np.random.default_rng(seed).choice(len(runs), size=n_train, replace=False)] = True
     return list(runs[chosen]), list(runs[~chosen])
