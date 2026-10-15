@@ -19,6 +19,10 @@ modeled on their own.
 | `explain_7_which_inputs_predict_execution_time.ipynb` | Which inputs the GP of a service needs to predict the mean execution time of a run on the testbed campaign: quality knobs only, with cores per worker, with cores and parallelism, and each of the last two with the load; cross-validated MSE per service. |
 | `explain_8_which_inputs_predict_execution_time_v2.ipynb` | The question of `explain_7` on the second campaign (`statics/results_milos_v2/`) with six input sets, and a partial-correlation test (as in PC structure learning) of how strongly each input is associated with the mean execution time; the same GPs with one length scale per input (ARD); why the load of that campaign cannot be judged. |
 
+`prototype_multi_server.ipynb` (branch `multi-server` only) is a prototype outside the paper: every service as a FIFO
+pool of `parallelism` workers instead of one server, execution-time models without `parallelism` as an input (with
+and without the load per worker), and the Pegasus bounds for chains of pools, compared with today's model.
+
 The numbered notebooks belong to the paper; the `explain_` notebooks each answer one question and can be read on
 their own. Start with `explain_3` for the fundamentals of the two bounds.
 
@@ -52,8 +56,8 @@ as `from pegasus.bounds import ...`, with the working directory at `notebooks/ts
 | `finetuning.py` | Experiment C.1: split-conformal calibration of a bound with end-to-end samples, and the baselines that are trained on runs of the chain itself (Quantile Sum, Fluxion-style). |
 | `optimization.py` | Experiment C.2: the SLO-fulfillment objective of a chain, and the optimizers that choose the next run with a latency method and refit its models after every evaluated run. |
 | `load_dependence.py` | `explain_6`: how often a service of the campaign used up its CPU quota, how the processing time of an item depends on the state of its service (next to another item, back to back, after idle), and two simulators (a worker pool under a CPU quota, a service that is slower after idle). |
-| `input_sets.py` | `explain_7` and `explain_8`: the runs of every service of a campaign with their knobs, mean processing time and load, a grouped cross-validation of the GP for six input sets (results cached in `statics/input_sets/<campaign>/`), the run-to-run scatter at one configuration, the partial rank correlation test of every input with the mean execution time, and an ARD variant of the GP (one length scale per input, cached in `statics/input_sets/<campaign>_ard/`) with the range effect of every input. |
-Dependencies point one way: `input_sets` depends on `real_data` and `service_gp`; `load_dependence` depends on `bounds`, `real_data` and `simulation`; `bounds` and `simulation` depend on nothing here; `service_gp` on nothing; `baselines` on
+| `multi_server.py` | `prototype_multi_server.ipynb`: a chain of FIFO pools (simulator and emulation of the campaign), the bounds of a pool as c single-server lanes, and the execution-time models without `parallelism` as an input. |
+Dependencies point one way: `multi_server` depends on `baselines`, `bounds`, `real_data`, `service_gp` and `simulation`; `load_dependence` depends on `bounds`, `real_data` and `simulation`; `bounds` and `simulation` depend on nothing here; `service_gp` on nothing; `baselines` on
 `service_gp`; `baselines_chain` on `baselines`, `bounds` and `service_gp`; `data` on `simulation`; `real_data` on `data` and
 `simulation`; `evaluation` on `baselines`, `bounds` and `service_gp`; `exploration` on `data`, `evaluation`, `real_data`
 and `service_gp`; `finetuning` on `baselines`, `baselines_chain`, `evaluation` and `service_gp`; `optimization` on
