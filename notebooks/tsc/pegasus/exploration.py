@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import norm, qmc
 
-from .data import CONFIGURATION_RANGES, sample_configurations, synthetic_execution_moments, synthetic_execution_times
+from .data import CONFIGURATION_RANGES, sample_configurations, synthetic_execution_moments, synthetic_execution_times, whole_workers
 from .evaluation import fit_services, pegasus_bound, sweep_line, validity_legend
 from .real_data import (POOL_COLUMNS, chain_execution_moments, chain_path, encode_configurations, node_configurations, run_table,
                         training_pool)
@@ -86,7 +86,7 @@ def explore(strategy: str, services: list, service_seed: int, n_total: int, n_in
         return x, synthetic_execution_times(x, services, rng, service_seed)
     if strategy == SOBOL:
         low, high = np.array(CONFIGURATION_RANGES).T
-        x = low + (high - low) * qmc.Sobol(d=len(low), scramble=True, seed=rng).random(n_total)
+        x = whole_workers(low + (high - low) * qmc.Sobol(d=len(low), scramble=True, seed=rng).random(n_total))
         return x, synthetic_execution_times(x, services, rng, service_seed)
     x, y = initial, synthetic_execution_times(initial, services, rng, service_seed)
     available = np.ones(n_candidates, dtype=bool)

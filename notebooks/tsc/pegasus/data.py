@@ -1,7 +1,8 @@
 """Data of the experiments in `2_evaluation.ipynb`, from one of two sources (`data_source` in the notebook):
 
 - "synthetic": services whose mean execution time is a known function of the configuration (CPU, quality,
-  parallelism), and a simulated chain of FIFO single-server queues as ground truth. A seeded generator provides as
+  parallelism), and a simulated chain of FIFO queues as ground truth, where the parallelism of a configuration is the
+  number of workers of every service (1 to 4). A seeded generator provides as
   many service types as a chain needs, so that no chain repeats a service type.
 - "real": the testbed campaign in `statics/results_milos/`, see `real_data.py`: measured processing times of real
   services, replayed through the same FIFO queues.
@@ -13,10 +14,12 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
+from .service_gp import configurations_of
 from .simulation import execution_times, quantile_with_lower_bound, simulate_chain
 
 # Synthetic service types. The mean execution time (s) of a service at the configuration (CPU, quality, parallelism) is
-# base + cpu / CPU + quality * quality_knob ** power; noise is the standard deviation of one execution time (s).
+# base + cpu / CPU + quality * quality_knob ** power; noise is the standard deviation of one execution time (s). CPU is
+# the CPU of one worker, so the execution time of an item does not depend on the parallelism (the number of workers).
 # Every service type is drawn from these ranges, which span the three hand-made services of 1_method_synthetic.ipynb. The slowest
 # possible service takes 0.012 + 0.040 / 0.5 + 0.030 * 2 ** 2 = 0.212 s at the slowest configuration (CPU 0.5, quality 2).
 GENERATED_RANGES = dict(base=(0.006, 0.012), cpu=(0.025, 0.040), quality=(0.015, 0.030), power=(1.5, 2.0), noise=(0.001, 0.006))
@@ -60,6 +63,8 @@ class ChainData:
     y_train_spread: dict = None               # real data: service -> standard deviation of single items in every training run (s)
     x_train_load: dict = None                 # inputs of the baselines monitored under load where they differ from x_train:
     x_test_load: dict = None                  # the configuration and the arrival rate, if the rate differs between configurations
+    workers_column: object = None             # column of x_test that holds the number of workers of a service (an int, or a
+                                              # dictionary service -> int or None like x_test); None: one worker
 
 
 def true_demand(x: np.ndarray, service: dict) -> np.ndarray:
@@ -70,8 +75,9 @@ def true_demand(x: np.ndarray, service: dict) -> np.ndarray:
 
 def busiest_utilization(path: list, x: np.ndarray, rate: float, service_seed: int = 0) -> np.ndarray:
     """True utilization of the busiest service of the synthetic chain `path`, per configuration of x: the arrival rate
-    (items/s) times the largest mean execution time (s) among the services. At 1 or above, that service is overloaded."""
-    return rate * np.max([true_demand(x, synthetic_service(s, service_seed)) for s in path], axis=0)
+    (items/s) times the largest mean execution time (s) among the services, divided by the number of workers (the
+    parallelism). At 1 or above, that service is overloaded."""
+    return rate * np.max([true_demand(x, synthetic_service(s, service_seed)) for s in path], axis=0) / x[:, WORKERS_COLUMN]
 
 
 def synthetic_execution_moments(path: list, x: np.ndarray, service_seed: int = 0) -> tuple:
@@ -82,20 +88,47 @@ def synthetic_execution_moments(path: list, x: np.ndarray, service_seed: int = 0
     mean = np.column_stack([true_demand(x, service) for service in services])
     return mean, np.broadcast_to([service["noise"] ** 2 for service in services], mean.shape).copy()
 
+WORKERS_COLUMN = 2   # the parallelism, the number of workers of every service of a synthetic chain
 
-CONFIGURATION_RANGES = ((0.5, 2.0), (0.5, 2.0), (1.0, 4.0))   # range of CPU, quality and parallelism in the synthetic system
+# Range of CPU, quality and parallelism in the synthetic system; the parallelism is drawn from [1, 5) and rounded down
+# to a whole number of workers, 1 to 4 (whole_workers)
+CONFIGURATION_RANGES = ((0.5, 2.0), (0.5, 2.0), (1.0, 5.0))
+
+
+def whole_workers(x: np.ndarray) -> np.ndarray:
+    """x with its parallelism (third column) rounded down to a whole number of workers."""
+    x = np.array(x, dtype=float)
+    x[:, WORKERS_COLUMN] = np.floor(x[:, WORKERS_COLUMN])
+    return x
+
+
+def chain_workers(x: np.ndarray, depth: int) -> np.ndarray:
+    """Workers of every service of a synthetic chain with `depth` services, (configurations, depth): every service has
+    the parallelism of the configuration."""
+    return np.repeat(x[:, WORKERS_COLUMN:WORKERS_COLUMN + 1].astype(int), depth, axis=1)
+
+
+def path_workers(data: ChainData) -> list:
+    """Workers of every position of the chain of `data` at its held-out configurations, one array per position (read
+    from x_test, so that it follows any replacement of x_test); None if every service has one worker."""
+    if data.workers_column is None:
+        return None
+    column = lambda s: data.workers_column[s] if isinstance(data.workers_column, dict) else data.workers_column
+    n_cfgs = len(configurations_of(data.x_test, data.path[0]))
+    return [np.ones(n_cfgs, dtype=int) if column(s) is None else configurations_of(data.x_test, s)[:, column(s)].astype(int) for s in data.path]
 
 
 def sample_configurations(n: int, rng: np.random.Generator) -> np.ndarray:
-    """n configurations drawn uniformly from the range of the synthetic system: CPU, quality, parallelism."""
-    return np.column_stack([rng.uniform(low, high, n) for low, high in CONFIGURATION_RANGES])
+    """n configurations drawn uniformly from the range of the synthetic system: CPU, quality, parallelism (whole
+    workers)."""
+    return whole_workers(np.column_stack([rng.uniform(low, high, n) for low, high in CONFIGURATION_RANGES]))
 
 
 def _simulate(x_cfgs, path, workload, n_items, item_correlation, rng, service_seed, **options):
     services = [synthetic_service(s, service_seed) for s in path]
     mean_execution = np.column_stack([true_demand(x_cfgs, service) for service in services])
     return simulate_chain(mean_execution, [service["noise"] for service in services], n_items=n_items,
-                          item_correlation=item_correlation, rng=rng, **workload, **options)
+                          item_correlation=item_correlation, rng=rng, workers=chain_workers(x_cfgs, len(path)), **workload, **options)
 
 
 def _execution_times(x_train, services, rng, service_seed, tail=0.0):
@@ -159,7 +192,8 @@ def synthetic_chain_data(path: list, level: float, coverage_check: dict, seed: i
                                      for s in services}
 
     return ChainData(path, workload, x_train, y_train, x_test, measured, measured_low, node_latencies,
-                     trace_node_latencies, monitored_arrivals, monitored_latencies, x_extra, extra_monitored_latencies)
+                     trace_node_latencies, monitored_arrivals, monitored_latencies, x_extra, extra_monitored_latencies,
+                     workers_column=WORKERS_COLUMN)
 
 
 def synthetic_training_data(services: list, workload: dict, n_train: int, seed, item_correlation: float = 0.0,
