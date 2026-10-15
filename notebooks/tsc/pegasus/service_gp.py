@@ -142,7 +142,7 @@ def train_run_statistics_models(X_train, y_mean_dict: dict, y_spread_dict: dict,
 def run_statistics_belief(model: RunStatisticsModel, x_cfg, confidence=0.95):
     """Belief about the execution time from a RunStatisticsModel, in the form of execution_time_belief: a pessimistic
     mean (s) and the variance of individual items (s^2). The pessimistic mean is the predicted mean of a new run
-    shifted up by z_c standard deviations of that prediction, so that it lies above the mean of a new run with
+    shifted up by z_gamma standard deviations of that prediction (gamma = `confidence`), so that it lies above the mean of a new run with
     probability `confidence` if the GP's predictive distribution is right. The variance is the square of the predicted
     standard deviation of single items; it has no margin of its own."""
     return model.mean(x_cfg, norm.ppf(confidence)), np.exp(model.spread.predict(x_cfg)) ** 2
@@ -151,7 +151,7 @@ def run_statistics_belief(model: RunStatisticsModel, x_cfg, confidence=0.95):
 def execution_time_belief(model, x_cfg, confidence=0.95):
     """Belief about the execution time of one item at the configurations x_cfg: a pessimistic mean (s) and the variance of
     individual items (s^2). The GP's error about the mean (epistemic) is shared by every item at a configuration and does
-    not average out over the items in a queue, so it shifts the mean, mu + z_c * sigma_epistemic, which lies above the true
-    mean with probability `confidence`; the scatter of individual items (aleatoric) is the variance per item."""
+    not average out over the items in a queue, so it shifts the mean, m + z_gamma * sigma_epistemic, which lies above the true
+    mean with probability gamma = `confidence`; the scatter of individual items (aleatoric) is the variance per item."""
     mu, _, var_epistemic, var_aleatoric = model.predict(x_cfg, return_variance_components=True)
     return mu + norm.ppf(confidence) * np.sqrt(var_epistemic), var_aleatoric

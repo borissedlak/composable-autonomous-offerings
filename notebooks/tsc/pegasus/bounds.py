@@ -5,16 +5,16 @@ Shared by the notebooks of this folder. Every function takes the arrival process
 (gamma-distributed gaps with mean 1/rate and squared coefficient of variation cv2 = variance / mean^2; cv2 = 1 is the
 Poisson process, a smaller cv2 spaces the arrivals more evenly and a larger one makes them burstier). Only the functions
 that take `cv2` know the gamma process.
-Execution times are Gaussian with the given mean and variance (s, s^2); bounds are latencies in seconds that are
+Execution times Y are Gaussian with the given mean m and variance (s, s^2); bounds are latencies in seconds that are
 exceeded with probability at most `epsilon`. Vectorized functions take one mean/variance per configuration.
 `rate` is one number, or one arrival rate per configuration (real data: every run of a chain has its own rate).
 The simulator that provides the ground truth is in `simulation.py`.
 
-Workers. A service with w workers takes the items in the order of arrival and gives each to the first free worker
-(a FIFO queue with w servers). Its waiting time is at most the waiting time under *cyclic assignment*, where every w-th
+Workers. A service with c workers takes the items in the order of arrival and gives each to the first free worker
+(a FIFO queue with c servers). Its waiting time is at most the waiting time under *cyclic assignment*, where every c-th
 item goes to the same worker (Wolff, "An upper bound for multi-channel queues", J. Appl. Prob. 14, 1977). Under cyclic
-assignment, every worker is a single-server queue whose gaps between arrivals are sums of w consecutive gaps, so
-E[exp(-theta T)] becomes E[exp(-theta T)]^w for i.i.d. gaps. Every bound below applies this to a node with w workers
+assignment, every worker is a single-server queue whose gaps between arrivals are sums of c consecutive gaps, so
+E[exp(-theta T)] becomes E[exp(-theta T)]^c for i.i.d. gaps. Every bound below applies this to a node with c workers
 (`workers`: one number, or one per configuration; `path_workers`: one such entry per node; default one worker, which
 gives the single-server bounds unchanged). The bound is looser than the true multi-server wait, because a worker of
 the cyclic system may wait while another one is free.
@@ -68,8 +68,8 @@ def log_worker_gap_mgf(process, rate, workers, jitter=0.1, theta=THETA_GRID, cv2
 # SNC bound (union bound over queue lengths + Chernoff)
 # ------------------------------------------------------------------------------
 def log_latency_moment(mean, var, process, rate, jitter=0.1, theta=THETA_GRID, workers=1):
-    """ln of M_X(theta) / (1 - rho(theta)), one row per configuration; inf where rho >= 1. With w workers,
-    rho(theta) = M_X(theta) E[exp(-theta T)]^w (cyclic assignment, module docstring)."""
+    """ln of M_Y(theta) / (1 - phi(theta)), one row per configuration; inf where phi >= 1. With c workers,
+    phi(theta) = M_Y(theta) E[exp(-theta T)]^c (cyclic assignment, module docstring)."""
     mean, var = np.atleast_1d(mean)[:, None], np.atleast_1d(var)[:, None]
     log_mgf = theta * mean + 0.5 * theta ** 2 * var
     log_rho = log_mgf + log_worker_gap_mgf(process, rate, worker_counts(workers, len(mean)), jitter, theta)
@@ -92,7 +92,7 @@ def snc_latency_bound(mean, var, process, rate, epsilon, jitter=0.1, workers=1):
 # SNC bound with propagated arrival models (node k is fed by the departures of node k-1)
 # ------------------------------------------------------------------------------
 def queue_log_moment(log_mgf_node, log_spacing):
-    """ln sum_n M_X(theta)^(n+1) E[exp(-theta A_n)], where log_spacing[..., n] bounds ln E[exp(-theta A_n)].
+    """ln sum_n M_Y(theta)^(n+1) E[exp(-theta A_n)], where log_spacing[..., n] bounds ln E[exp(-theta A_n)].
     log_spacing is a minimum of functions linear in n, so the log-terms are concave in n: beyond the last n every term
     shrinks at least by the last ratio r, and the rest of the sum is at most term_last * r / (1 - r). inf if r >= 1."""
     n = np.arange(log_spacing.shape[-1])
@@ -107,7 +107,7 @@ def queue_log_moment(log_mgf_node, log_spacing):
 
 def propagated_node_moments(path_beliefs, process, rate, jitter=0.1, n_max=200, chunk=5, theta=THETA_GRID, path_lower_means=None,
                             path_workers=None):
-    """ln of the latency moment sum_n M_X(theta)^(n+1) E[exp(-theta A_n)] of every node on the path, shape (nodes,
+    """ln of the latency moment sum_n M_Y(theta)^(n+1) E[exp(-theta A_n)] of every node on the path, shape (nodes,
     configurations, theta). It does not depend on epsilon, and node k only depends on nodes 1..k, so the moments of the
     longest chain serve every shorter prefix and every epsilon (see propagated_node_bounds).
     The arrival spacing of node k is the smallest of three bounds: the service spacing of node k-1, the arrival spacing
@@ -115,8 +115,8 @@ def propagated_node_moments(path_beliefs, process, rate, jitter=0.1, n_max=200, 
     is never looser than the SNC bound. path_beliefs: one (mean, var) pair per node. n_max: queue lengths summed explicitly
     (the rest by a geometric tail). path_lower_means: the lower (optimistic) mean of every node, used where its execution
     times space the items for the next node (a faster node spaces them less); defaults to the means of path_beliefs.
-    path_workers: workers of every node (module docstring), default one each. A worker of a node with w workers receives
-    every w-th item, so its n-th item before is n * w items earlier in the stream: its spacing is A_(n w). The first two
+    path_workers: workers of every node (module docstring), default one each. A worker of a node with c workers receives
+    every c-th item, so its n-th item before is n * c items earlier in the stream: its spacing is A_(n c). The first two
     bounds on the spacing of node k need the items to leave node k-1 in order, one at a time; after a node with more than
     one worker, node k assumes the external arrival process."""
     n_cfgs = len(np.atleast_1d(path_beliefs[0][0]))
@@ -164,7 +164,7 @@ def propagated_node_bounds(path_beliefs, process, rate, epsilon, jitter=0.1, n_m
 # Network service curve with Hoelder's inequality (one bound for the whole chain, any dependence between nodes)
 # ------------------------------------------------------------------------------
 def path_log_gap_mgf(path_beliefs, process, rate, jitter=0.1, theta=THETA_GRID, cv2=1.0, path_workers=None):
-    """ln E[exp(-theta T)]^(w_k) of every node k of the path (one worker's gap under cyclic assignment, module
+    """ln E[exp(-theta T)]^(c_k) of every node k of the path (one worker's gap under cyclic assignment, module
     docstring), shape (nodes, configurations, theta); without path_workers the same for every node, shape (theta,) or
     (configurations, theta)."""
     if path_workers is None:
@@ -175,9 +175,9 @@ def path_log_gap_mgf(path_beliefs, process, rate, jitter=0.1, theta=THETA_GRID, 
 
 def network_log_moment(path_beliefs, process, rate, jitter=0.1, theta=THETA_GRID, holder_exponents=None, iterations=50, cv2=1.0,
                        path_workers=None):
-    """ln of prod_k M~_k(theta) / (1 - M~_k(theta) E[exp(-theta T)]^(w_k)), one row per configuration, where M~_k is
+    """ln of prod_k M~_k(theta) / (1 - M~_k(theta) E[exp(-theta T)]^(c_k)), one row per configuration, where M~_k is
     node k's Gaussian execution-time MGF with its variance multiplied by the Hoelder exponent p_k (sum_k 1/p_k = 1) and
-    w_k its number of workers (path_workers, default one each).
+    c_k its number of workers (path_workers, default one each).
     holder_exponents: one fixed p_k per node; None tunes them per configuration and theta (see network_service_bound)."""
     n_nodes = len(path_beliefs)
     mean = np.stack([np.atleast_1d(m)[:, None] for m, _ in path_beliefs])   # (nodes, configurations, 1)
@@ -198,7 +198,7 @@ def network_log_moment(path_beliefs, process, rate, jitter=0.1, theta=THETA_GRID
         share = np.reshape(1 / np.asarray(holder_exponents, dtype=float), (-1, 1, 1))
         return node_moments(share)[0].sum(axis=0)
     # Tuned exponents: minimizing sum_k moment_k over the shares q_k = 1 / p_k (sum 1) is convex; its optimality
-    # condition gives q_k proportional to sigma_k / sqrt(1 - rho_k), solved by a damped fixed-point iteration. Any shares
+    # condition gives q_k proportional to sigma_k / sqrt(1 - phi_k), solved by a damped fixed-point iteration. Any shares
     # that sum to 1 give a valid bound, so the result is the smaller of the tuned and the equal (p_k = K) shares.
     equal = node_moments(np.full((n_nodes, 1, 1), 1 / n_nodes))[0].sum(axis=0)
     share = np.full(np.broadcast_shapes(mean.shape, theta.shape), 1 / n_nodes)
@@ -219,7 +219,7 @@ def network_service_bound(path_beliefs, process, rate, epsilon, jitter=0.1, thet
     holder_exponents: fixed p_k per node; None tunes them per configuration and theta. All ones gives the independent
     SNC convolution, which skips the Hoelder step: a guarantee only if the execution times of an item are independent
     between the nodes. cv2: squared coefficient of variation of the gaps between arrivals (gamma arrivals only).
-    path_workers: workers of every node; a node with w workers enters with the cyclic-assignment factor of the module
+    path_workers: workers of every node; a node with c workers enters with the cyclic-assignment factor of the module
     docstring. The derivation over paths through (item, node) assumes that items leave every node in order, which a
     node with several workers does not guarantee; with workers, this composition is checked against the simulation
     only, not proven."""
@@ -231,7 +231,7 @@ def network_service_bound(path_beliefs, process, rate, epsilon, jitter=0.1, thet
 def network_bound_terms(path_beliefs, process, rate, epsilon, jitter=0.1, theta=THETA_GRID, cv2=1.0, path_workers=None):
     """The three terms of network_service_bound for independent nodes (all Hoelder exponents 1), at the theta that
     minimizes their sum, per configuration (s): the pessimistic execution time sum_k ln M_k(theta) / theta, the queueing
-    term sum_k -ln(1 - rho_k(theta)) / theta, and the price of confidence ln(1 / epsilon) / theta. The fourth value is
+    term sum_k -ln(1 - phi_k(theta)) / theta, and the price of confidence ln(1 / epsilon) / theta. The fourth value is
     that theta (1/s). The three terms add up to network_service_bound(..., holder_exponents=[1] * K); all are inf where
     a node is overloaded at every theta."""
     mean = np.stack([np.atleast_1d(m)[:, None] for m, _ in path_beliefs])   # (nodes, configurations, 1)
@@ -251,8 +251,8 @@ def network_bound_terms(path_beliefs, process, rate, epsilon, jitter=0.1, theta=
 # Martingale bound (Kingman; Pollaczek-Khinchine refinement for Poisson arrivals)
 # ------------------------------------------------------------------------------
 def martingale_theta(mean, var, process, rate, jitter=0.1, theta=THETA_GRID, cv2=1.0, workers=1):
-    """Largest grid theta below the first crossing of rho(theta) = 1; nan if there is none (overloaded node). With w
-    workers, rho(theta) = M_X(theta) E[exp(-theta T)]^w (cyclic assignment, module docstring)."""
+    """Largest grid theta below the first crossing of phi(theta) = 1; nan if there is none (overloaded node). With c
+    workers, phi(theta) = M_Y(theta) E[exp(-theta T)]^c (cyclic assignment, module docstring)."""
     log_rho = theta * mean[:, None] + 0.5 * theta ** 2 * var[:, None] + log_worker_gap_mgf(process, rate, worker_counts(workers, len(mean)),
                                                                                            jitter, theta, cv2)
     crossing = np.where(np.any(log_rho >= 0, axis=1), np.argmax(log_rho >= 0, axis=1), len(theta))
@@ -261,7 +261,7 @@ def martingale_theta(mean, var, process, rate, jitter=0.1, theta=THETA_GRID, cv2
 
 def waiting_time_tail(w, mean, sd, theta, process, rate, single_worker=True):
     """Bound on P(Q > w) for the waiting time Q, w >= 0: Pollaczek-Khinchine refinement for Poisson arrivals at a node
-    with one worker, Kingman's exp(-theta w) otherwise (a worker of a node with several workers receives every w-th item
+    with one worker, Kingman's exp(-theta w) otherwise (a worker of a node with c workers receives every c-th item
     under cyclic assignment, which is no longer a Poisson stream). One rate per configuration, and single_worker (bool,
     one per configuration), must have the shape of mean, sd and theta (one column)."""
     w = np.maximum(w, 0.0)
@@ -269,8 +269,8 @@ def waiting_time_tail(w, mean, sd, theta, process, rate, single_worker=True):
     if process != "poisson" or not np.any(single_worker):
         return np.minimum(1.0, kingman)
     z_w, z_0 = (w - mean) / sd, -mean / sd
-    beyond = sd * (norm.pdf(z_w) - z_w * norm.sf(z_w))                  # int_w^inf P(X > x) dx
-    below = (norm.sf(z_w) - kingman * norm.sf(z_0)) / theta             # e^{-theta w} int_0^w P(X > x) e^{theta x} dx ...
+    beyond = sd * (norm.pdf(z_w) - z_w * norm.sf(z_w))                  # int_w^inf P(Y > x) dx
+    below = (norm.sf(z_w) - kingman * norm.sf(z_0)) / theta             # e^{-theta w} int_0^w P(Y > x) e^{theta x} dx ...
     mass = norm.cdf((w - mean - theta * sd ** 2) / sd) - norm.cdf((-mean - theta * sd ** 2) / sd)
     with np.errstate(divide="ignore"):
         below = below + np.exp(-theta * w + theta * mean + 0.5 * theta ** 2 * sd ** 2 + np.log(np.maximum(mass, 0.0))) / theta
@@ -279,9 +279,9 @@ def waiting_time_tail(w, mean, sd, theta, process, rate, single_worker=True):
 
 
 def martingale_node_bound(mean, var, process, rate, epsilon, jitter=0.1, bins=4000, iterations=30, workers=1):
-    """Smallest d with P(Q + X > d) <= epsilon, per configuration; inf for overloaded nodes.
+    """Smallest d with P(Q + Y > d) <= epsilon, per configuration; inf for overloaded nodes.
     epsilon may be a scalar (result: one bound per configuration) or a sequence (result: one row per epsilon); all
-    epsilons are solved in the same bisection. E_X[P(Q > d - X)] uses `bins` equal-probability bins of X at their upper
+    epsilons are solved in the same bisection. E_Y[P(Q > d - Y)] uses `bins` equal-probability bins of Y at their upper
     edges, the last bin counted as a violation, so the discretization can only make the bound larger. The bisection over
     [mean, mean + 60 s] returns its upper end, so it can only err upwards, by at most 60 s / 2^iterations (56 ns for 30).
     workers: workers of the node, see the module docstring."""
@@ -311,10 +311,10 @@ def martingale_node_bound(mean, var, process, rate, epsilon, jitter=0.1, bins=40
 def spacing_decay_rate(mean, var, previous_lower_mean, previous_var, workers, previous_workers):
     """Decay rate theta_s (1/s) of Kingman's bound exp(-theta_s w) on the waiting time of a node that receives the
     departures of the node before it, per configuration; 0 where there is none. A node before with one worker releases
-    the items in order and no two closer together than its execution times, so the items i and i + w that a worker of
-    the node receives under cyclic assignment are at least w execution times of the node before apart. The wait is then
-    the maximum of a random walk with increments X - (X'_1 + ... + X'_w), whose Gaussian decay rate is
-    theta_s = 2 (w mean_prev - mean) / (var + w var_prev). After a node with several workers there is no such spacing."""
+    the items in order and no two closer together than its execution times, so the items i and i + c that a worker of
+    the node receives under cyclic assignment are at least c execution times of the node before apart. The wait is then
+    the maximum of a random walk with increments Y - (Y'_1 + ... + Y'_c), whose Gaussian decay rate is
+    theta_s = 2 (c m'^- - m^+) / (var + c var_prev), with m^+ = mean and m'^- = previous_lower_mean. After a node with several workers there is no such spacing."""
     spacing = 2 * (workers * np.atleast_1d(previous_lower_mean) - mean) / (var + workers * np.atleast_1d(previous_var))
     return np.where(previous_workers == 1, np.maximum(spacing, 0.0), 0.0)
 
@@ -373,12 +373,12 @@ def martingale_propagated_node_bounds(path_beliefs, path_lower_means, process, r
 # ------------------------------------------------------------------------------
 def martingale_closed_form_node_bound(mean, var, process, rate, epsilon, jitter=0.1, previous_lower_mean=None, previous_var=None,
                                       iterations=40, cv2=1.0, workers=1, previous_workers=1):
-    """Smallest d with P(Q + X > d) <= epsilon from a closed formula, per configuration; inf for overloaded nodes.
-    Q is the waiting time and X ~ N(mean, var) the item's own execution time (s), independent of Q.
+    """Smallest d with P(Q + Y > d) <= epsilon from a closed formula, per configuration; inf for overloaded nodes.
+    Q is the waiting time and Y ~ N(mean, var) the item's own execution time (s), independent of Q.
     1. Waiting time: Kingman's martingale bound P(Q > w) <= exp(-theta w) for w >= 0, with theta the decay rate of
-       martingale_theta (the largest grid theta with rho(theta) <= 1; any smaller theta is valid as well).
-    2. Latency: P(Q + X > d) = E_X[P(Q > d - X)] <= E_X[min(1, exp(-theta (d - X)))], which for a Gaussian X is
-       P(X > d) + exp(-theta (d - mean) + theta^2 var / 2) * Phi((d - mean - theta var) / sd), with Phi the standard
+       martingale_theta (the largest grid theta with phi(theta) <= 1; any smaller theta is valid as well).
+    2. Latency: P(Q + Y > d) = E_Y[P(Q > d - Y)] <= E_Y[min(1, exp(-theta (d - Y)))], which for a Gaussian Y is
+       P(Y > d) + exp(-theta (d - mean) + theta^2 var / 2) * Phi((d - mean - theta var) / sd), with Phi the standard
        normal distribution function. No discretization of X is needed; d is found by bisection on this formula.
     With previous_lower_mean and previous_var (the optimistic mean and the variance of the node before, see
     martingale_propagated_node_bound), the node receives the departures of that node: the waiting time then also obeys
@@ -397,7 +397,7 @@ def martingale_closed_form_node_bound(mean, var, process, rate, epsilon, jitter=
         theta = np.fmax(theta, np.where(theta_spacing > 0, theta_spacing, np.nan))   # fmax ignores a nan on one side
     rate_of_decay = np.nan_to_num(theta, nan=1.0)   # placeholder where there is no valid rate; those entries become inf below
 
-    def tail(d):   # bound on P(Q + X > d); the second term in log space, because theta^2 var can be very large
+    def tail(d):   # bound on P(Q + Y > d); the second term in log space, because theta^2 var can be very large
         waits = np.exp(-rate_of_decay * (d - mean) + 0.5 * rate_of_decay ** 2 * var + norm.logcdf((d - mean - rate_of_decay * var) / sd))
         return norm.sf((d - mean) / sd) + waits
 

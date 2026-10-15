@@ -36,10 +36,10 @@ def compute_snc_mgf_delay_bound(model, x_cfg, alpha=0.01):
     """
     Chernoff bound on a single execution time, no queue (= the SNC latency bound with lambda -> 0).
 
-    Using log M_Y(theta) = theta*mu + (theta^2 / 2)*var, Chernoff's bound gives:
+    Using log M_Y(theta) = theta*m + (theta^2 / 2)*var, with m the mean execution time, Chernoff's bound gives:
     P(Y >= D) <= exp(log M_Y(theta) - theta*D) = alpha
     Solving for optimal theta* yields: theta* = sqrt(-2*ln(alpha) / var)
-    Plugging theta* back yields: D_i(alpha) = mu + sqrt(-2*ln(alpha) * var)
+    Plugging theta* back yields: D_i(alpha) = m + sqrt(-2*ln(alpha) * var)
     """
     mu, std_total, var_epistemic, var_aleatoric = model.predict(x_cfg, return_variance_components=True)
     var_total = std_total ** 2

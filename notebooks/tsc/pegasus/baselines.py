@@ -186,8 +186,8 @@ def queueing_formula_latency(mean, var, process, rate, epsilon, jitter=0.1, iter
     """(1 - epsilon) latency quantile (s) of one FIFO queue with `workers` workers (one number or one per
     configuration) from textbook queueing formulas, per configuration; inf where the service is overloaded. mean, var:
     execution time of one item (s, s^2); process, rate, jitter: the arrival process as in bounds.py.
-    1. Mean waiting time, the Allen-Cunneen approximation for a G/G/w queue:
-       E[Q] = P_wait / (w (1 - rho)) * (C_a^2 + C_s^2) / 2 * mean, with the utilization rho = rate * mean / w, the
+    1. Mean waiting time, the Allen-Cunneen approximation for a G/G/c queue with c workers:
+       E[Q] = P_wait / (c (1 - rho)) * (C_a^2 + C_s^2) / 2 * mean, with the utilization rho = rate * mean / c, the
        probability of waiting P_wait from Erlang's C formula (erlang_c; P_wait = rho for one worker, which gives Kingman's
        G/G/1 formula), the squared coefficient of variation of the execution time C_s^2 = var / mean^2 and that of the
        gaps between arrivals C_a^2 (1 for Poisson arrivals, where the one-worker formula is the exact Pollaczek-Khinchine
