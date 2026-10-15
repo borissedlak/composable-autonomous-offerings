@@ -11,6 +11,7 @@ import numpy as np
 from .baselines import summed_service_quantiles
 from .baselines_chain import fluxion_training_rows, train_fluxion_chain
 from .evaluation import PROPOSED, PROPOSED_SNC
+from .data import model_inputs
 from .service_gp import configurations_of
 
 FINETUNED = {PROPOSED: "Pegasus per node, fine-tuned", PROPOSED_SNC: "Pegasus SNC, fine-tuned"}
@@ -52,8 +53,8 @@ def finetuned_bound(bound: np.ndarray, measured: np.ndarray, samples: np.ndarray
 
 def _chain_inputs(data, service: str) -> np.ndarray:
     """Inputs of a model of one service inside the chain at all held-out configurations: its configuration, and with
-    real data also the arrival rate of the run (ChainData.x_test_load)."""
-    return configurations_of(data.x_test if data.x_test_load is None else data.x_test_load, service)
+    real data also the arrival rate of the run (ChainData.x_test_load); without the number of workers (model_inputs)."""
+    return configurations_of(model_inputs(data.x_test if data.x_test_load is None else data.x_test_load, data.workers_column), service)
 
 
 def quantile_sum(data, samples: np.ndarray, test: np.ndarray, alpha: float) -> np.ndarray:

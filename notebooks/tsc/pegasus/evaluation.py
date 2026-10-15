@@ -17,7 +17,7 @@ from .baselines import (conformal_service_bounds, joint_gaussian_quantile, queue
 from .service_gp import (RunStatisticsModel, configurations_of, execution_time_belief, run_statistics_belief, train_gp_models,
                          train_run_statistics_models)
 from .bounds import martingale_closed_form_node_bounds, network_service_bound
-from .data import path_workers
+from .data import model_inputs, path_workers
 
 PROPOSED = "Pegasus per node (ours)"   # union bound over the node bounds
 PROPOSED_SNC = "Pegasus SNC (ours)"    # one bound for the whole chain from its network service curve
@@ -40,8 +40,10 @@ def fit_services(data, x_train, y_train: dict, model_seed: int, confidence: floa
     of a service is then fitted on the logarithm of the run means and predicts the mean execution time, a further GP
     per service predicts the standard deviation of single items from the spreads, and the beliefs come from both
     (RunStatisticsModel in service_gp.py). The time to train the spread GPs is part of "gp". The DNN is trained on the
-    run means and uses the same spread GP."""
+    run means and uses the same spread GP.
+    No model receives the number of workers of a configuration (model_inputs in data.py)."""
     services = sorted(set(data.path))
+    x_train, x_test = model_inputs(x_train, data.workers_column), model_inputs(data.x_test, data.workers_column)
     from_runs = data.y_train_spread is not None
     belief_of = run_statistics_belief if from_runs else execution_time_belief
     started = time.perf_counter()
@@ -57,8 +59,8 @@ def fit_services(data, x_train, y_train: dict, model_seed: int, confidence: floa
         dnn = {s: RunStatisticsModel(dnn[s], spread[s], log_center=False) for s in services}
     dnn_seconds = time.perf_counter() - started
     started = time.perf_counter()
-    belief = {s: belief_of(gp[s], configurations_of(data.x_test, s), confidence) for s in services}
-    lower_mean = {s: belief_of(gp[s], configurations_of(data.x_test, s), 1 - confidence)[0] for s in services}
+    belief = {s: belief_of(gp[s], configurations_of(x_test, s), confidence) for s in services}
+    lower_mean = {s: belief_of(gp[s], configurations_of(x_test, s), 1 - confidence)[0] for s in services}
     belief_seconds = time.perf_counter() - started
     return dict(gp=gp, dnn=dnn, seconds=dict(gp=gp_seconds, dnn=dnn_seconds, beliefs=belief_seconds),
                 beliefs=[belief[s] for s in data.path], lower_means=[lower_mean[s] for s in data.path])
@@ -100,12 +102,15 @@ def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alph
     leave_out: names of methods that are not computed.
     With real data (data.y_train_spread is given), the GPs of Quantile Union and Conformal are fitted on the logarithm
     of the latency quantile, like the GP of the mean execution time (fit_services): the latency of a real service
-    differs by orders of magnitude between its configurations."""
+    differs by orders of magnitude between its configurations. No model receives the number of workers of a
+    configuration (model_inputs in data.py); Kingman and both versions of Pegasus get it from path_workers."""
     K, workload = len(data.path), data.workload
     workers_by_position = path_workers(data) or [1] * K
     log_target = data.y_train_spread is not None
     x_load, x_test_load = (x_train, data.x_test) if x_train_load is None else (x_train_load, data.x_test_load)
-    predictions = lambda fitted: [fitted[s].predict(configurations_of(data.x_test, s), return_std=True) for s in data.path]
+    x_load, x_test_load = model_inputs(x_load, data.workers_column), model_inputs(x_test_load, data.workers_column)   # the rate stays the last column
+    x_test = model_inputs(data.x_test, data.workers_column)
+    predictions = lambda fitted: [fitted[s].predict(configurations_of(x_test, s), return_std=True) for s in data.path]
     gp_seconds, dnn_seconds = models["seconds"]["gp"], models["seconds"]["dnn"]
     # name, group, time to train the models the method shares with others, function that computes its latencies
     candidates = [
@@ -151,7 +156,8 @@ def queueing_formula_inputs(data, models: dict, true_mean: np.ndarray, true_var:
     Returns a dictionary variant -> end-to-end latency per held-out configuration (s), and the relative error of the
     predicted mean, predicted / true - 1, at the busiest service of every held-out configuration (the service with the
     largest true mean)."""
-    predictions = [models["gp"][s].predict(configurations_of(data.x_test, s), return_std=True) for s in data.path]
+    x_test = model_inputs(data.x_test, data.workers_column)
+    predictions = [models["gp"][s].predict(configurations_of(x_test, s), return_std=True) for s in data.path]
     predicted_mean = np.column_stack([mean for mean, _ in predictions])
     predicted_var = np.column_stack([std ** 2 for _, std in predictions])
     pessimistic_mean = np.column_stack([mean for mean, _ in models["beliefs"]])

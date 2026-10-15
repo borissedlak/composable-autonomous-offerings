@@ -414,8 +414,8 @@ def real_replay_data(experiment: str, seed, utilization: float = 0.5, n_train: i
     not used.
     split: (training runs, held-out runs) of split_runs; the training compositions are then drawn from the training runs
     of the experiment, and x_test holds the held-out runs.
-    Returns x_train (training compositions, features): the configurations of all services next to each other and
-    log10 of the arrival rate; the arrival times and the latencies (s) of the monitored items, each a dictionary
+    Returns x_train (training compositions, features): the configurations of all services next to each other, without
+    the number of workers (no model receives it, see model_inputs in data.py), and log10 of the arrival rate; the arrival times and the latencies (s) of the monitored items, each a dictionary
     service -> (training compositions, items); and x_test, the same features for every held-out run of the chain."""
     rng = np.random.default_rng(seed)
     chain = run_table(experiment)
@@ -430,8 +430,8 @@ def real_replay_data(experiment: str, seed, utilization: float = 0.5, n_train: i
     for node in path:
         pool = pools[node]
         chosen = drawn.merge(pool, on=["experiment", "run_id"]) if measured else pool.iloc[rng.choice(len(pool), size=n_train, replace=False)]
-        knobs = [column for column in pool.columns if column not in POOL_COLUMNS]
-        x_train, x_test = encode_configurations(chosen[knobs], node_configurations(chain, node).loc[runs])
+        knobs = [column for column in pool.columns if column not in POOL_COLUMNS and column != "parallelism"]
+        x_train, x_test = encode_configurations(chosen[knobs], node_configurations(chain, node).loc[runs, knobs])
         features_train.append(x_train)
         features_test.append(x_test)
         chosen_runs[node] = chosen

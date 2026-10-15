@@ -118,6 +118,21 @@ def path_workers(data: ChainData) -> list:
     return [np.ones(n_cfgs, dtype=int) if column(s) is None else configurations_of(data.x_test, s)[:, column(s)].astype(int) for s in data.path]
 
 
+def model_inputs(x, workers_column):
+    """The inputs of a prediction model at the configurations x (one array, or a dictionary service -> array like
+    ChainData.x_test, or the configurations of one service): x without the column of the number of workers
+    (workers_column, an int, None, or a dictionary service -> int or None). By assumption, the number of workers sets
+    only how many items a service processes at the same time, not the execution time of an item, so no model receives
+    it; the bounds and the simulators read it from the configuration (path_workers)."""
+    if workers_column is None:
+        return x
+    if isinstance(x, dict):
+        column = lambda s: workers_column[s] if isinstance(workers_column, dict) else workers_column
+        return {s: values if column(s) is None else np.delete(values, column(s), axis=1) for s, values in x.items()}
+    assert not isinstance(workers_column, dict), "the configurations of one service need the workers column of that service"
+    return np.delete(x, workers_column, axis=1)
+
+
 def sample_configurations(n: int, rng: np.random.Generator) -> np.ndarray:
     """n configurations drawn uniformly from the range of the synthetic system: CPU, quality, parallelism (whole
     workers)."""

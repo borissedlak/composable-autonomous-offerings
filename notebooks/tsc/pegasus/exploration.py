@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import norm, qmc
 
-from .data import CONFIGURATION_RANGES, sample_configurations, synthetic_execution_moments, synthetic_execution_times, whole_workers
+from .data import CONFIGURATION_RANGES, WORKERS_COLUMN, model_inputs, sample_configurations, synthetic_execution_moments, synthetic_execution_times, whole_workers
 from .evaluation import fit_services, pegasus_bound, sweep_line, validity_legend
 from .real_data import (POOL_COLUMNS, chain_execution_moments, chain_path, encode_configurations, node_configurations, run_table,
                         training_pool)
@@ -78,6 +78,7 @@ def explore(strategy: str, services: list, service_seed: int, n_total: int, n_in
     - adaptive strategies (acquisition): the first n_initial configurations are drawn at random; every further one is
       the candidate with the largest score among n_candidates random configurations that are not benchmarked yet. The
       GPs are fitted anew after every benchmark, with one restart of the hyperparameter search to keep the loop fast.
+      The GPs do not receive the number of workers (model_inputs), but a strategy chooses whole configurations.
     seed: every strategy that is called with the same seed gets the same initial configurations and candidates."""
     rng = np.random.default_rng(seed)
     initial, candidates, reference = (sample_configurations(n, rng) for n in (n_initial, n_candidates, n_reference))
@@ -91,8 +92,8 @@ def explore(strategy: str, services: list, service_seed: int, n_total: int, n_in
     x, y = initial, synthetic_execution_times(initial, services, rng, service_seed)
     available = np.ones(n_candidates, dtype=bool)
     while len(x) < n_total:
-        models = train_gp_models(x, y, services, n_restarts_optimizer=1)
-        scores = acquisition(strategy, models, candidates, reference, sum(y.values()))
+        models = train_gp_models(model_inputs(x, WORKERS_COLUMN), y, services, n_restarts_optimizer=1)
+        scores = acquisition(strategy, models, model_inputs(candidates, WORKERS_COLUMN), model_inputs(reference, WORKERS_COLUMN), sum(y.values()))
         chosen = np.flatnonzero(available)[np.argmax(scores[available])]
         available[chosen] = False
         measured = synthetic_execution_times(candidates[[chosen]], services, rng, service_seed)
@@ -110,7 +111,7 @@ def exploration_results(data, x: np.ndarray, y: dict, sizes: list, service_seed:
     for size in sizes:
         subset = replace(data, x_train=x[:size], y_train={s: values[:size] for s, values in y.items()})
         models = fit_services(subset, subset.x_train, subset.y_train, model_seed=model_seed, confidence=confidence, with_dnn=False)
-        predicted = np.column_stack([models["gp"][s].predict(data.x_test) for s in data.path])
+        predicted = np.column_stack([models["gp"][s].predict(model_inputs(data.x_test, data.workers_column)) for s in data.path])
         results[size] = (pegasus_bound(subset, models, alpha), float(np.median(np.abs(predicted / true_mean - 1))))
     return results
 
@@ -154,8 +155,8 @@ COLORS[FARTHEST] = "black"
 
 def explore_pool(strategy: str, x_pool: np.ndarray, y_pool: np.ndarray, n_total: int, n_initial: int, seed, n_reference: int = 200) -> np.ndarray:
     """Chooses n_total of the measured runs of one real service one after the other under a sampling strategy, and
-    returns their indices in the pool in the order of the choices. x_pool: (runs, features) the configurations of all
-    runs that may train the service; y_pool: the mean processing time (s) of every run, which a strategy only sees for
+    returns their indices in the pool in the order of the choices. x_pool: (runs, features) the inputs of the model at
+    the configurations of all runs that may train the service (without the number of workers, model_inputs); y_pool: the mean processing time (s) of every run, which a strategy only sees for
     the runs it has chosen. A run is one benchmark; several runs of the pool can have the same configuration.
     - RANDOM: runs drawn uniformly at random.
     - FARTHEST: after n_initial random runs, always the run whose configuration is farthest (in standardized knobs)
@@ -204,7 +205,7 @@ def real_exploration_results(experiment: str, data, strategy: str, sizes: list, 
         pools[node] = training_pool(service_of[node], pipeline)
         knobs = [column for column in pools[node].columns if column not in POOL_COLUMNS]
         x_pool[node], x_test[node] = encode_configurations(pools[node][knobs], node_configurations(chain, node).loc[runs])
-        order[node] = explore_pool(strategy, x_pool[node], pools[node]["mean_s"].to_numpy(), max(sizes), n_initial, seed=[*np.atleast_1d(seed), k])
+        order[node] = explore_pool(strategy, model_inputs(x_pool[node], data.workers_column[node]), pools[node]["mean_s"].to_numpy(), max(sizes), n_initial, seed=[*np.atleast_1d(seed), k])
     results = {}
     for size in sizes:
         take = {node: order[node][:size] for node in path}
@@ -212,6 +213,6 @@ def real_exploration_results(experiment: str, data, strategy: str, sizes: list, 
                          y_train={node: pools[node]["mean_s"].to_numpy()[take[node]] for node in path},
                          y_train_spread={node: pools[node]["spread_s"].to_numpy()[take[node]] for node in path})
         models = fit_services(subset, subset.x_train, subset.y_train, model_seed=model_seed, confidence=confidence, with_dnn=False)
-        predicted = np.column_stack([models["gp"][node].predict(x_test[node]) for node in path])
+        predicted = np.column_stack([models["gp"][node].predict(model_inputs(x_test[node], data.workers_column[node])) for node in path])
         results[size] = (pegasus_bound(subset, models, alpha), float(np.median(np.abs(predicted / true_mean - 1))))
     return results
