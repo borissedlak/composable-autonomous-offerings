@@ -18,10 +18,7 @@ modeled on their own.
 | `explain_6_when_load_changes_execution_times.ipynb` | When the load changes the execution time of a service (CPU throttling, warm-up after idle), shown on the testbed campaign, and two remedies: enough cores for the workers, and a benchmark in the slowest state. |
 | `explain_7_which_inputs_predict_execution_time.ipynb` | Which inputs the GP of a service needs to predict the mean execution time of a run on the testbed campaign: quality knobs only, with cores per worker, with cores and parallelism, and each of the last two with the load; cross-validated MSE per service. |
 | `explain_8_which_inputs_predict_execution_time_v2.ipynb` | The question of `explain_7` on the second campaign (`statics/results_milos_v2/`) with six input sets, and a partial-correlation test (as in PC structure learning) of how strongly each input is associated with the mean execution time; the same GPs with one length scale per input (ARD); why the load of that campaign cannot be judged. |
-
-`prototype_multi_server.ipynb` (branch `multi-server` only) is a prototype outside the paper: every service as a FIFO
-pool of `parallelism` workers instead of one server, execution-time models without `parallelism` as an input (with
-and without the load per worker), and the Pegasus bounds for chains of pools, compared with today's model.
+| `explain_9_does_provisioning_make_execution_times_load_independent.ipynb` | Whether the execution time depends on the load on the second campaign, split by provisioning (fewer cores than workers, one core per worker, more than one): throttling, the probe before each run against the run, the same configuration at different rates, and the state of a service when an item starts (next to other items, many recent arrivals, after a pause); whether over-provisioning ensures Assumption 3. |
 
 The numbered notebooks belong to the paper; the `explain_` notebooks each answer one question and can be read on
 their own. Start with `explain_3` for the fundamentals of the two bounds.
@@ -56,8 +53,8 @@ as `from pegasus.bounds import ...`, with the working directory at `notebooks/ts
 | `finetuning.py` | Experiment C.1: split-conformal calibration of a bound with end-to-end samples, and the baselines that are trained on runs of the chain itself (Quantile Sum, Fluxion-style). |
 | `optimization.py` | Experiment C.2: the SLO-fulfillment objective of a chain, and the optimizers that choose the next run with a latency method and refit its models after every evaluated run. |
 | `load_dependence.py` | `explain_6`: how often a service of the campaign used up its CPU quota, how the processing time of an item depends on the state of its service (next to another item, back to back, after idle), and two simulators (a worker pool under a CPU quota, a service that is slower after idle). |
-| `multi_server.py` | `prototype_multi_server.ipynb`: a chain of FIFO pools (simulator and emulation of the campaign), the bounds of a pool as c single-server lanes, and the execution-time models without `parallelism` as an input. |
-Dependencies point one way: `multi_server` depends on `baselines`, `bounds`, `real_data`, `service_gp` and `simulation`; `load_dependence` depends on `bounds`, `real_data` and `simulation`; `bounds` and `simulation` depend on nothing here; `service_gp` on nothing; `baselines` on
+| `load_independence.py` | `explain_9`: per run and service of the second campaign, the provisioning class, the probe before the run, and within-run ratios of execution times by the state of the service at the start of an item; summaries of ratios over runs and the elasticity of the execution time with respect to the rate within configurations. |
+Dependencies point one way: `load_independence` depends on `real_data`; `load_dependence` depends on `bounds`, `real_data` and `simulation`; `bounds` and `simulation` depend on nothing here; `service_gp` on nothing; `baselines` on
 `service_gp`; `baselines_chain` on `baselines`, `bounds` and `service_gp`; `data` on `simulation`; `real_data` on `data` and
 `simulation`; `evaluation` on `baselines`, `bounds` and `service_gp`; `exploration` on `data`, `evaluation`, `real_data`
 and `service_gp`; `finetuning` on `baselines`, `baselines_chain`, `evaluation` and `service_gp`; `optimization` on
@@ -68,6 +65,7 @@ and `service_gp`; `finetuning` on `baselines`, `baselines_chain`, `evaluation` a
 | Path | Contents |
 |---|---|
 | `statics/results_milos/` | The testbed campaign that `real_data.py` reads: one folder per experiment (single services, chains, trees, deep chains). The real data source of `1_method_real.ipynb`, `2_evaluation.ipynb`, `explain_5`, `explain_6` and `draft_problem_figure.py` needs this folder. The folder is not part of the repository: it is not committed, so a fresh clone does not contain it. |
+| `statics/load_independence/results_milos_v2/run_states.csv` | Cache of `run_states` (`load_independence.py`) for `explain_9`: one row per run and service of the second campaign. Recomputed from `statics/results_milos_v2/` when missing. |
 | `figures/tsc/` | Outputs of the figure scripts. |
 
 ## Other files
