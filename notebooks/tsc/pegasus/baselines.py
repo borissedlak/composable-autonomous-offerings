@@ -18,6 +18,7 @@ from contextlib import contextmanager
 
 import numpy as np
 import torch
+from scipy.special import factorial
 from scipy.stats import norm
 from sklearn.exceptions import ConvergenceWarning
 
@@ -171,31 +172,44 @@ def conformal_service_bounds(x_train, monitored_latencies: dict, path: list, eps
 # ==============================================================================
 # 3. Queueing formula per service
 # ==============================================================================
-def queueing_formula_latency(mean, var, process, rate, epsilon, jitter=0.1, iterations=40, cv2=1.0):
-    """(1 - epsilon) latency quantile (s) of one FIFO single-server queue from textbook queueing formulas, per
-    configuration; inf where the service is overloaded. mean, var: execution time of one item (s, s^2); process, rate,
-    jitter: the arrival process as in bounds.py.
-    1. Mean waiting time, Kingman's approximation for a G/G/1 queue (Allen-Cunneen form):
-       E[Q] = rho / (1 - rho) * (C_a^2 + C_s^2) / 2 * mean, with the utilization rho = rate * mean, the squared coefficient
-       of variation of the execution time C_s^2 = var / mean^2 and that of the gaps between arrivals C_a^2 (1 for
-       Poisson arrivals, where the formula is the exact Pollaczek-Khinchine mean; jitter^2 / 3 for periodic arrivals
-       with uniform jitter; cv2 for gamma arrivals, see bounds.py).
-    2. Waiting-time distribution, the usual exponential approximation: an item does not wait with probability 1 - rho
-       and otherwise waits an exponential time with mean E[Q] / rho.
+def erlang_c(offered_load, workers):
+    """Probability that an item has to wait in an M/M/w queue (Erlang's C formula), per configuration: offered_load
+    a = rate * mean execution time (the mean number of busy workers), workers w; requires a < w."""
+    terms = np.stack([offered_load ** k / factorial(k) for k in range(int(np.max(workers)))])   # a^k / k!, k < w
+    below = np.where(np.arange(len(terms))[:, None] < workers, terms, 0.0).sum(axis=0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        full = offered_load ** workers / factorial(workers) / (1 - offered_load / workers)
+    return full / (below + full)
+
+
+def queueing_formula_latency(mean, var, process, rate, epsilon, jitter=0.1, iterations=40, cv2=1.0, workers=1):
+    """(1 - epsilon) latency quantile (s) of one FIFO queue with `workers` workers (one number or one per
+    configuration) from textbook queueing formulas, per configuration; inf where the service is overloaded. mean, var:
+    execution time of one item (s, s^2); process, rate, jitter: the arrival process as in bounds.py.
+    1. Mean waiting time, the Allen-Cunneen approximation for a G/G/w queue:
+       E[Q] = P_wait / (w (1 - rho)) * (C_a^2 + C_s^2) / 2 * mean, with the utilization rho = rate * mean / w, the
+       probability of waiting P_wait from Erlang's C formula (erlang_c; P_wait = rho for one worker, which gives Kingman's
+       G/G/1 formula), the squared coefficient of variation of the execution time C_s^2 = var / mean^2 and that of the
+       gaps between arrivals C_a^2 (1 for Poisson arrivals, where the one-worker formula is the exact Pollaczek-Khinchine
+       mean; jitter^2 / 3 for periodic arrivals with uniform jitter; cv2 for gamma arrivals, see bounds.py).
+    2. Waiting-time distribution, the usual exponential approximation: an item does not wait with probability
+       1 - P_wait and otherwise waits an exponential time with mean E[Q] / P_wait.
     3. Latency = waiting + own execution time (Gaussian, independent of the wait); its tail has a closed form and the
        quantile is found by bisection.
     An approximation, not a bound: nothing keeps it above the true quantile, and it uses the mean and variance as given,
     without any allowance for the error of the model that predicted them."""
     mean, var = np.atleast_1d(mean).astype(float), np.atleast_1d(var).astype(float)
-    sd, rho = np.sqrt(var), rate * mean
+    workers = np.broadcast_to(np.asarray(workers, dtype=float), mean.shape)
+    sd, rho = np.sqrt(var), rate * mean / workers
     arrival_cv2 = {"poisson": 1.0, "periodic": jitter ** 2 / 3, "gamma": cv2}[process]
     with np.errstate(divide="ignore", invalid="ignore"):
-        mean_wait = rho / (1 - rho) * (arrival_cv2 + var / mean ** 2) / 2 * mean
-        decay = rho / mean_wait   # rate of the exponential waiting time of the items that wait
+        waiting = np.where(workers == 1, rho, erlang_c(rate * mean, workers))   # probability that an item waits
+        mean_wait = waiting / (workers * (1 - rho)) * (arrival_cv2 + var / mean ** 2) / 2 * mean
+        decay = waiting / mean_wait   # rate of the exponential waiting time of the items that wait
 
     def tail(d):   # P(waiting + execution > d)
         with np.errstate(over="ignore", invalid="ignore"):
-            waits = rho * np.exp(-decay * (d - mean) + 0.5 * decay ** 2 * var) * norm.cdf((d - mean - decay * var) / sd)
+            waits = waiting * np.exp(-decay * (d - mean) + 0.5 * decay ** 2 * var) * norm.cdf((d - mean - decay * var) / sd)
         return norm.sf((d - mean) / sd) + waits
 
     low, high = mean.copy(), mean + 60.0

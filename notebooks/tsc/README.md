@@ -16,6 +16,8 @@ modeled on their own.
 | `explain_4_how_fluxion_composes.ipynb` | How the Fluxion baseline composes latency percentiles. |
 | `explain_5_what_kingman_inputs_cost.ipynb` | Why the Kingman baseline does not hold in B.1: its queueing formula with predicted, true and pessimistic inputs. |
 | `explain_6_when_load_changes_execution_times.ipynb` | When the load changes the execution time of a service (CPU throttling, warm-up after idle), shown on the testbed campaign, and two remedies: enough cores for the workers, and a benchmark in the slowest state. |
+| `explain_7_which_inputs_predict_execution_time.ipynb` | Which inputs the GP of a service needs to predict the mean execution time of a run on the testbed campaign: quality knobs only, with cores per worker, with cores and parallelism, and each of the last two with the load; cross-validated MSE per service. |
+| `explain_8_which_inputs_predict_execution_time_v2.ipynb` | The question of `explain_7` on the second campaign (`statics/results_milos_v2/`) with six input sets, and a partial-correlation test (as in PC structure learning) of how strongly each input is associated with the mean execution time; the same GPs with one length scale per input (ARD); why the load of that campaign cannot be judged. |
 
 `prototype_multi_server.ipynb` (branch `multi-server` only) is a prototype outside the paper: every service as a FIFO
 pool of `parallelism` workers instead of one server, execution-time models without `parallelism` as an input (with

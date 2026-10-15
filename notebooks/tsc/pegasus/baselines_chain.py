@@ -59,10 +59,13 @@ def compute_snc_mgf_delay_bound(model, x_cfg, alpha=0.01):
 # ==============================================================================
 # 2. Composition of latency bounds without a guarantee
 # ==============================================================================
-def independent_snc_convolution(path_beliefs, epsilon, **workload):
+def independent_snc_convolution(path_beliefs, epsilon, path_workers=None, **workload):
     """Multiplies the node latency MGFs and optimizes one theta: only valid for independent nodes. It equals the
-    network service curve (network_service_bound in bounds.py) with all Hoelder exponents 1."""
-    return latency_bound_from_moment(sum(log_latency_moment(*belief, **workload) for belief in path_beliefs), epsilon)
+    network service curve (network_service_bound in bounds.py) with all Hoelder exponents 1. path_workers: workers of
+    every node, default one each (bounds.py)."""
+    path_workers = [1] * len(path_beliefs) if path_workers is None else path_workers
+    return latency_bound_from_moment(sum(log_latency_moment(*belief, workers=workers, **workload)
+                                         for belief, workers in zip(path_beliefs, path_workers)), epsilon)
 
 
 # ==============================================================================

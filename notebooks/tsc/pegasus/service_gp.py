@@ -67,24 +67,30 @@ def configurations_of(x, service: str) -> np.ndarray:
 # Lower limit of the length scale of every GP on real data, in standard deviations of a knob (the inputs are standardized).
 # Without a limit, the hyperparameter search of some services ends at a length scale near zero: the GP then reproduces
 # every training run and predicts the average of all runs everywhere else. Any limit between 0.3 and 2 gave the same
-# fits on the chains of the campaign, because a search that cannot collapse finds a length scale above 2.
+# fits on the chains of the campaign, because a search that cannot collapse finds a length scale above 2 (checked with one
+# length scale for all inputs, before train_gp_models used one length scale per input).
 MIN_LENGTH_SCALE = 0.3
 
 
-def train_gp_models(X_train, y_train_dict: dict, service_names: list, min_length_scale: float = None, n_restarts_optimizer: int = 5) -> dict:
+def train_gp_models(X_train, y_train_dict: dict, service_names: list, min_length_scale: float = None, n_restarts_optimizer: int = 5,
+                    ard: bool = True) -> dict:
     """Fits ScaledGPRegressor models for each service. X_train: one array for all services or one per service
     (configurations_of). min_length_scale: lower limit of the length scale (default: that of scikit-learn, 1e-5).
-    n_restarts_optimizer: restarts of the hyperparameter search from random starting points."""
+    n_restarts_optimizer: restarts of the hyperparameter search from random starting points.
+    ard: one length scale per input (automatic relevance determination), so that the hyperparameter search can give an
+    input that does not matter a long length scale; with ard=False, one length scale for all inputs (the model of the
+    results before 2026-10-14; explain_7 and Section 2 of explain_8 compare the two)."""
     models = {}
     length_scale_bounds = (1e-5, 1e5) if min_length_scale is None else (min_length_scale, 1e5)
     for name in service_names:
+        x = configurations_of(X_train, name)
         kernel = (
-            C(1.0, (1e-2, 1e2)) * Matern(length_scale=1.0, length_scale_bounds=length_scale_bounds, nu=2.5) +
+            C(1.0, (1e-2, 1e2)) * Matern(length_scale=np.ones(np.shape(x)[1]) if ard else 1.0, length_scale_bounds=length_scale_bounds, nu=2.5) +
             WhiteKernel(noise_level=1e-3, noise_level_bounds=(1e-5, 1e-1))
         )
 
         model = ScaledGPRegressor(kernel=kernel, n_restarts_optimizer=n_restarts_optimizer, random_state=42)
-        model.fit(configurations_of(X_train, name), y_train_dict[name])
+        model.fit(x, y_train_dict[name])
         models[name] = model
 
     return models
@@ -94,7 +100,8 @@ class RunStatisticsModel:
     """Execution-time model of one service that is trained on statistics of whole runs instead of on single items
     (real data). `center` predicts the mean execution time of a configuration and was trained on the natural logarithm
     of the mean of every training run (log_center, the standard), so its prediction is exponentiated: the effects of
-    the knobs of a real service multiply, and on the logarithm they add, which a GP with one length scale can fit.
+    the knobs of a real service multiply, and on the logarithm they add, which a GP with one length scale per knob
+    can fit.
     With log_center=False, `center` was trained on the run means themselves. `spread` is a GP on the natural logarithm
     of the standard deviation (s) of single items in a run.
     predict() has the interface of ScaledGPRegressor: the mean and, on request, the standard deviation of one item."""

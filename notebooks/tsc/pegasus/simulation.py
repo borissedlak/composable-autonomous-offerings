@@ -1,5 +1,5 @@
-"""Simulator of a chain of FIFO single-server services: the ground truth that the bounds of `bounds.py` are compared
-with. It samples the gaps between arrivals and the execution times, runs the chain item by item, and measures a latency
+"""Simulator of a chain of FIFO services with one or more workers each: the ground truth that the bounds of
+`bounds.py` are compared with. It samples the gaps between arrivals and the execution times, runs the chain item by item, and measures a latency
 quantile with a confidence interval. The arrival processes ("poisson", "periodic", "gamma") are those of `bounds.py`.
 Units: times in seconds.
 """
@@ -23,7 +23,7 @@ def sample_interarrival_times(process, rate, shape, rng, jitter=0.1, cv2=1.0):
 
 
 # ------------------------------------------------------------------------------
-# Simulated chain of FIFO servers
+# Simulated chain of FIFO nodes with one or more workers
 # ------------------------------------------------------------------------------
 def execution_times(mean, noise_level, z, tail=0.0):
     """Execution times (s) of items from their standard normal draws z. mean: mean execution time (s); noise_level:
@@ -38,9 +38,33 @@ def execution_times(mean, noise_level, z, tail=0.0):
     return mean * np.exp(tail * z - 0.5 * tail ** 2) + noise_level * z
 
 
+def fifo_node_leaving(entering, execution, workers=1):
+    """Times (s) at which the items leave one FIFO node with `workers` workers, vectorized over configurations.
+    entering: (configurations, items) times at which the items reach the node, in any order (after a node with several
+    workers, the items arrive out of order); execution: (configurations, items) their execution times at the node (s);
+    workers: one number, or one per configuration. The node takes the items in the order in which they reach it and gives
+    each to the worker that becomes free first; an item starts when it has arrived and that worker is free. With one
+    worker, this is the single-server recursion: an item starts when it has arrived and the previous item has left."""
+    entering, execution = np.asarray(entering, dtype=float), np.asarray(execution, dtype=float)
+    n_cfgs, n_items = entering.shape
+    workers = np.broadcast_to(np.asarray(workers, dtype=int), (n_cfgs,))
+    order = np.argsort(entering, axis=1, kind="stable")
+    arriving, executing = np.take_along_axis(entering, order, axis=1), np.take_along_axis(execution, order, axis=1)
+    free = np.where(np.arange(workers.max())[None, :] < workers[:, None], 0.0, np.inf)   # time at which every worker is free
+    rows, leaving_in_order = np.arange(n_cfgs), np.empty_like(arriving)
+    for i in range(n_items):
+        worker = np.argmin(free, axis=1)
+        leaving_in_order[:, i] = np.maximum(arriving[:, i], free[rows, worker]) + executing[:, i]
+        free[rows, worker] = leaving_in_order[:, i]
+    leaving = np.empty_like(leaving_in_order)
+    np.put_along_axis(leaving, order, leaving_in_order, axis=1)
+    return leaving
+
+
 def simulate_chain(mean_execution, noise_levels, process, rate, n_items, item_correlation, rng, jitter=0.1, warmup_share=0.1,
-                   return_arrivals=False, cv2=1.0, tail=0.0):
-    """Simulates a chain of FIFO single-server services, vectorized over configurations.
+                   return_arrivals=False, cv2=1.0, tail=0.0, workers=None):
+    """Simulates a chain of FIFO services, vectorized over configurations; every node has `workers` workers
+    ((configurations, nodes), default one each, see fifo_node_leaving).
     mean_execution: (configurations, nodes) mean execution time of every node (s); noise_levels: std per node (s).
     The execution-time noise of an item is shared across nodes with correlation item_correlation; it is Gaussian for
     tail = 0 and has a heavier right tail at the same mean for tail > 0 (execution_times).
@@ -59,12 +83,7 @@ def simulate_chain(mean_execution, noise_levels, process, rate, n_items, item_co
         z = item_correlation * shared_size + np.sqrt(1 - item_correlation ** 2) * own_noise
         execution = np.maximum(execution_times(mean_execution[:, k][:, None], noise_level, z, tail), 0.0)
 
-        # an item starts when it has arrived and the previous item has left
-        leaving = np.empty_like(entering)
-        previous_leaving = np.zeros(n_cfgs)
-        for i in range(n_items):
-            previous_leaving = np.maximum(entering[:, i], previous_leaving) + execution[:, i]
-            leaving[:, i] = previous_leaving
+        leaving = fifo_node_leaving(entering, execution, 1 if workers is None else workers[:, k])
         node_latencies.append(leaving - entering)
         entering = leaving
 
@@ -73,20 +92,16 @@ def simulate_chain(mean_execution, noise_levels, process, rate, n_items, item_co
     return (*results, arrivals[:, kept_items]) if return_arrivals else results
 
 
-def fifo_chain_latencies(arrivals, execution):
-    """Latencies of a chain of FIFO single-server services for given arrival and execution times, vectorized over
-    configurations. arrivals: (configurations, items) times at which the items enter the chain (s, increasing);
-    execution: (configurations, items, nodes) execution time of every item at every node (s), e.g. measured ones.
+def fifo_chain_latencies(arrivals, execution, workers=None):
+    """Latencies of a chain of FIFO services for given arrival and execution times, vectorized over configurations.
+    arrivals: (configurations, items) times at which the items enter the chain (s, increasing); execution:
+    (configurations, items, nodes) execution time of every item at every node (s), e.g. measured ones; workers:
+    (configurations, nodes) workers of every node, default one each (fifo_node_leaving).
     Returns per-node latencies (configurations, items, nodes) and end-to-end latencies (configurations, items)."""
     entering = np.asarray(arrivals, dtype=float)
     node_latencies = []
     for k in range(execution.shape[-1]):
-        # an item starts when it has arrived and the previous item has left
-        leaving = np.empty_like(entering)
-        previous_leaving = np.zeros(len(entering))
-        for i in range(entering.shape[1]):
-            previous_leaving = np.maximum(entering[:, i], previous_leaving) + execution[:, i, k]
-            leaving[:, i] = previous_leaving
+        leaving = fifo_node_leaving(entering, execution[:, :, k], 1 if workers is None else np.asarray(workers)[:, k])
         node_latencies.append(leaving - entering)
         entering = leaving
     return np.stack(node_latencies, axis=-1), entering - arrivals
