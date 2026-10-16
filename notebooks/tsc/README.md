@@ -8,6 +8,7 @@ modeled on their own.
 | Notebook | What it is |
 |---|---|
 | `1_method_synthetic.ipynb` | The method: GP model per service, node bounds, compositions, and the baselines of the method section. |
+| `1_method_synthetic_trees.ipynb` | The method on fork-join trees (experiment B3): why the latency of a tree is the maximum over its leaf-to-root paths, every composition applied path by path, and coverage and tightness on balanced and narrow trees with one or several workers per service. |
 | `1_method_real.ipynb` | The method on real services: the same steps as `1_method_synthetic.ipynb` on the testbed campaign (training on run statistics, emulated queueing), without the sections that need a synthetic system. |
 | `2_evaluation.ipynb` | The paper's evaluation (Section V) on synthetic or real data (`data_source`): setup (A), the coverage and tightness experiments B.1 to B.6 including B.2b (which configuration to benchmark next), and the iterative experiments C.1 (fine-tuning a bound with end-to-end samples) and C.2 (choosing a faster configuration of a chain). A last section holds real-data results that do not fit the paper's structure. |
 | `explain_1_why_chernoff_mgf.ipynb` | Why the bounds use moment generating functions and Chernoff bounds, and which alternatives exist. |
@@ -43,7 +44,7 @@ as `from pegasus.bounds import ...`, with the working directory at `notebooks/ts
 |---|---|
 | `bounds.py` | The latency bounds: SNC node bound, martingale node bounds, propagated arrivals, network service curve. |
 | `simulation.py` | The ground truth: simulator of a chain and of a fork-join tree of FIFO services, and the measured quantile with its confidence interval. |
-| `trees.py` | Fork-join trees (B3, Section 10 of `1_method_synthetic`): balanced and narrow topologies, their leaf-to-root paths, and the maximum over paths through which a chain composition extends to a tree. |
+| `trees.py` | Fork-join trees (B3, `1_method_synthetic_trees`): balanced and narrow topologies, their leaf-to-root paths, and the maximum over paths through which a chain composition extends to a tree. |
 | `service_gp.py` | The GP model of one service's execution time, and the belief the bounds take from it. |
 | `baselines.py` | Per-service baselines of the evaluation: GP Sum, DNN Sum, Allen-Cunneen formula, Quantile Union, Conformal, Oracle. |
 | `baselines_chain.py` | Baselines of the method notebook that need runs of the chain: Deep GP, Fluxion-style, replay; independence tests. |
