@@ -42,7 +42,8 @@ as `from pegasus.bounds import ...`, with the working directory at `notebooks/ts
 | Module | Contents |
 |---|---|
 | `bounds.py` | The latency bounds: SNC node bound, martingale node bounds, propagated arrivals, network service curve. |
-| `simulation.py` | The ground truth: simulator of a chain of FIFO services, and the measured quantile with its confidence interval. |
+| `simulation.py` | The ground truth: simulator of a chain and of a fork-join tree of FIFO services, and the measured quantile with its confidence interval. |
+| `trees.py` | Fork-join trees (B3, Section 10 of `1_method_synthetic`): balanced and narrow topologies, their leaf-to-root paths, and the maximum over paths through which a chain composition extends to a tree. |
 | `service_gp.py` | The GP model of one service's execution time, and the belief the bounds take from it. |
 | `baselines.py` | Per-service baselines of the evaluation: GP Sum, DNN Sum, Allen-Cunneen formula, Quantile Union, Conformal, Oracle. |
 | `baselines_chain.py` | Baselines of the method notebook that need runs of the chain: Deep GP, Fluxion-style, replay; independence tests. |
@@ -54,7 +55,7 @@ as `from pegasus.bounds import ...`, with the working directory at `notebooks/ts
 | `optimization.py` | Experiment C.2: the SLO-fulfillment objective of a chain, and the optimizers that choose the next run with a latency method and refit its models after every evaluated run. |
 | `load_dependence.py` | `explain_6`: how often a service of the campaign used up its CPU quota, how the processing time of an item depends on the state of its service (next to another item, back to back, after idle), and two simulators (a worker pool under a CPU quota, a service that is slower after idle). |
 | `load_independence.py` | `explain_9`: per run and service of the second campaign, the provisioning class, the probe before the run, and within-run ratios of execution times by the state of the service at the start of an item; summaries of ratios over runs and the elasticity of the execution time with respect to the rate within configurations. |
-Dependencies point one way: `load_independence` depends on `real_data`; `load_dependence` depends on `bounds`, `real_data` and `simulation`; `bounds` and `simulation` depend on nothing here; `service_gp` on nothing; `baselines` on
+Dependencies point one way: `load_independence` depends on `real_data`; `load_dependence` depends on `bounds`, `real_data` and `simulation`; `bounds` and `trees` depend on nothing here; `simulation` on `trees`; `service_gp` on nothing; `baselines` on
 `service_gp`; `baselines_chain` on `baselines`, `bounds` and `service_gp`; `data` on `simulation`; `real_data` on `data` and
 `simulation`; `evaluation` on `baselines`, `bounds` and `service_gp`; `exploration` on `data`, `evaluation`, `real_data`
 and `service_gp`; `finetuning` on `baselines`, `baselines_chain`, `evaluation` and `service_gp`; `optimization` on

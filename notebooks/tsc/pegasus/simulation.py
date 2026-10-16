@@ -1,10 +1,12 @@
-"""Simulator of a chain of FIFO services with one or more workers each: the ground truth that the bounds of
+"""Simulator of a chain, or of a fork-join tree (trees.py), of FIFO services with one or more workers each: the ground truth that the bounds of
 `bounds.py` are compared with. It samples the gaps between arrivals and the execution times, runs the chain item by item, and measures a latency
 quantile with a confidence interval. The arrival processes ("poisson", "periodic", "gamma") are those of `bounds.py`.
 Units: times in seconds.
 """
 import numpy as np
 from scipy.stats import t as student_t
+
+from .trees import children_first
 
 
 # ------------------------------------------------------------------------------
@@ -105,6 +107,45 @@ def fifo_chain_latencies(arrivals, execution, workers=None):
         node_latencies.append(leaving - entering)
         entering = leaving
     return np.stack(node_latencies, axis=-1), entering - arrivals
+
+
+def simulate_tree(mean_execution, noise_levels, children, process, rate, n_items, item_correlation, rng, jitter=0.1, warmup_share=0.1,
+                  workers=None, node_level=None, return_execution=False):
+    """Simulates a fork-join tree of FIFO services (trees.py), vectorized over configurations. A frame enters every
+    leaf at its arrival time; an aggregator receives the frame when the later of its two children releases it, and
+    processes the frames in that order. mean_execution: (configurations, services) mean execution time (s);
+    noise_levels: std per service (s); rate: one arrival rate or one per configuration; workers: (configurations,
+    services), default one each. The execution-time noise of a frame is shared across services with correlation
+    item_correlation, as in simulate_chain.
+    Returns the end-to-end latencies (configurations, frames), the first warmup_share of frames dropped. With node_level,
+    also the node_level quantile of every service's latency (release minus the time the frame was complete at the
+    service), (configurations, services). With return_execution, also the arrival times (configurations, all frames)
+    and execution times (configurations, all frames, services), e.g. to replay every path as a chain."""
+    mean_execution = np.atleast_2d(mean_execution)
+    n_cfgs, n_services = mean_execution.shape
+    workers = np.ones((n_cfgs, n_services), dtype=int) if workers is None else workers
+    rate_column = np.asarray(rate, dtype=float)[:, None] if np.ndim(rate) else rate
+    arrivals = np.cumsum(sample_interarrival_times(process, 1.0, (n_cfgs, n_items), rng, jitter, 1.0) / rate_column, axis=1)
+    shared_size = rng.standard_normal((n_cfgs, n_items))
+    kept_items = slice(int(warmup_share * n_items), None)
+    leaving, node_quantiles, executions = [None] * n_services, np.empty((n_cfgs, n_services)), [None] * n_services
+    for position in children_first(children):
+        z = item_correlation * shared_size + np.sqrt(1 - item_correlation ** 2) * rng.standard_normal((n_cfgs, n_items))
+        execution = np.maximum(mean_execution[:, position][:, None] + noise_levels[position] * z, 0.0)
+        entering = arrivals if not children[position] else np.maximum.reduce([leaving[child] for child in children[position]])
+        leaving[position] = fifo_node_leaving(entering, execution, workers[:, position])
+        if node_level is not None:
+            node_quantiles[:, position] = np.quantile((leaving[position] - entering)[:, kept_items], node_level, axis=1)
+        if return_execution:
+            executions[position] = execution
+        for child in children[position]:
+            leaving[child] = None   # only the parent needs it; frees memory in large trees
+    results = ((leaving[0] - arrivals)[:, kept_items],)
+    if node_level is not None:
+        results += (node_quantiles,)
+    if return_execution:
+        results += (arrivals, np.stack(executions, axis=-1))
+    return results if len(results) > 1 else results[0]
 
 
 # ------------------------------------------------------------------------------
