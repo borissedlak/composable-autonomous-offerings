@@ -148,7 +148,7 @@ def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alph
 
 
 def queueing_formula_inputs(data, models: dict, true_mean: np.ndarray, true_var: np.ndarray, alpha: float) -> tuple:
-    """Diagnostic of the Allen-Cunneen baseline (explain_5_what_kingman_inputs_cost.ipynb): the same queueing formula (queueing_formula_latency, one quantile per service
+    """Diagnostic of the Allen-Cunneen baseline (explain_5_what_allen_cunneen_inputs_cost.ipynb): the same queueing formula (queueing_formula_latency, one quantile per service
     at alpha, added) with different inputs for the mean and the variance of the execution time. "predicted" is the
     prediction of the GP of a service, as the baseline uses it; "true" is true_mean / true_var, (held-out
     configurations, services); "pessimistic" is the mean that Pegasus uses, i.e. the prediction shifted up by the GP's
