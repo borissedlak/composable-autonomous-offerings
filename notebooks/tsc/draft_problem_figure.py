@@ -2,7 +2,8 @@
 
 Claims of the figures:
  (a) Per-service execution times do not add up to the end-to-end tail latency: the gap is the queueing, and it grows
-     with the load, so it cannot be calibrated away with a constant.
+     with the load, so it cannot be calibrated away with a constant. Adding a per-service queueing term (Allen-Cunneen)
+     follows the trend of the true latency, but for a single run it falls on both sides of the true latency.
  (b) An accurate point prediction is not a guarantee: for unseen configurations it falls on both sides of the true
      latency, and nothing tells on which side.
 
@@ -54,12 +55,15 @@ def load(s, utilization):
 # Every run is divided by the sum of its true mean execution times, so that runs whose latencies differ by orders of
 # magnitude can be shown together: 1 means "as long as the mean execution of all services".
 total_execution = np.array([times.mean(axis=0).sum() for times in chain_run_execution_times(experiment)])   # s, per run of the chain
-measured_by_load, summed_by_load = [], []
+measured_by_load, summed_by_load, queueing_by_load = [], [], []
 for utilization in utilizations:
     data, methods = load(seeds[0], utilization)
     measured_by_load.append(data.measured / total_execution)
     summed_by_load.append(methods["GP Sum"][1] / total_execution)
+    queueing_by_load.append(methods["Allen-Cunneen"][1] / total_execution)
 measured_by_load, summed_by_load = np.array(measured_by_load), np.array(summed_by_load)   # (loads, runs)
+queueing_by_load = np.array(queueing_by_load)
+queueing_by_load[~np.isfinite(queueing_by_load)] = np.nan   # the queueing formula has no finite value for a service it predicts to be overloaded
 
 # Panel (b): predicted against true quantile for every held-out run and seed at the load of B.1
 truth, predicted = [], {name: [] for name in point_predictors}
@@ -82,8 +86,9 @@ def save(fig, name):
 
 # --- (a) -----------------------------------------------------------------------
 fig_load, ax_load = plt.subplots(figsize=(6, 4))
-quartiles = lambda values: np.quantile(values, [0.25, 0.5, 0.75], axis=1)
+quartiles = lambda values: np.nanquantile(values, [0.25, 0.5, 0.75], axis=1)
 for values, color, style, label in ((measured_by_load, "tab:purple", "o-", f"true end-to-end {p_label}"),
+                                    (queueing_by_load, METHOD_COLORS["Allen-Cunneen"], "^-.", f"sum of waiting + execution times ({p_label}, Allen-Cunneen)"),
                                     (summed_by_load, METHOD_COLORS["GP Sum"], "s--", f"sum of the per-service execution times ({p_label})")):
     low, middle, high = quartiles(values)
     ax_load.plot(utilizations, middle, style, color=color, linewidth=1.8, markersize=6, label=label)
@@ -128,6 +133,10 @@ save(fig_scatter, "problem_prediction_draft")
 
 print(f"(a) true {p_label} / sum of execution times, median over {measured_by_load.shape[1]} runs: {gap_low:.2f} at utilization {utilizations[0]:g}, "
       f"{gap_high:.2f} at utilization {utilizations[-1]:g}")
+for utilization, queueing, measured in zip(utilizations, queueing_by_load, measured_by_load):
+    ratio = queueing / measured
+    print(f"(a) Allen-Cunneen / true {p_label} at utilization {utilization:g}: median {np.nanmedian(ratio):.2f}, "
+          f"{np.mean(ratio[np.isfinite(ratio)] < 1):.0%} too low, finite at {np.isfinite(ratio).mean():.0%} of the runs")
 for name in point_predictors:
     ratio = predicted[name][finite[name]] / truth[finite[name]]
     print(f"(b) {name}: {np.mean(ratio < 1):.0%} too low, median ratio {np.median(ratio):.2f}, 5th to 95th percentile {np.quantile(ratio, 0.05):.2f} to "
