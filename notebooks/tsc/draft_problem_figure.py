@@ -81,7 +81,7 @@ def save(fig, name):
 
 
 # --- (a) -----------------------------------------------------------------------
-fig_load, ax_load = plt.subplots(figsize=(7.5, 4.8))
+fig_load, ax_load = plt.subplots(figsize=(6.6, 4.8))
 quartiles = lambda values: np.quantile(values, [0.25, 0.5, 0.75], axis=1)
 for values, color, style, label in ((measured_by_load, "tab:purple", "o-", f"true end-to-end {p_label}"),
                                     (summed_by_load, METHOD_COLORS["GP Sum"], "s--", f"sum of the per-service execution times ({p_label})")):
@@ -99,7 +99,7 @@ ax_load.legend(loc="upper left", fontsize=11)
 save(fig_load, "problem_queueing_draft")
 
 # --- (b) -----------------------------------------------------------------------
-fig_scatter, ax_scatter = plt.subplots(figsize=(7.5, 4.8))
+fig_scatter, ax_scatter = plt.subplots(figsize=(6.6, 4.8))
 finite = {name: np.isfinite(values) for name, values in predicted.items()}
 low = 1e3 * 0.7 * min(truth.min(), *(predicted[name][finite[name]].min() for name in point_predictors))
 high = 1e3 * 1.4 * max(truth.max(), *(predicted[name][finite[name]].max() for name in point_predictors))
