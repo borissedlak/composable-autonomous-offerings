@@ -22,7 +22,7 @@ from .evaluation import METHOD_COLORS, PROPOSED, PROPOSED_SNC, compare_methods, 
 BEST_OF_RUNS, GRADIENT = "best of the runs", "gradient steps"
 RANDOM_SEARCH = "Random search"
 COLORS = {RANDOM_SEARCH: "black"}                              # to be added to METHOD_COLORS of evaluation.py by the notebook
-EXECUTION_TIME_METHODS = (PROPOSED, PROPOSED_SNC, "GP Sum", "Kingman")   # methods that use the execution-time models of fit_services
+EXECUTION_TIME_METHODS = (PROPOSED, PROPOSED_SNC, "GP Sum", "Allen-Cunneen")   # methods that use the execution-time models of fit_services
 
 
 @dataclass

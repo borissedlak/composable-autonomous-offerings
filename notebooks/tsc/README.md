@@ -14,7 +14,7 @@ modeled on their own.
 | `explain_2_why_poisson_is_loose.ipynb` | Why the SNC node bound is loose under Poisson arrivals. |
 | `explain_3_how_pegasus_bounds_compose.ipynb` | The two versions of Pegasus (per-node union bound, SNC): the math from one queue upward, strengths and weaknesses. |
 | `explain_4_how_fluxion_composes.ipynb` | How the Fluxion baseline composes latency percentiles. |
-| `explain_5_what_kingman_inputs_cost.ipynb` | Why the Kingman baseline does not hold in B.1: its queueing formula with predicted, true and pessimistic inputs. |
+| `explain_5_what_kingman_inputs_cost.ipynb` | Why the Allen-Cunneen baseline does not hold in B.1: its queueing formula with predicted, true and pessimistic inputs. |
 | `explain_6_when_load_changes_execution_times.ipynb` | When the load changes the execution time of a service (CPU throttling, warm-up after idle), shown on the testbed campaign, and two remedies: enough cores for the workers, and a benchmark in the slowest state. |
 | `explain_7_which_inputs_predict_execution_time.ipynb` | Which inputs the GP of a service needs to predict the mean execution time of a run on the testbed campaign: quality knobs only, with cores per worker, with cores and parallelism, and each of the last two with the load; cross-validated MSE per service. |
 | `explain_8_which_inputs_predict_execution_time_v2.ipynb` | The question of `explain_7` on the second campaign (`statics/results_milos_v2/`) with six input sets, and a partial-correlation test (as in PC structure learning) of how strongly each input is associated with the mean execution time; the same GPs with one length scale per input (ARD); why the load of that campaign cannot be judged. |
@@ -44,7 +44,7 @@ as `from pegasus.bounds import ...`, with the working directory at `notebooks/ts
 | `bounds.py` | The latency bounds: SNC node bound, martingale node bounds, propagated arrivals, network service curve. |
 | `simulation.py` | The ground truth: simulator of a chain of FIFO services, and the measured quantile with its confidence interval. |
 | `service_gp.py` | The GP model of one service's execution time, and the belief the bounds take from it. |
-| `baselines.py` | Per-service baselines of the evaluation: GP Sum, DNN Sum, Kingman formula, Quantile Union, Conformal, Oracle. |
+| `baselines.py` | Per-service baselines of the evaluation: GP Sum, DNN Sum, Allen-Cunneen formula, Quantile Union, Conformal, Oracle. |
 | `baselines_chain.py` | Baselines of the method notebook that need runs of the chain: Deep GP, Fluxion-style, replay; independence tests. |
 | `data.py` | Data of the evaluation: the seeded generator of synthetic services, the simulated chain data, and the entry points for both data sources. |
 | `real_data.py` | The real data source: reader of the testbed campaign in `statics/results_milos/`, and the emulation that replays its measured processing times through FIFO queues. |

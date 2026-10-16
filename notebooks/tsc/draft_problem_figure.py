@@ -12,7 +12,7 @@ Writes figures/tsc/problem_overview_draft.pdf and .jpg.
 Source of the data: the testbed campaign in statics/results_milos (chain 04e, qr -> cv -> face), loaded with
 pegasus/real_data.py as in 2_evaluation.ipynb. The end-to-end latencies are emulated: the measured processing times of
 every run are replayed through a chain of FIFO queues under Poisson arrivals. The methods are the baselines of
-2_evaluation.ipynb (pegasus/evaluation.py): GP Sum, Kingman and Quantile Union, trained on single-service data only.
+2_evaluation.ipynb (pegasus/evaluation.py): GP Sum, Allen-Cunneen and Quantile Union, trained on single-service data only.
 """
 import warnings
 from pathlib import Path
@@ -36,7 +36,7 @@ seed, n_calibration = 35, 20                           # base seed and calibrati
 utilizations = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]   # panel (a): utilization of the busiest service of every run
 base_utilization = 0.5                                 # panel (b): the load of B.1
 seeds = list(range(5))                                 # panel (b): a seed determines the training runs and the randomness of the emulation
-point_predictors = ["Kingman", "Quantile Union"]       # panel (b): one analytic and one learned predictor of the latency quantile
+point_predictors = ["Allen-Cunneen", "Quantile Union"]       # panel (b): one analytic and one learned predictor of the latency quantile
 p_label = f"p{100 * (1 - alpha):g}"
 
 

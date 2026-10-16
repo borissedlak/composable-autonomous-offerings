@@ -22,7 +22,7 @@ from .data import model_inputs, path_workers
 PROPOSED = "Pegasus per node (ours)"   # union bound over the node bounds
 PROPOSED_SNC = "Pegasus SNC (ours)"    # one bound for the whole chain from its network service curve
 GROUP_COLORS = {"proposed": "tab:green", "baseline": "tab:gray", "reference": "tab:purple"}
-METHOD_COLORS = {PROPOSED: "tab:green", PROPOSED_SNC: "tab:olive", "GP Sum": "tab:gray", "DNN Sum": "black", "Kingman": "tab:blue",
+METHOD_COLORS = {PROPOSED: "tab:green", PROPOSED_SNC: "tab:olive", "GP Sum": "tab:gray", "DNN Sum": "black", "Allen-Cunneen": "tab:blue",
                  "Quantile Union": "tab:orange", "Conformal": "tab:red", "Oracle": "tab:purple"}
 
 
@@ -103,7 +103,7 @@ def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alph
     With real data (data.y_train_spread is given), the GPs of Quantile Union and Conformal are fitted on the logarithm
     of the latency quantile, like the GP of the mean execution time (fit_services): the latency of a real service
     differs by orders of magnitude between its configurations. No model receives the number of workers of a
-    configuration (model_inputs in data.py); Kingman and both versions of Pegasus get it from path_workers."""
+    configuration (model_inputs in data.py); Allen-Cunneen and both versions of Pegasus get it from path_workers."""
     K, workload = len(data.path), data.workload
     workers_by_position = path_workers(data) or [1] * K
     log_target = data.y_train_spread is not None
@@ -118,7 +118,7 @@ def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alph
         (PROPOSED_SNC, "proposed", gp_seconds, lambda: pegasus_snc_bound(data, models, alpha)),
         ("GP Sum", "baseline", gp_seconds, lambda: joint_gaussian_quantile(*zip(*predictions(models["gp"])), norm.ppf(1 - alpha))),
         ("DNN Sum", "baseline", dnn_seconds, lambda: joint_gaussian_quantile(*zip(*predictions(models["dnn"])), norm.ppf(1 - alpha))),
-        ("Kingman", "baseline", gp_seconds, lambda: sum(queueing_formula_latency(mean, std ** 2, epsilon=alpha, workers=workers, **workload)
+        ("Allen-Cunneen", "baseline", gp_seconds, lambda: sum(queueing_formula_latency(mean, std ** 2, epsilon=alpha, workers=workers, **workload)
                                                         for (mean, std), workers in zip(predictions(models["gp"]), workers_by_position))),
     ]
     if monitored_latencies is not None:   # these two train their own models and measure that time themselves (None here)
@@ -148,7 +148,7 @@ def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alph
 
 
 def queueing_formula_inputs(data, models: dict, true_mean: np.ndarray, true_var: np.ndarray, alpha: float) -> tuple:
-    """Diagnostic of the Kingman baseline (explain_5_what_kingman_inputs_cost.ipynb): the same queueing formula (queueing_formula_latency, one quantile per service
+    """Diagnostic of the Allen-Cunneen baseline (explain_5_what_kingman_inputs_cost.ipynb): the same queueing formula (queueing_formula_latency, one quantile per service
     at alpha, added) with different inputs for the mean and the variance of the execution time. "predicted" is the
     prediction of the GP of a service, as the baseline uses it; "true" is true_mean / true_var, (held-out
     configurations, services); "pessimistic" is the mean that Pegasus uses, i.e. the prediction shifted up by the GP's
