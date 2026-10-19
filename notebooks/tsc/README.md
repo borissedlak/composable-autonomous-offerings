@@ -67,7 +67,7 @@ and `service_gp`; `finetuning` on `baselines`, `baselines_chain`, `evaluation` a
 | Path | Contents |
 |---|---|
 | `statics/results_milos/` | The testbed campaign that `real_data.py` reads: one folder per experiment (single services, chains, trees, deep chains). The real data source of `1_method_real.ipynb`, `2_evaluation.ipynb`, `explain_5`, `explain_6` and `draft_problem_figure.py` needs this folder. The folder is not part of the repository: it is not committed, so a fresh clone does not contain it. |
-| `statics/load_independence/results_milos_v2/run_states.csv` | Cache of `run_states` (`load_independence.py`) for `explain_9`: one row per run and service of the second campaign. Recomputed from `statics/results_milos_v2/` when missing. |
+| `statics/load_independence/results_milos_v2_b1/run_states.csv` | Cache of `run_states` (`load_independence.py`) for `explain_9`: one row per run and service of the second campaign. Recomputed from `statics/results_milos_v2/b1/` when missing. |
 | `figures/tsc/` | Outputs of the figure scripts. |
 
 ## Other files

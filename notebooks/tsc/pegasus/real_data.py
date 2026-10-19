@@ -1,5 +1,6 @@
 """Reader of the two testbed campaigns, `statics/results_milos/` (CAMPAIGN, the first campaign) and
-`statics/results_milos_v2/` (CAMPAIGN_V2, the B1 experiments of `new_experiments.md`), and the emulation that turns
+`statics/results_milos_v2/` (the second campaign: CAMPAIGN_V2, its folder `b1/` with the B1 chains of
+`new_experiments.md`, and BENCHMARKS_V2, its folder `benchmark/` with every service measured alone), and the emulation that turns
 their measurements into chain data: the measured processing times of the real services are replayed through a chain of
 FIFO queues, every service with the number of workers of its configuration (`parallelism`; `fifo_chain_latencies` in
 `simulation.py`); the second campaign needs no emulation, its latencies are measured (chain_run_latencies). An experiment is named by its folder, and
@@ -14,12 +15,23 @@ services of the second campaign queue FIFO, so its measured latencies are used a
 
 Held-out runs (training_exclusion): in the first campaign, the methods are trained on a service measured alone or
 inside pipelines whose topology differs from the chain that is evaluated; no run of the evaluated topology is used for
-training. The second campaign has one topology per application, and every service occurs only in that topology, so
-there the methods are trained on the runs of the other experiments of the campaign that contain the service (e.g. the
-runs with one to four workers for the chain with one worker); no run of the evaluated experiment is used for training.
+training. In the second campaign every chain is its own experiment, and every service occurs in two or three of its
+chains, so there the methods are trained on the runs of the other chains that contain the service (e.g. the image
+transformer of `b1-vision-1-single` on its runs in `b1-vision-4-single`); no run of the evaluated experiment is used.
 Alternatively (split_runs), the runs of one experiment of the second campaign are split: a part trains the models, the
-rest is held out. With unthrottled=True, only the runs in which no container of the chain was throttled take part
-(unthrottled_runs).
+rest is held out.
+
+Hop overhead (second campaign): the handling overhead of a request (handling_overhead) depends on where it comes from,
+the load generator (first service of a chain, benchmarks) or the service before it (every later service); the models
+use one constant per kind of hop, measured on the other chains (path_hop_overheads).
+
+Second campaign: only unthrottled runs (unthrottled_runs), for training and as held-out runs. The cores of a service
+are no configuration (NOT_CONFIGURATION): a run either had enough cores for its load (no throttling) or is not used,
+and with enough cores the execution time does not depend on them.
+
+Benchmarks (BENCHMARKS_V2): every service measured alone, one experiment `bench-<service>-<version>-u<utilization in %>`
+per service and utilization (0.1 to 1.0), each with the same 10 configurations; the cores of a run are the CPU need of
+the configuration from a probe times a slack (`cpu_slack`), so the service has enough cores at every load.
 
 Folder layout: `<experiment>/<start time>/dataset.csv` has one row per run and node with the configuration and summary
 statistics; `runs/<run>/trace_steps.csv` (pipelines) has one row per request and node; `runs/<run>/<node>/records.csv`
@@ -36,8 +48,10 @@ from .data import ChainData
 from .simulation import fifo_chain_latencies, quantile_with_lower_bound, sample_interarrival_times
 
 CAMPAIGN = Path(__file__).resolve().parents[3] / "statics" / "results_milos"
-CAMPAIGN_V2 = CAMPAIGN.parent / "results_milos_v2"
-POOL_COLUMNS = ("run_id", "experiment", "node", "alone", "mean_s", "spread_s")   # columns of training_pool that are not knobs
+CAMPAIGN_V2 = CAMPAIGN.parent / "results_milos_v2" / "b1"
+BENCHMARKS_V2 = CAMPAIGN_V2.parent / "benchmark"
+NOT_CONFIGURATION = ("cores",)   # knobs that no model of real_chain_data / real_replay_data receives (module docstring)
+POOL_COLUMNS = ("run_id", "experiment", "node", "alone", "mean_s", "spread_s", "overhead_s")   # columns of training_pool that are not knobs
 NORMAL_P95 = 1.6449                                                              # 95th percentile of the standard normal distribution
 
 
@@ -45,8 +59,9 @@ NORMAL_P95 = 1.6449                                                             
 # Reading the campaign
 # ------------------------------------------------------------------------------
 def campaign_of(experiment: str) -> Path:
-    """The campaign folder that holds `experiment`: CAMPAIGN_V2 if it has a folder of that name, else CAMPAIGN."""
-    return CAMPAIGN_V2 if (CAMPAIGN_V2 / experiment).is_dir() else CAMPAIGN
+    """The campaign folder that holds `experiment`: CAMPAIGN_V2 or BENCHMARKS_V2 if it has a folder of that name,
+    else CAMPAIGN."""
+    return next((campaign for campaign in (CAMPAIGN_V2, BENCHMARKS_V2) if (campaign / experiment).is_dir()), CAMPAIGN)
 
 
 def experiment_folder(experiment: str) -> Path:
@@ -67,11 +82,12 @@ def run_table(experiment: str) -> pd.DataFrame:
 def node_configurations(table: pd.DataFrame, node: str) -> pd.DataFrame:
     """Configuration of `node` in every run of `table`, one row per run (index: run_id) and one column per knob
     (cores, parallelism and the knobs of the service), without the prefix "<node>.". Left out: the service name, the
-    memory limit and the queueing discipline (second campaign only), which are the same in every run, and "rps", the
-    arrival rate of a source node in a tree, which is a property of the load and not of the service."""
+    memory limit and the queueing discipline (second campaign only), which are the same in every run, "probe_cores",
+    the cores of the probe of a benchmark (the same in every run), and "rps", the arrival rate of a source node in a
+    tree, which is a property of the load and not of the service."""
     runs = table.drop_duplicates("run_id").set_index("run_id")
     columns = [column for column in runs.columns
-               if column.startswith(node + ".") and not column.endswith((".service", ".memory", ".discipline", ".rps"))]
+               if column.startswith(node + ".") and not column.endswith((".service", ".memory", ".discipline", ".probe_cores", ".rps"))]
     return runs[columns].rename(columns=lambda column: column[len(node) + 1:])
 
 
@@ -105,13 +121,47 @@ def handling_overhead(experiment: str, run_id: str, node: str) -> float:
     no worker busy; records.csv), median over those requests. The testbed takes about this time for every request, also
     with an empty queue, so it is not queueing; execution times count it as part of the execution (chain_execution_times,
     run_execution_times, training_pool). 0 in the first campaign, where it is not separated from the wait for the
-    release once per second."""
-    if campaign_of(experiment) != CAMPAIGN_V2:
+    release once per second. nan if no request of the measurement phase found the service idle."""
+    if campaign_of(experiment) == CAMPAIGN:
         return 0.0
     records = pd.read_csv(experiment_folder(experiment) / "runs" / run_id / node / "records.csv")
     idle = records[(records["admission_phase"] == "measure") & (records["outcome"] == "completed") & (records["queue_length_at_arrival"] == 0)
                    & (records["workers_busy_at_arrival"] == 0)]
+    if idle.empty:   # no request found the service idle (benchmarks at utilization 1.0): not measurable
+        return np.nan
     return float(np.median(idle["started_at_ns"] - idle["arrived_at_ns"])) / 1e9
+
+
+@lru_cache(maxsize=None)
+def chain_handling_overheads(experiment: str) -> np.ndarray:
+    """handling_overhead (s) of every node of the chain `experiment` (second campaign) in every one of its
+    unthrottled_runs: (runs, nodes), the nodes in the order of the chain."""
+    path = chain_path(experiment)[0]
+    return np.array([[handling_overhead(experiment, run_id, node) for node in path] for run_id in unthrottled_runs(experiment)])
+
+
+def hop_overheads(exclude_experiment: str = None) -> tuple:
+    """The handling overhead (s) of a hop as two constants, each the median over the unthrottled runs of every chain of
+    CAMPAIGN_V2 except exclude_experiment (the evaluated chain, which must not inform its own prediction):
+    entry, the overhead of the first service of a chain, which receives the requests from the load generator; and
+    handover, the overhead of every later service, which receives them from the service before it. The overhead
+    depends on where a request comes from, not on the service: a benchmark run (also fed by the load generator) has
+    about the entry overhead, and every later position of every chain about the same, larger handover overhead."""
+    tables = [chain_handling_overheads(path.name) for path in sorted(CAMPAIGN_V2.iterdir()) if path.is_dir() and path.name != exclude_experiment]
+    entry = float(np.nanmedian(np.concatenate([table[:, 0] for table in tables])))
+    handover = float(np.nanmedian(np.concatenate([table[:, 1:].ravel() for table in tables])))
+    return entry, handover
+
+
+def path_hop_overheads(experiment: str) -> np.ndarray:
+    """The hop overhead (s) of every node of the chain `experiment`, in the order of the chain: the entry overhead of
+    hop_overheads at the first node, the handover overhead at every later one, both measured on the other chains.
+    Zero for the first campaign, which does not separate the overhead (handling_overhead)."""
+    path = chain_path(experiment)[0]
+    if campaign_of(experiment) == CAMPAIGN:
+        return np.zeros(len(path))
+    entry, handover = hop_overheads(exclude_experiment=experiment)
+    return np.array([entry] + [handover] * (len(path) - 1))
 
 
 def training_busy_worker_shares(experiment: str, training_runs: list = None) -> dict:
@@ -171,7 +221,10 @@ def training_pool(service: str, exclude_pipeline: str = None, sources: tuple = (
     time), and spread_s, the standard deviation (s) of a Gaussian with the run's median and
     95th percentile, (p95 - median) / 1.645, which is less sensitive to single extreme items than the sample standard
     deviation; a run whose p95 does not exceed its median gets a spread of one microsecond. Experiments that do not vary
-    every knob of the service are left out, because the value of the missing knob is not stored."""
+    every knob of the service are left out, because the value of the missing knob is not stored. overhead_s is the
+    handling overhead of the run (s, handling_overhead), which mean_s contains. A run without a
+    measurable handling overhead (no request found the service idle, which happens in benchmarks at utilization 1.0)
+    is left out, because its mean execution time is unknown."""
     nodes = campaign_nodes(campaign)
     nodes = nodes[(nodes["service"] == service) & (nodes["pipeline"] != exclude_pipeline) & (nodes["experiment"] != exclude_experiment)]
     knobs = max((set(node_configurations(run_table(row.experiment), row.node).columns) for row in nodes.itertuples()), key=len)
@@ -191,14 +244,18 @@ def training_pool(service: str, exclude_pipeline: str = None, sources: tuple = (
         spread = (statistics["processing_p95_ms"] - statistics["processing_p50_ms"]) / NORMAL_P95 / 1e3
         overhead = np.array([handling_overhead(row.experiment, run_id, row.node) for run_id in configurations.index])
         parts.append(configurations.reset_index().assign(experiment=row.experiment, node=row.node, alone=row.alone,
-                                                         mean_s=statistics["processing_mean_ms"].to_numpy() / 1e3 + overhead,
+                                                         mean_s=statistics["processing_mean_ms"].to_numpy() / 1e3 + overhead, overhead_s=overhead,
                                                          spread_s=np.maximum(spread.to_numpy(), 1e-6)))
-    return pd.concat(parts, ignore_index=True)
+    pool = pd.concat(parts, ignore_index=True)
+    return pool[pool["mean_s"].notna()].reset_index(drop=True)
 
 
-def training_exclusion(experiment: str) -> dict:
+def training_exclusion(experiment: str, training_campaign: Path = None) -> dict:
     """The arguments of training_pool that hold out the chain `experiment`: in the first campaign every run with its
-    topology, in the second campaign (one topology per application) every run of the experiment itself."""
+    topology, in the second campaign (one topology per chain) every run of the experiment itself. With
+    training_campaign = BENCHMARKS_V2, the services are trained on their benchmarks, which contain no chain."""
+    if training_campaign == BENCHMARKS_V2:
+        return dict(campaign=BENCHMARKS_V2)
     campaign = campaign_of(experiment)
     if campaign == CAMPAIGN_V2:
         return dict(campaign=campaign, exclude_experiment=experiment)
@@ -209,19 +266,20 @@ def run_execution_times(run) -> np.ndarray:
     """Measured execution times (s) of the service in one run of training_pool (a row of that table): processing times,
     plus in the second campaign the handling overhead of the service in that run."""
     if run.alone:
-        return single_execution_times(run.experiment, run.run_id, run.node)
+        return single_execution_times(run.experiment, run.run_id, run.node) + handling_overhead(run.experiment, run.run_id, run.node)
     steps = pipeline_steps(run.experiment, run.run_id)
     return steps[steps["node"] == run.node]["processing_s"].to_numpy() + handling_overhead(run.experiment, run.run_id, run.node)
 
 
-def feature_names(experiment: str) -> dict:
-    """Names of the columns of x_train and x_test in real_chain_data, per node of the chain `experiment`: the knobs of
-    the service, and one name "<knob>_<value>" per value of a knob that is a word."""
+def feature_names(experiment: str, training_campaign: Path = None) -> dict:
+    """Names of the columns of x_train and x_test in real_chain_data (with the same training_campaign), per node of the
+    chain `experiment`: the knobs of the service except NOT_CONFIGURATION, and one name "<knob>_<value>" per value of a
+    knob that is a word."""
     path, service_of = chain_path(experiment)[:2]
     names = {}
     for node in path:
-        pool = training_pool(service_of[node], **training_exclusion(experiment))
-        names[node] = list(pd.get_dummies(pool[[column for column in pool.columns if column not in POOL_COLUMNS]], dtype=float).columns)
+        pool = training_pool(service_of[node], **training_exclusion(experiment, training_campaign))
+        names[node] = list(pd.get_dummies(pool[[column for column in pool.columns if column not in POOL_COLUMNS + NOT_CONFIGURATION]], dtype=float).columns)
     return names
 
 
@@ -357,12 +415,19 @@ def unthrottled_runs(experiment: str) -> list:
     return [run_id for run_id in chain_runs(experiment) if throttled[run_id] == 0]
 
 
-def split_runs(experiment: str, n_train: int, seed, unthrottled: bool = False) -> tuple:
-    """The runs of one experiment of the second campaign, split into n_train training runs drawn at random and the
-    held-out rest, both sorted: (training runs, held-out runs). A training run trains the model of every service of the
-    chain (split_training_pool); a held-out run is one held-out configuration of the chain. unthrottled: split only the
-    runs of unthrottled_runs; the other runs are neither trained on nor held out."""
-    runs = np.array(unthrottled_runs(experiment) if unthrottled else chain_runs(experiment))
+def unthrottled_pool(pool: pd.DataFrame) -> pd.DataFrame:
+    """The rows of a table of training_pool whose run is in unthrottled_runs of its experiment: no container of the
+    run (in a chain, no service of the chain) was throttled."""
+    keep = {(experiment, run_id) for experiment in pool["experiment"].unique() for run_id in unthrottled_runs(experiment)}
+    return pool[[(row.experiment, row.run_id) in keep for row in pool.itertuples()]].reset_index(drop=True)
+
+
+def split_runs(experiment: str, n_train: int, seed) -> tuple:
+    """The unthrottled runs of one experiment of the second campaign (unthrottled_runs), split into n_train training
+    runs drawn at random and the held-out rest, both sorted: (training runs, held-out runs). A training run trains the
+    model of every service of the chain (split_training_pool); a held-out run is one held-out configuration of the
+    chain. The throttled runs are neither trained on nor held out."""
+    runs = np.array(unthrottled_runs(experiment))
     chosen = np.zeros(len(runs), dtype=bool)
     chosen[np.random.default_rng(seed).choice(len(runs), size=n_train, replace=False)] = True
     return list(runs[chosen]), list(runs[~chosen])
@@ -399,60 +464,70 @@ def emulate_services_alone(experiment: str, rates: np.ndarray, n_items: int, see
                      for k in range(times[0].shape[1])], axis=-1)
 
 
-def real_replay_data(experiment: str, seed, utilization: float = 0.5, n_train: int = 50, n_trace_items: int = 2000, split: tuple = None) -> tuple:
+def real_replay_data(experiment: str, seed, utilization: float = 0.5, n_train: int = 50, n_trace_items: int = 2000, split: tuple = None,
+                     training_campaign: Path = None) -> tuple:
     """Training data of the replay baseline (ReplayComposition in baselines_chain.py) for the chain `experiment`, from
-    the runs that training_exclusion allows; no run of the chain is used.
+    the runs that training_exclusion allows (training_campaign as in real_chain_data); no run of the chain is used.
     A *training composition* puts one training run of every service of the chain together: the j-th of n_train runs
-    that are drawn at random per service from training_pool. Its arrival rate is `utilization` / (mean processing time
+    that are drawn at random per service from training_pool. Its arrival rate is `utilization` / (mean execution time
     of its busiest service per worker), as for the runs of the chain. Every service of a training composition is then
-    monitored alone: its measured processing times are replayed through one FIFO queue with the workers of its run under
-    Poisson arrivals at that rate (n_trace_items items).
-    Second campaign: every training run contains every service of the chain, so a training composition is one
-    training run, drawn once for all services, and nothing is emulated: the monitored arrival times and latencies of a
-    service are the ones measured at that service in that run (its first n_trace_items requests, or as many as the
-    shortest of the drawn runs has), and the arrival rate is the one the campaign set (arrival_rates); `utilization` is
-    not used.
-    split: (training runs, held-out runs) of split_runs; the training compositions are then drawn from the training runs
-    of the experiment, and x_test holds the held-out runs.
+    monitored alone: its measured execution times are replayed through one FIFO queue with the workers of its run under
+    Poisson arrivals at that rate (n_trace_items items). The runs of the services were measured at different rates
+    (e.g. the benchmarks at five utilizations), so only this emulation gives every service of a composition one rate.
+    split (second campaign): (training runs, held-out runs) of split_runs. Every training run then contains every
+    service of the chain, so a training composition is one training run, drawn once for all services, and nothing is
+    emulated: the monitored arrival times and latencies of a service are the ones measured at that service in that
+    run (its first n_trace_items requests, or as many as the shortest of the drawn runs has), and the arrival rate is
+    the one the campaign set (arrival_rates); `utilization` is not used.
+    Second campaign: only unthrottled runs, for training and as held-out runs, and the arrival rate of a held-out run
+    is the one the campaign set; the handling overhead of every training run is replaced by the hop overhead of the
+    node's position (path_hop_overheads, as in real_chain_data). No feature holds the knobs of NOT_CONFIGURATION.
     Returns x_train (training compositions, features): the configurations of all services next to each other, without
-    the number of workers (no model receives it, see model_inputs in data.py), and log10 of the arrival rate; the arrival times and the latencies (s) of the monitored items, each a dictionary
-    service -> (training compositions, items); and x_test, the same features for every held-out run of the chain."""
+    the number of workers (no model receives it, see model_inputs in data.py), and log10 of the arrival rate; the
+    arrival times and the latencies (s) of the monitored items, each a dictionary service -> (training compositions,
+    items); and x_test, the same features for every held-out run of the chain."""
     rng = np.random.default_rng(seed)
     chain = run_table(experiment)
     path, service_of = chain_path(experiment)[:2]
-    runs = chain_runs(experiment, None if split is None else split[1])
-    measured = campaign_of(experiment) == CAMPAIGN_V2
-    pools = {node: (training_pool(service_of[node], **training_exclusion(experiment)) if split is None
+    measured_campaign = campaign_of(experiment) == CAMPAIGN_V2
+    runs = chain_runs(experiment, split[1] if split is not None else unthrottled_runs(experiment) if measured_campaign else None)
+    pools = {node: (training_pool(service_of[node], **training_exclusion(experiment, training_campaign)) if split is None
                     else split_training_pool(service_of[node], experiment, split[0])) for node in path}
-    if measured:
+    if measured_campaign and split is None:
+        pools = {node: unthrottled_pool(pool) for node, pool in pools.items()}
+    if split is not None:
         drawn = pools[path[0]].iloc[rng.choice(len(pools[path[0]]), size=n_train, replace=False)][["experiment", "run_id"]]
-    features_train, features_test, times, chosen_runs = [], [], {}, {}
-    for node in path:
+    features_train, features_test, times, chosen_runs, hop_shift = [], [], {}, {}, {}
+    hops = path_hop_overheads(experiment)   # as in real_chain_data: every run's own handling overhead replaced by the hop overhead
+    for k, node in enumerate(path):
         pool = pools[node]
-        chosen = drawn.merge(pool, on=["experiment", "run_id"]) if measured else pool.iloc[rng.choice(len(pool), size=n_train, replace=False)]
-        knobs = [column for column in pool.columns if column not in POOL_COLUMNS and column != "parallelism"]
+        chosen = drawn.merge(pool, on=["experiment", "run_id"]) if split is not None else pool.iloc[rng.choice(len(pool), size=n_train, replace=False)]
+        knobs = [column for column in pool.columns if column not in POOL_COLUMNS and column not in NOT_CONFIGURATION and column != "parallelism"]
         x_train, x_test = encode_configurations(chosen[knobs], node_configurations(chain, node).loc[runs, knobs])
         features_train.append(x_train)
         features_test.append(x_test)
         chosen_runs[node] = chosen
-        if not measured:
-            times[node] = [run_execution_times(run) for run in chosen.itertuples()]
+        hop_shift[node] = hops[k] - chosen["overhead_s"].to_numpy()
+        if split is None:
+            times[node] = [run_execution_times(run) + shift for run, shift in zip(chosen.itertuples(), hop_shift[node])]
     arrivals, latencies = {}, {}
-    if measured:
+    if split is not None:
         rates = np.array([arrival_rates(run.experiment)[run.run_id] for run in drawn.itertuples()])
-        test_rates = arrival_rates(experiment).loc[runs].to_numpy()
         monitored = {node: [measured_latencies(run.experiment, run.run_id, [run.node]) for run in chosen_runs[node].itertuples()] for node in path}
         n_items = min([n_trace_items] + [len(run[0]) for node in path for run in monitored[node]])
         for node in path:
-            latencies[node] = np.stack([run[1][:n_items, 0] for run in monitored[node]])
+            latencies[node] = np.stack([run[1][:n_items, 0] + shift for run, shift in zip(monitored[node], hop_shift[node])])
             arrivals[node] = np.stack([run[2][:n_items, 0] for run in monitored[node]])
     else:
         rates = utilization / np.max([[run_times.mean() / w for run_times, w in zip(times[node], run_workers(chosen_runs[node]))] for node in path], axis=0)
-        test_rates = utilization / np.array([(run_times.mean(axis=0) / w).max() for run_times, w in zip(chain_run_execution_times(experiment),
-                                                                                                      chain_run_workers(experiment))])
         for node in path:
             _, latencies[node], arrivals[node] = emulate_runs([run_times[:, None] for run_times in times[node]], rates, n_trace_items, rng,
                                                               workers=run_workers(chosen_runs[node])[:, None], return_arrivals=True)
+    if measured_campaign:
+        test_rates = arrival_rates(experiment).loc[runs].to_numpy()
+    else:
+        test_rates = utilization / np.array([(run_times.mean(axis=0) / w).max() for run_times, w in zip(chain_run_execution_times(experiment, runs),
+                                                                                                      chain_run_workers(experiment, runs))])
     return (np.column_stack(features_train + [np.log10(rates)]), arrivals, latencies,
             np.column_stack(features_test + [np.log10(test_rates)]))
 
@@ -480,7 +555,8 @@ def chain_tail_ratios(experiment: str, runs: list = None) -> np.ndarray:
 
 def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, utilization: float = 0.5, arrival_process: str = "poisson",
                     arrival_cv2: float = 1.0, n_train: int = 50, n_items: int = 5000, n_trace_items: int = 2000,
-                    sources: tuple = ("alone", "pipeline"), train_seed=None, arrival_rate: float = None, split: tuple = None) -> ChainData:
+                    sources: tuple = ("alone", "pipeline"), train_seed=None, arrival_rate: float = None, split: tuple = None,
+                    training_campaign: Path = None) -> ChainData:
     """Data of one chain of the campaign (`experiment`, e.g. "04e-chain-qr-cv-face") for the experiments of
     `2_evaluation.ipynb`. No run of the chain is used for training (training_exclusion): in the first campaign the chain is
     an unseen composition (no run with its topology is used), in the second campaign an unseen experiment.
@@ -506,6 +582,11 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
     training run at which every worker of the service would be busy 95% of the time or more is not monitored (its
     latencies are nan).
 
+    Hop overhead (second campaign): the handling overhead that a training run measured depends on where the requests of
+    that run came from (the load generator in a benchmark, another service in a chain), not on the service. Every
+    training target and every monitored latency therefore has the overhead of its own run replaced by the hop overhead
+    of the node's position in the evaluated chain (path_hop_overheads, measured on the other chains).
+
     Training (per service): n_train runs drawn at random from training_pool, i.e. from runs of the service alone and
     of pipelines with another topology, or in the second campaign from the other experiments that contain the service
     (`sources` restricts the pool to runs alone or in pipelines). The configuration of a run is
@@ -526,6 +607,11 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
     configurations, and the n_train training runs of every service are drawn from the training runs of the experiment
     instead of the other experiments (split_training_pool).
 
+    training_campaign (second campaign, without split): BENCHMARKS_V2 trains every service on its benchmark runs (the
+    service alone, at five utilizations); the default (None) trains it on the runs of the other chains that contain it.
+    Second campaign: the held-out runs are the unthrottled_runs of the chain, and the training runs are unthrottled
+    as well (unthrottled_pool). No model receives the knobs of NOT_CONFIGURATION (the cores).
+
     seed: seed of the ground truth and, unless train_seed is given, of the training data; with train_seed, another
     training set is drawn for the same ground truth. x_train and x_test are dictionaries service -> configurations,
     because every service has its own knobs and runs; workload["rate"] has one arrival rate per run of the chain.
@@ -539,8 +625,8 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
     path, service_of = chain_path(experiment)[:2]
 
     # ground truth: every held-out run of the chain at its own arrival rate
-    runs = chain_runs(experiment, None if split is None else split[1])
     measured_campaign = campaign_of(experiment) == CAMPAIGN_V2
+    runs = chain_runs(experiment, split[1] if split is not None else unthrottled_runs(experiment) if measured_campaign else None)
     assert split is None or measured_campaign, "split_runs is for experiments of the second campaign"
     if measured_campaign:   # the services queue FIFO: the measured latencies are the ground truth
         assert arrival_rate is None and arrival_process == "poisson", "the second campaign measured Poisson arrivals at the rate of every run"
@@ -563,20 +649,25 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
     # training data: every service from the runs that training_exclusion allows
     x_train, y_train, y_train_spread, x_test, x_train_load, x_test_load, monitored_latencies = {}, {}, {}, {}, {}, {}, {}
     workers_column = {}
-    for node in path:
-        pool = (training_pool(service_of[node], sources=tuple(sources), **training_exclusion(experiment)) if split is None
+    hops = path_hop_overheads(experiment)   # hop overhead of every node of the chain (s), measured on the other chains
+    for k, node in enumerate(path):
+        pool = (training_pool(service_of[node], sources=tuple(sources), **training_exclusion(experiment, training_campaign)) if split is None
                 else split_training_pool(service_of[node], experiment, split[0], tuple(sources)))
+        if measured_campaign and split is None:
+            pool = unthrottled_pool(pool)
         assert len(pool) >= n_train, f"{service_of[node]}: {len(pool)} training runs available, {n_train} needed"
         chosen = pool.iloc[np.sort(rng_train.choice(len(pool), size=n_train, replace=False))]
-        knobs = [column for column in pool.columns if column not in POOL_COLUMNS]
-        x_train[node], x_test[node] = encode_configurations(chosen[knobs], node_configurations(chain, node).loc[runs])
-        names = encoded_names(chosen[knobs], node_configurations(chain, node).loc[runs])
+        assert split is not None or experiment not in set(chosen["experiment"]), f"{experiment}: a run of the evaluated chain is in the training data"
+        knobs = [column for column in pool.columns if column not in POOL_COLUMNS and column not in NOT_CONFIGURATION]
+        x_train[node], x_test[node] = encode_configurations(chosen[knobs], node_configurations(chain, node).loc[runs, knobs])
+        names = encoded_names(chosen[knobs], node_configurations(chain, node).loc[runs, knobs])
         workers_column[node] = names.index("parallelism") if "parallelism" in names else None
         times = [run_execution_times(run) for run in chosen.itertuples()]
-        y_train[node], y_train_spread[node] = chosen["mean_s"].to_numpy(), chosen["spread_s"].to_numpy()
+        hop_shift = hops[k] - chosen["overhead_s"].to_numpy()   # per training run: its own handling overhead replaced by the hop overhead
+        y_train[node], y_train_spread[node] = chosen["mean_s"].to_numpy() + hop_shift, chosen["spread_s"].to_numpy()
         if measured_campaign:   # the latencies of the service as measured in the training run, at the rate of that run
             monitored_rates = np.array([arrival_rates(run.experiment)[run.run_id] for run in chosen.itertuples()])
-            monitored = [measured_latencies(run.experiment, run.run_id, [run.node])[1][:, 0] for run in chosen.itertuples()]
+            monitored = [measured_latencies(run.experiment, run.run_id, [run.node])[1][:, 0] + shift for run, shift in zip(chosen.itertuples(), hop_shift)]
             monitored_latencies[node] = np.stack([series[:min(n_trace_items, *map(len, monitored))] for series in monitored])
         else:
             mean_per_worker = np.array([run_times.mean() for run_times in times]) / run_workers(chosen)

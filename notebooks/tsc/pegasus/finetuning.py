@@ -14,10 +14,9 @@ from .evaluation import PROPOSED, PROPOSED_SNC
 from .data import model_inputs
 from .service_gp import configurations_of
 
-FINETUNED = {PROPOSED: "Pegasus per node, fine-tuned", PROPOSED_SNC: "Pegasus SNC, fine-tuned"}
 QUANTILE_SUM, FLUXION = "Quantile Sum", "Fluxion-style"
-# Colors of the methods of C.1, to be added to METHOD_COLORS of evaluation.py by the notebook
-COLORS = {FINETUNED[PROPOSED]: "limegreen", FINETUNED[PROPOSED_SNC]: "gold", QUANTILE_SUM: "tab:pink", FLUXION: "tab:brown"}
+# Colors of the two baselines of C.1, to be added to METHOD_COLORS of evaluation.py by the notebook
+COLORS = {QUANTILE_SUM: "tab:pink", FLUXION: "tab:brown"}
 
 
 def split_samples(n_configurations: int, n_samples_max: int, rng: np.random.Generator) -> tuple:
@@ -80,15 +79,14 @@ def fluxion_style(data, samples: np.ndarray, test: np.ndarray, alpha: float, lev
 
 
 def finetuning_methods(data, methods: dict, samples: np.ndarray, test: np.ndarray, alpha: float, miscoverage: float) -> dict:
-    """Every method of C.1 at the test configurations, name -> (group, latency in s): both versions of Pegasus as
-    they are (reference) and fine-tuned with the end-to-end samples, and the two baselines trained on these samples.
-    methods: the results of B.1 for the chain, name -> (group, latency at all held-out configurations), from
-    compare_methods. With no samples, only the reference is returned."""
-    results = {name: ("proposed", methods[name][1][test]) for name in (PROPOSED, PROPOSED_SNC)}
+    """Every method of C.1 at the test configurations, name -> (group, latency in s): both versions of Pegasus,
+    fine-tuned with the end-to-end samples (finetuned_bound; with no samples, or too few for the level, the bound of
+    B.1 as it is), and the two baselines trained on these samples, which need at least one sample. methods: the results
+    of B.1 for the chain, name -> (group, latency at all held-out configurations), from compare_methods."""
+    results = {name: ("proposed", finetuned_bound(methods[name][1], data.measured, samples, test, miscoverage)) for name in (PROPOSED, PROPOSED_SNC)}
     if len(samples) == 0:
         return results
-    for name, tuned in FINETUNED.items():
-        results[tuned] = ("proposed", finetuned_bound(methods[name][1], data.measured, samples, test, miscoverage))
     results[QUANTILE_SUM] = ("baseline", quantile_sum(data, samples, test, alpha))
     results[FLUXION] = ("baseline", fluxion_style(data, samples, test, alpha))
     return results
+

@@ -20,9 +20,9 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from .real_data import CAMPAIGN_V2, experiment_folder, node_configurations, run_table
+from .real_data import CAMPAIGN, CAMPAIGN_V2, experiment_folder, node_configurations, run_table
 
-CACHE = CAMPAIGN_V2.parent / "load_independence"   # results of run_states, one folder per campaign
+CACHE = CAMPAIGN.parent / "load_independence"   # results of run_states, one folder per campaign
 RECORD_COLUMNS = ["admission_phase", "outcome", "arrived_at_ns", "started_at_ns", "finished_at_ns"]
 PROVISIONING = ("r < c", "r = c", "r > c")
 
@@ -109,9 +109,9 @@ def run_states(campaign: Path = CAMPAIGN_V2, min_group: int = 8, window_s: float
       the queue); window_ratio (median processing time of the third of the items with the most arrivals at the node in
       the window_s before they started / of the third with the fewest, i.e. momentary high load / low load). A ratio is
       nan if one of its groups has fewer than min_group items.
-    Read from CACHE/<campaign folder>/run_states.csv if that file exists and recompute is False (computing it reads
+    Read from CACHE/<campaign>/run_states.csv (<campaign>: its path below statics/ with "_" for "/") if that file exists and recompute is False (computing it reads
     every records.csv of the campaign, about a minute); otherwise computed and written there."""
-    path = CACHE / campaign.name / "run_states.csv"
+    path = CACHE / "_".join(campaign.relative_to(CAMPAIGN.parent).parts) / "run_states.csv"
     if path.exists() and not recompute:
         return pd.read_csv(path)
     rows = []

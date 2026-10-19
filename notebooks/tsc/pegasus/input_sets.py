@@ -19,10 +19,9 @@ import pandas as pd
 from scipy import stats
 from sklearn.model_selection import GroupKFold
 
-from .real_data import CAMPAIGN, node_configurations
+from .real_data import CAMPAIGN, CAMPAIGN_V2, node_configurations
 from .service_gp import MIN_LENGTH_SCALE, train_gp_models
 
-CAMPAIGN_V2 = CAMPAIGN.parent / "results_milos_v2"
 # Input sets: name -> the columns of service_runs that are added to the quality knobs
 INPUT_SETS = {"quality": [],
               "cores": ["cores"],
@@ -145,10 +144,10 @@ def range_effect(length_scale, input_range, signal_variance):
 
 
 def cross_validate_all(input_set: str, campaign: Path = CAMPAIGN, recompute: bool = False, ard: bool = False) -> pd.DataFrame:
-    """cross_validate for every service of `campaign`, read from CACHE/<campaign folder>/<input_set>.csv (with ard:
-    CACHE/<campaign folder>_ard/) if that file exists (otherwise computed, which takes up to an hour per input set on
+    """cross_validate for every service of `campaign`, read from CACHE/<campaign>/<input_set>.csv (<campaign>: its
+    path below statics/ with "_" for "/", e.g. results_milos_v2_b1; with ard: CACHE/<campaign>_ard/) if that file exists (otherwise computed, which takes up to an hour per input set on
     the first campaign, and written there)."""
-    path = CACHE / (campaign.name + ("_ard" if ard else "")) / f"{input_set}.csv"
+    path = CACHE / ("_".join(campaign.relative_to(CAMPAIGN.parent).parts) + ("_ard" if ard else "")) / f"{input_set}.csv"
     if path.exists() and not recompute:
         return pd.read_csv(path)
     results = pd.concat([cross_validate(service, input_set, campaign=campaign, ard=ard) for service in services(campaign)], ignore_index=True)
