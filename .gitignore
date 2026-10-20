@@ -7,3 +7,4 @@ __pycache__/
 .idea
 .venv
 statics/results_milos_v2
+statics/results_milos
