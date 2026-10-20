@@ -11,9 +11,9 @@ Run from `notebooks/tsc/` with the venv:  ../../venv/Scripts/python draft_proble
 Writes figures/tsc/problem_queueing_draft.pdf and .jpg for (a), and figures/tsc/problem_prediction_draft.pdf and .jpg for (b).
 
 Source of the data: the testbed campaign in statics/results_milos (chain 04e, qr -> cv -> face), loaded with
-pegasus/real_data.py as in 2_evaluation.ipynb. The end-to-end latencies are emulated: the measured processing times of
+pegasus/real_data.py as in the evaluation (`2a_base_case.ipynb` to `2e_iterative.ipynb`). The end-to-end latencies are emulated: the measured processing times of
 every run are replayed through a chain of FIFO queues under Poisson arrivals. The methods are the baselines of
-2_evaluation.ipynb (pegasus/evaluation.py): GP Sum, Allen-Cunneen and Quantile Union, trained on single-service data only.
+the evaluation (`2a_base_case.ipynb` to `2e_iterative.ipynb`) (pegasus/evaluation.py): GP Sum, Allen-Cunneen and Quantile Union, trained on single-service data only.
 """
 import warnings
 from pathlib import Path
@@ -31,9 +31,9 @@ plt.rcParams.update({'font.size': 12})
 
 OUTPUT = Path(__file__).resolve().parents[2] / "figures" / "tsc"
 experiment = "04e-chain-qr-cv-face"
-alpha, confidence = 0.05, 0.95                         # violation probability epsilon (the bounded quantile is p95) and confidence, as in 2_evaluation.ipynb
+alpha, confidence = 0.05, 0.95                         # violation probability epsilon (the bounded quantile is p95) and confidence, as in pegasus/evaluation_setup.py
 coverage_check = dict(n_batches=10, confidence=0.95)
-seed, n_calibration = 35, 20                           # base seed and calibration size, as in 2_evaluation.ipynb
+seed, n_calibration = 35, 20                           # base seed and calibration size, as in pegasus/evaluation_setup.py
 utilizations = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]   # panel (a): utilization of the busiest service of every run
 base_utilization = 0.5                                 # panel (b): the load of B.1
 seeds = list(range(5))                                 # panel (b): a seed determines the training runs and the randomness of the emulation
@@ -43,7 +43,7 @@ p_label = f"p{100 * (1 - alpha):g}"
 
 def load(s, utilization):
     with warnings.catch_warnings():
-        warnings.simplefilter("ignore", ConvergenceWarning)   # GP hyperparameters at their bounds, as in 2_evaluation.ipynb
+        warnings.simplefilter("ignore", ConvergenceWarning)   # GP hyperparameters at their bounds, as in pegasus/evaluation_setup.py
         data = load_chain_data("real", experiment=experiment, utilization=utilization, level=1 - alpha, coverage_check=coverage_check, seed=[seed, s])
         models = fit_services(data, data.x_train, data.y_train, model_seed=seed + s, confidence=confidence, with_dnn=False)
         methods, _ = compare_methods(data, models, data.x_train, data.monitored_latencies, alpha, confidence, n_calibration, model_seed=seed + s,

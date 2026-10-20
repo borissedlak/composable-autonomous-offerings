@@ -569,7 +569,7 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
                     sources: tuple = ("alone", "pipeline"), train_seed=None, arrival_rate: float = None, split: tuple = None,
                     training_campaign: Path = None) -> ChainData:
     """Data of one chain of the campaign (`experiment`, e.g. "04e-chain-qr-cv-face") for the experiments of
-    `2_evaluation.ipynb`. No run of the chain is used for training (training_exclusion): in the first campaign the chain is
+    the evaluation (`2a_base_case.ipynb` to `2e_iterative.ipynb`). No run of the chain is used for training (training_exclusion): in the first campaign the chain is
     an unseen composition (no run with its topology is used), in the second campaign an unseen experiment.
 
     Ground truth, second campaign (per valid run of the chain): the services queue FIFO, so the ground truth is the

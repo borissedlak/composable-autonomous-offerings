@@ -1,4 +1,4 @@
-"""Experiment C.2 of `2_evaluation.ipynb`: choosing the configuration of a chain with a latency model, among the runs
+"""Experiment C.2 of `2e_iterative.ipynb`: choosing the configuration of a chain with a latency model, among the runs
 of the chain that exist.
 
 The *objective* is the SLO fulfillment of a configuration, as in the multidimensional scaling paper (Sedlak et al.,

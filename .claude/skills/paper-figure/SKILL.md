@@ -15,7 +15,7 @@ description: Create, restyle, or export a matplotlib/seaborn figure intended for
 
 ## 2. Style (match the existing figures)
 - **TSC notebooks (`notebooks/tsc/`): use `pegasus/figures.py`.** It holds the approved style
-  (reference figures: `draft_problem_figure.py` and B.1 on All Chains in `2_evaluation.ipynb`):
+  (reference figures: `draft_problem_figure.py` and B.1 on All Chains in `2a_base_case.ipynb`):
   - draw inside `with paper_style():` (default style, font 12, scoped to the block so later
     notebook figures are unchanged);
   - every method has a fixed color (`METHOD_COLORS`) **and** marker + line style

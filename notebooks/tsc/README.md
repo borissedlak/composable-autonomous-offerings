@@ -10,7 +10,11 @@ modeled on their own.
 | `1_method_synthetic.ipynb` | The method: GP model per service, node bounds, compositions, and the baselines of the method section. |
 | `1_method_synthetic_trees.ipynb` | The method on fork-join trees (experiment B3): why the latency of a tree is the maximum over its leaf-to-root paths, every composition applied path by path, and coverage and tightness on balanced and narrow trees with one or several workers per service. |
 | `1_method_real.ipynb` | The method on real services: the same steps as `1_method_synthetic.ipynb` on the testbed campaign (training on run statistics, emulated queueing), without the sections that need a synthetic system. |
-| `2_evaluation.ipynb` | The paper's evaluation (Section V) on synthetic or real data (`data_source`): setup (A), the coverage and tightness experiments B.1 to B.6 including B.2b (which configuration to benchmark next), and the iterative experiments C.1 (fine-tuning a bound with end-to-end samples) and C.2 (choosing a faster configuration of a chain). A last section holds real-data results that do not fit the paper's structure. |
+| `2a_base_case.ipynb` | The paper's evaluation (Section V), part 1, on synthetic or real data (`data_source`): the two data sources, the setup (A), the base case B.1 with all methods and the ablation of the compositions, B.1 on all chains of the campaign (real data), and real-data results that do not fit the paper's structure. Writes the base case of B.1 to `statics/evaluation_cache/`, which 2b to 2e read. |
+| `2b_evidence.ipynb` | Evaluation B.2 (varying evidence per service) and B.2b (which configuration to benchmark next). |
+| `2c_depth_and_load.ipynb` | Evaluation B.3 (varying chain depth) and B.4 (varying load and arrival pattern); synthetic data only for now. |
+| `2d_tails_and_percentiles.ipynb` | Evaluation B.5 (varying tail behaviors) and B.6 (varying percentiles). |
+| `2e_iterative.ipynb` | Evaluation C.1 (fine-tuning a bound with end-to-end samples) and C.2 (choosing a faster configuration of a chain). |
 | `explain_1_why_chernoff_mgf.ipynb` | Why the bounds use moment generating functions and Chernoff bounds, and which alternatives exist. |
 | `explain_2_why_poisson_is_loose.ipynb` | Why the SNC node bound is loose under Poisson arrivals. |
 | `explain_3_how_pegasus_bounds_compose.ipynb` | The two versions of Pegasus (per-node union bound, SNC): the math from one queue upward, strengths and weaknesses. |
@@ -32,7 +36,7 @@ script writes a `.pdf` and a `.jpg` to `figures/tsc/`.
 
 | Script | Figure | Data | Output in `figures/tsc/` |
 |---|---|---|---|
-| `draft_problem_figure.py` | The two problems the paper addresses (Section II-A): per-service execution times do not add up to the end-to-end tail latency, and an accurate point prediction is not a guarantee. | Real: chain `04e-chain-qr-cv-face` of the testbed campaign, with emulated queueing as in `2_evaluation.ipynb`. | `problem_overview_draft` |
+| `draft_problem_figure.py` | The two problems the paper addresses (Section II-A): per-service execution times do not add up to the end-to-end tail latency, and an accurate point prediction is not a guarantee. | Real: chain `04e-chain-qr-cv-face` of the testbed campaign, with emulated queueing as in the evaluation notebooks. | `problem_overview_draft` |
 | `draft_methodology_figure.py` | The methodology overview (Fig. 1): learn one model per service, bound each service as a queue, compose the service bounds for a pipeline that is never executed. | Synthetic: the services `s1`, `s2`, `s3` of `pegasus/data.py`, on a setting chosen for readability; an illustration, not a result of the evaluation. | `methodology_overview_draft` |
 
 ## Helper code: `pegasus/`
@@ -50,6 +54,7 @@ as `from pegasus.bounds import ...`, with the working directory at `notebooks/ts
 | `baselines_chain.py` | Baselines of the method notebook that need runs of the chain: Deep GP, Fluxion-style, replay; independence tests. |
 | `data.py` | Data of the evaluation: the seeded generator of synthetic services, the simulated chain data, and the entry points for both data sources. |
 | `real_data.py` | The real data source: reader of the testbed campaign in `statics/results_milos/`, and the emulation that replays its measured processing times through FIFO queues. |
+| `evaluation_setup.py` | What the evaluation notebooks 2a to 2e share: the parameters (ε, confidence, seeds, ...), the options per data source, and the base case of B.1 (`b1_base`), computed once and cached in `statics/evaluation_cache/`; every experiment cell keeps its results there too (`cached`). A cache is recomputed when the parameters, the settings or the code of the experiment, or the computation code of `pegasus/` change (not when only a figure changes); `refresh=True` forces it. |
 | `evaluation.py` | What the experiments of the evaluation share: model fitting, the comparison of all methods, coverage, figures. |
 | `exploration.py` | Experiment B.2b: sampling strategies that pick the next configuration to benchmark (random, Sobol sequence, and four acquisition functions on the GPs), for the synthetic services and for the measured runs of a real service. |
 | `finetuning.py` | Experiment C.1: split-conformal calibration of a bound with end-to-end samples, and the baselines that are trained on runs of the chain itself (Quantile Sum, Fluxion-style). |
@@ -66,7 +71,7 @@ and `service_gp`; `finetuning` on `baselines`, `baselines_chain`, `evaluation` a
 
 | Path | Contents |
 |---|---|
-| `statics/results_milos/` | The testbed campaign that `real_data.py` reads: one folder per experiment (single services, chains, trees, deep chains). The real data source of `1_method_real.ipynb`, `2_evaluation.ipynb`, `explain_5`, `explain_6` and `draft_problem_figure.py` needs this folder. The folder is not part of the repository: it is not committed, so a fresh clone does not contain it. |
+| `statics/results_milos/` | The testbed campaign that `real_data.py` reads: one folder per experiment (single services, chains, trees, deep chains). The real data source of `1_method_real.ipynb`, the evaluation notebooks (`2a` to `2e`), `explain_5`, `explain_6` and `draft_problem_figure.py` needs this folder. The folder is not part of the repository: it is not committed, so a fresh clone does not contain it. |
 | `statics/load_independence/results_milos_v2_b1/run_states.csv` | Cache of `run_states` (`load_independence.py`) for `explain_9`: one row per run and service of the second campaign. Recomputed from `statics/results_milos_v2/b1/` when missing. |
 | `figures/tsc/` | Outputs of the figure scripts. |
 

@@ -1,4 +1,4 @@
-The evaluation notebook [2_evaluation.ipynb](2_evaluation.ipynb) already carries most of the experiments needed for the 
+The evaluation notebooks ([2a_base_case.ipynb](2a_base_case.ipynb) to [2e_iterative.ipynb](2e_iterative.ipynb)) already carry most of the experiments needed for the 
 paper, however, we need new data. For  this we use the existing structure, run some new experiments in the background, 
 and swap the data. In particular, we need the following experiments and also a folder structure that follow this.
 

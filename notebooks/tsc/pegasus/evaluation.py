@@ -1,4 +1,4 @@
-"""What the experiments in `2_evaluation.ipynb` share: the per-service models, the comparison of the proposed method with
+"""What the experiments in the evaluation (`2a_base_case.ipynb` to `2e_iterative.ipynb`) share: the per-service models, the comparison of the proposed method with
 every baseline, the coverage of a method, and the figures. The notebook only calls these functions; the bounds
 themselves are in `bounds.py` and the baselines in `baselines.py`.
 
@@ -412,36 +412,43 @@ def tightness_sweep_figure(settings: list, statistics: dict, xlabel: str, title:
 
 def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xlabel: str, title: str, level_label: str,
                               tick_labels: list = None, log_x: bool = True, name: str = None) -> None:
-    """Three panels over a sweep. Left: the tightness of every method, as in tightness_sweep_figure. Middle: the
-    training time (s), one line per set of trained models; methods that use the same models (same_models) share a line,
-    and the legend of the panel names them. Right: the evaluation time (s) of every method. Lines and bands of the time
-    panels are the median and the range over the seeds (sweep_line). statistics: from sweep_statistics; times: from
-    sweep_seconds. The title is printed above the figure; name: file name in figures/tsc, or None."""
+    """Three separate figures over a sweep. First: the tightness of every method, as in tightness_sweep_figure.
+    Second: the training time (s), one line per set of trained models; methods that use the same models (same_models)
+    share a line, and its legend names them. Third: the evaluation time (s) of every method. Lines and bands of the time
+    figures are the median and the range over the seeds (sweep_line). statistics: from sweep_statistics; times: from
+    sweep_seconds. The title is printed above the figures; name: file name in figures/tsc, saved as <name>_tightness,
+    <name>_training and <name>_evaluation, or None."""
     from .figures import legend_inside, paper_style, save_figure
     print(title)
+    short = lambda method: method.replace(" (ours)", "")
     with paper_style():
-        fig, (ax_tight, ax_training, ax_evaluation) = plt.subplots(1, 3, figsize=(18, 4.8))
-        for ax in (ax_tight, ax_training, ax_evaluation):
-            _sweep_axis(ax, settings, xlabel, tick_labels, log_x)
-        _tightness_panel(ax_tight, settings, statistics, level_label)
-        short = lambda method: method.replace(" (ours)", "")
-        training_segments = []
-        for group in same_models(times, list(times)):
-            sweep_line(ax_training, settings, times[group[0]]["training"], group[0], label=", ".join(short(method) for method in group))
-            training_segments += sweep_segments(settings, times[group[0]]["training"])
-        for method in times:
-            sweep_line(ax_evaluation, settings, times[method]["evaluation"], method)
-        for ax, what in ((ax_training, "training time"), (ax_evaluation, "evaluation time")):
-            ax.set_yscale("log")
-            ax.set_ylabel(f"{what} (s, log scale)")
+        fig, ax = plt.subplots(figsize=(9, 4.5))
+        _sweep_axis(ax, settings, xlabel, tick_labels, log_x)
+        _tightness_panel(ax, settings, statistics, level_label)
         fig.tight_layout()
-        _tightness_legend(ax_tight, settings, statistics, ncol=2)   # a third of the figure is too narrow for three columns
-        handles, labels = ax_training.get_legend_handles_labels()
-        legend_inside(ax_training, handles, labels, training_segments, max_doublings=0, title="models trained for", fontsize=9, title_fontsize=9,
-                      framealpha=0.95)
+        _tightness_legend(ax, settings, statistics)
         if name is not None:
-            save_figure(fig, name)
+            save_figure(fig, f"{name}_tightness")
         plt.show()
+        for what in ("training", "evaluation"):
+            fig, ax = plt.subplots(figsize=(9, 4.5))
+            _sweep_axis(ax, settings, xlabel, tick_labels, log_x)
+            segments = []
+            # training: one line per set of shared models; evaluation: one line per method
+            lines = [(group[0], ", ".join(short(method) for method in group)) for group in same_models(times, list(times))] if what == "training" \
+                else [(method, method) for method in times]
+            for method, label in lines:
+                sweep_line(ax, settings, times[method][what], method, label=label)
+                segments += sweep_segments(settings, times[method][what])
+            ax.set_yscale("log")
+            ax.set_ylabel(f"{what} time (s, log scale)")
+            fig.tight_layout()
+            handles, labels = ax.get_legend_handles_labels()
+            legend_inside(ax, handles, labels, segments, max_doublings=0, title="models trained for" if what == "training" else None, ncol=2,
+                          fontsize=10, title_fontsize=10, framealpha=0.95, columnspacing=1.0, handletextpad=0.4)
+            if name is not None:
+                save_figure(fig, f"{name}_{what}")
+            plt.show()
 
 
 def _sweep_axis(ax, settings: list, xlabel: str, tick_labels: list, log_x: bool) -> None:

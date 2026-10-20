@@ -1,4 +1,4 @@
-"""Per-service baselines of `2_evaluation.ipynb`. Like the proposed method, each is trained only on data of every service
+"""Per-service baselines of the evaluation (`2a_base_case.ipynb` to `2e_iterative.ipynb`). Like the proposed method, each is trained only on data of every service
 on its own; none sees a run of the chain. They differ in what is measured per service:
 
 1. Execution-time model per service, summed, no queue: the joint Gaussian quantile of the predicted execution times,

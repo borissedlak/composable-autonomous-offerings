@@ -1,4 +1,4 @@
-"""Experiment B.2b of `2_evaluation.ipynb`: which configuration to benchmark next. A sampling strategy builds the
+"""Experiment B.2b of `2b_evidence.ipynb`: which configuration to benchmark next. A sampling strategy builds the
 training configurations of the synthetic services one at a time; the adaptive ones choose the next configuration with
 an acquisition function on the GPs that are fitted to the configurations benchmarked so far.
 
@@ -122,44 +122,59 @@ def exploration_results(data, x: np.ndarray, y: dict, sizes: list, service_seed:
 
 def exploration_figure(sizes: list, statistics: dict, errors: dict, title: str, level_label: str,
                        xlabel: str = "benchmarked configurations (log scale)", name: str = None) -> None:
-    """Two panels over the number of benchmarked configurations, one line per sampling strategy (median over the seeds,
-    band from the smallest to the largest seed, see sweep_line), in the style of the paper figures (figures.py). Left:
-    tightness of the bound that is trained on the configurations of the strategy, with a filled marker where the bound
-    holds and the red zone below 1x. Right: relative error of the predicted mean execution time. statistics: from
-    sweep_statistics, with the strategies in place of the methods; errors: strategy -> (sizes, seeds); xlabel: what the
-    sizes count. The title is printed above the figure; name: file name in figures/tsc, or None."""
+    """Two separate figures over the number of benchmarked configurations, one line per sampling strategy (median over
+    the seeds, band from the smallest to the largest seed, see sweep_line), in the style of the paper figures
+    (figures.py). First: tightness of the bound that is trained on the configurations of the strategy, with a filled
+    marker where the bound holds and the red zone below 1x. Second: relative error of the predicted mean execution
+    time. statistics: from sweep_statistics, with the strategies in place of the methods; errors: strategy -> (sizes,
+    seeds); xlabel: what the sizes count. The title is printed above the figures; name: file name in figures/tsc, saved
+    as <name>_tightness and <name>_error, or None."""
     print(title)
+
+    def axis(ax):
+        ax.set_xscale("log")
+        ax.set_xticks(sizes, [str(size) for size in sizes])
+        ax.minorticks_off()
+        ax.set_xlabel(xlabel)
+        ax.grid(True, linestyle=":", alpha=0.6)
+
     with paper_style():
-        fig, (ax_tight, ax_error) = plt.subplots(1, 2, figsize=(15, 4.8))
-        ax_tight.axhspan(TIGHTNESS_RANGE[0], 1.0, color=FAILURE_COLOR, linewidth=0)
-        ax_tight.axhline(1.0, color="black", linewidth=1)
-        tight_segments = []
+        fig, ax = plt.subplots(figsize=(9, 4.5))
+        ax.axhspan(TIGHTNESS_RANGE[0], 1.0, color=FAILURE_COLOR, linewidth=0)
+        ax.axhline(1.0, color="black", linewidth=1)
+        segments = []
         for strategy in statistics:
-            sweep_line(ax_tight, sizes, statistics[strategy]["tightness"], strategy, held=statistics[strategy]["holds"])
-            sweep_line(ax_error, sizes, 100 * errors[strategy], strategy)
-            tight_segments += sweep_segments(sizes, statistics[strategy]["tightness"])
-        for ax in (ax_tight, ax_error):
-            ax.set_xscale("log")
-            ax.set_xticks(sizes, [str(size) for size in sizes])
-            ax.minorticks_off()
-            ax.set_xlabel(xlabel)
-            ax.grid(True, linestyle=":", alpha=0.6)
-        ax_tight.text(0.99, 0.03, f"below the measured {level_label}: no bound", transform=ax_tight.transAxes, ha="right", va="bottom",
-                      color=FAILURE_TEXT_COLOR)
-        ax_tight.set_yscale("log")
-        ax_tight.set_ylim(*TIGHTNESS_RANGE)
-        ax_tight.set_yticks(TIGHTNESS_TICKS, [f"{tick:g}×" for tick in TIGHTNESS_TICKS])
-        ax_tight.yaxis.set_minor_locator(plt.NullLocator())
-        ax_tight.set_ylabel(f"tightness: latency ÷ measured {level_label}")
-        ax_error.set_ylabel("error of the predicted mean execution time (%)")
-        ax_error.set_ylim(bottom=0)
+            sweep_line(ax, sizes, statistics[strategy]["tightness"], strategy, held=statistics[strategy]["holds"])
+            segments += sweep_segments(sizes, statistics[strategy]["tightness"])
+        axis(ax)
+        ax.text(0.99, 0.03, f"below the measured {level_label}: no bound", transform=ax.transAxes, ha="right", va="bottom", color=FAILURE_TEXT_COLOR)
+        ax.set_yscale("log")
+        ax.set_ylim(*TIGHTNESS_RANGE)
+        ax.set_yticks(TIGHTNESS_TICKS, [f"{tick:g}×" for tick in TIGHTNESS_TICKS])
+        ax.yaxis.set_minor_locator(plt.NullLocator())
+        ax.set_ylabel(f"tightness: latency ÷ measured {level_label}")
         fig.tight_layout()
-        handles, labels = ax_tight.get_legend_handles_labels()
+        handles, labels = ax.get_legend_handles_labels()
         marker_handles, marker_labels = holds_handles()
-        legend_inside(ax_tight, handles + marker_handles, labels + marker_labels, tight_segments, max_doublings=0, ncol=2, fontsize=10,
-                      framealpha=0.95, columnspacing=1.0, handletextpad=0.4)
+        legend_inside(ax, handles + marker_handles, labels + marker_labels, segments, max_doublings=0, ncol=3, fontsize=10, framealpha=0.95,
+                      columnspacing=1.0, handletextpad=0.4)
         if name is not None:
-            save_figure(fig, name)
+            save_figure(fig, f"{name}_tightness")
+        plt.show()
+
+        fig, ax = plt.subplots(figsize=(9, 4.5))
+        segments = []
+        for strategy in statistics:
+            sweep_line(ax, sizes, 100 * errors[strategy], strategy)
+            segments += sweep_segments(sizes, 100 * errors[strategy])
+        axis(ax)
+        ax.set_ylabel("error of the predicted mean execution time (%)")
+        ax.set_ylim(bottom=0)
+        fig.tight_layout()
+        handles, labels = ax.get_legend_handles_labels()
+        legend_inside(ax, handles, labels, segments, max_doublings=0, ncol=3, fontsize=10, framealpha=0.95, columnspacing=1.0, handletextpad=0.4)
+        if name is not None:
+            save_figure(fig, f"{name}_error")
         plt.show()
 
 

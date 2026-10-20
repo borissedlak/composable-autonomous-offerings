@@ -1,4 +1,4 @@
-"""Experiment C.1 of `2_evaluation.ipynb`: fine-tuning a latency bound with end-to-end samples, and the baselines that
+"""Experiment C.1 of `2e_iterative.ipynb`: fine-tuning a latency bound with end-to-end samples, and the baselines that
 are trained on runs of the chain itself.
 
 An *end-to-end sample* is one run of the chain whose end-to-end latency quantile was measured: one of the held-out

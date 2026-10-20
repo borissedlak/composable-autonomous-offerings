@@ -1,4 +1,4 @@
-"""Data of the experiments in `2_evaluation.ipynb`, from one of two sources (`data_source` in the notebook):
+"""Data of the experiments in the evaluation (`2a_base_case.ipynb` to `2e_iterative.ipynb`), from one of two sources (`data_source` in the notebook):
 
 - "synthetic": services whose mean execution time is a known function of the configuration (CPU, quality,
   parallelism), and a simulated chain of FIFO queues as ground truth, where the parallelism of a configuration is the
