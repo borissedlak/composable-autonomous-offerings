@@ -9,7 +9,6 @@ import time
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.lines import Line2D
 from scipy.stats import norm
 
 from .baselines import (conformal_service_bounds, joint_gaussian_quantile, queueing_formula_latency, summed_service_quantiles, train_dnn_models,
@@ -19,7 +18,7 @@ from .service_gp import (RunStatisticsModel, configurations_of, execution_time_b
 from .bounds import martingale_closed_form_node_bounds, network_service_bound
 from .data import model_inputs, path_workers
 
-PROPOSED = "Pegasus per node (ours)"   # union bound over the node bounds
+PROPOSED = "Pegasus Node (ours)"   # union bound over the node bounds
 PROPOSED_SNC = "Pegasus SNC (ours)"    # one bound for the whole chain from its network service curve
 GROUP_COLORS = {"proposed": "tab:green", "baseline": "tab:gray", "reference": "tab:purple"}
 METHOD_COLORS = {PROPOSED: "tab:green", PROPOSED_SNC: "tab:olive", "GP Sum": "tab:gray", "DNN Sum": "black", "Allen-Cunneen": "tab:blue",
@@ -67,7 +66,7 @@ def fit_services(data, x_train, y_train: dict, model_seed: int, confidence: floa
 
 
 def pegasus_bound(data, models: dict, alpha: float) -> np.ndarray:
-    """Pegasus per node: the union bound over the closed-form martingale node bounds with propagated service spacing, per
+    """Pegasus Node: the union bound over the closed-form martingale node bounds with propagated service spacing, per
     held-out configuration (s). The waiting time at a service is bounded by Kingman's martingale bound exp(-theta w);
     with a Gaussian execution time, the latency bound of the service follows from one formula. The first service
     receives the external arrivals; every later one receives the departures of the service before it, which cannot be
@@ -363,59 +362,86 @@ def tightness_figure(results: dict, data, title: str, level_label: str, seeds_re
 
 
 def sweep_line(ax, settings, values: np.ndarray, name: str, held: np.ndarray = None, label: str = None) -> None:
-    """One method in a figure over a sweep. settings: the values of the horizontal axis; values: (settings, seeds), nan
-    where the method has no value. The line is the median over the seeds, in which a seed without a value counts as
-    infinitely large, so that a setting has no point if half of the seeds or more have no value. The band reaches from
-    the smallest to the largest seed with a value. held: per setting, whether the method holds there (see holds); its
-    marker is then filled, otherwise hollow. Without `held` every marker is filled. label: legend entry (default: name)."""
+    """One method in a figure over a sweep, in the style of the paper figures (pegasus/figures.py): its color, marker
+    and line style. settings: the values of the horizontal axis; values: (settings, seeds), nan where the method has
+    no value. The line is the median over the seeds, in which a seed without a value counts as infinitely large, so that
+    a setting has no point if half of the seeds or more have no value. The band reaches from the smallest to the
+    largest seed with a value. held: per setting, whether the method holds there (see holds); its marker is then
+    filled, otherwise hollow. Without `held` every marker is filled. label: legend entry (default: name)."""
+    from .figures import BAND_ALPHA, METHOD_STYLES, method_linewidth
     typical = np.median(np.where(np.isnan(values), np.inf, values), axis=1)
     shown = np.isfinite(typical)
     settings, values, typical = np.asarray(settings)[shown], values[shown], typical[shown]
     color = METHOD_COLORS[name]
+    marker, linestyle = METHOD_STYLES.get(name, ("o", "-"))
     filled = np.ones(len(settings), dtype=bool) if held is None else np.asarray(held)[shown]
-    ax.plot(settings, typical, "-", color=color, label=label or name, linewidth=2.5 if name in (PROPOSED, PROPOSED_SNC) else 1.5)
-    ax.fill_between(settings, np.nanmin(values, axis=1), np.nanmax(values, axis=1), color=color, alpha=0.15)
-    ax.scatter(settings, typical, s=30, facecolors=[color if f else "white" for f in filled], edgecolors=color, linewidths=1.5, zorder=3)
+    ax.plot(settings, typical, linestyle=linestyle, color=color, linewidth=method_linewidth(name))
+    ax.fill_between(settings, np.nanmin(values, axis=1), np.nanmax(values, axis=1), color=color, alpha=BAND_ALPHA, linewidth=0)
+    ax.scatter(settings, typical, s=40, marker=marker, facecolors=[color if f else "white" for f in filled], edgecolors=color, linewidths=1.5,
+               zorder=3)
+    # the legend entry carries the line and the marker, as in the legends of figures.py
+    ax.plot([], [], linestyle=linestyle, marker=marker, color=color, linewidth=method_linewidth(name), markersize=7, label=label or name)
+
+
+def sweep_segments(settings, values: np.ndarray) -> list:
+    """(x, y_low, y_high) of every point and band of a sweep_line, for legend_inside in figures.py."""
+    shown = ~np.isnan(values).all(axis=1)
+    return list(zip(np.asarray(settings, dtype=float)[shown], np.nanmin(values[shown], axis=1), np.nanmax(values[shown], axis=1)))
 
 
 def tightness_sweep_figure(settings: list, statistics: dict, xlabel: str, title: str, level_label: str, tick_labels: list = None,
-                           log_x: bool = True) -> None:
+                           log_x: bool = True, name: str = None) -> None:
     """Tightness of every method over a sweep, one panel: per method the median over the seeds with the band from the
     smallest to the largest seed (sweep_line), a filled marker where the method holds and a hollow one where it does
     not. statistics: from sweep_statistics; tick_labels: text of every setting on the horizontal axis (default: its
     value); level_label: name of the measured quantile (e.g. "p95"). A method has no point where, under half of the
-    seeds or more, it has no finite latency at half of the held-out configurations or more."""
-    fig, ax = plt.subplots(figsize=(9, 4.8))
-    _sweep_axis(ax, settings, xlabel, tick_labels, log_x)
-    _tightness_panel(fig, ax, settings, statistics, level_label, legend_columns=3)
-    fig.suptitle(title)
-    plt.tight_layout()
-    plt.show()
+    seeds or more, it has no finite latency at half of the held-out configurations or more. The title is printed above
+    the figure instead of drawn into it (no title in a paper figure); name: file name in figures/tsc, or None."""
+    from .figures import paper_style, save_figure
+    print(title)
+    with paper_style():
+        fig, ax = plt.subplots(figsize=(9, 4.5))
+        _sweep_axis(ax, settings, xlabel, tick_labels, log_x)
+        _tightness_panel(ax, settings, statistics, level_label)
+        fig.tight_layout()
+        _tightness_legend(ax, settings, statistics)
+        if name is not None:
+            save_figure(fig, name)
+        plt.show()
 
 
 def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xlabel: str, title: str, level_label: str,
-                              tick_labels: list = None, log_x: bool = True) -> None:
+                              tick_labels: list = None, log_x: bool = True, name: str = None) -> None:
     """Three panels over a sweep. Left: the tightness of every method, as in tightness_sweep_figure. Middle: the
     training time (s), one line per set of trained models; methods that use the same models (same_models) share a line,
     and the legend of the panel names them. Right: the evaluation time (s) of every method. Lines and bands of the time
     panels are the median and the range over the seeds (sweep_line). statistics: from sweep_statistics; times: from
-    sweep_seconds."""
-    fig, (ax_tight, ax_training, ax_evaluation) = plt.subplots(1, 3, figsize=(18, 4.8))
-    for ax in (ax_tight, ax_training, ax_evaluation):
-        _sweep_axis(ax, settings, xlabel, tick_labels, log_x)
-    _tightness_panel(fig, ax_tight, settings, statistics, level_label, legend_columns=4)
-    short = lambda name: name.replace(" (ours)", "")
-    for group in same_models(times, list(times)):
-        sweep_line(ax_training, settings, times[group[0]]["training"], group[0], label=", ".join(short(name) for name in group))
-    for name in times:
-        sweep_line(ax_evaluation, settings, times[name]["evaluation"], name)
-    for ax, what in ((ax_training, "training time"), (ax_evaluation, "evaluation time")):
-        ax.set_yscale("log")
-        ax.set_ylabel(f"{what} (s, log scale)")
-    ax_training.legend(title="models trained for", fontsize=9, title_fontsize=9)
-    fig.suptitle(title)
-    plt.tight_layout()
-    plt.show()
+    sweep_seconds. The title is printed above the figure; name: file name in figures/tsc, or None."""
+    from .figures import legend_inside, paper_style, save_figure
+    print(title)
+    with paper_style():
+        fig, (ax_tight, ax_training, ax_evaluation) = plt.subplots(1, 3, figsize=(18, 4.8))
+        for ax in (ax_tight, ax_training, ax_evaluation):
+            _sweep_axis(ax, settings, xlabel, tick_labels, log_x)
+        _tightness_panel(ax_tight, settings, statistics, level_label)
+        short = lambda method: method.replace(" (ours)", "")
+        training_segments = []
+        for group in same_models(times, list(times)):
+            sweep_line(ax_training, settings, times[group[0]]["training"], group[0], label=", ".join(short(method) for method in group))
+            training_segments += sweep_segments(settings, times[group[0]]["training"])
+        for method in times:
+            sweep_line(ax_evaluation, settings, times[method]["evaluation"], method)
+        for ax, what in ((ax_training, "training time"), (ax_evaluation, "evaluation time")):
+            ax.set_yscale("log")
+            ax.set_ylabel(f"{what} (s, log scale)")
+        fig.tight_layout()
+        _tightness_legend(ax_tight, settings, statistics, ncol=2)   # a third of the figure is too narrow for three columns
+        handles, labels = ax_training.get_legend_handles_labels()
+        legend_inside(ax_training, handles, labels, training_segments, max_doublings=0, title="models trained for", fontsize=9, title_fontsize=9,
+                      framealpha=0.95)
+        if name is not None:
+            save_figure(fig, name)
+        plt.show()
 
 
 def _sweep_axis(ax, settings: list, xlabel: str, tick_labels: list, log_x: bool) -> None:
@@ -428,25 +454,30 @@ def _sweep_axis(ax, settings: list, xlabel: str, tick_labels: list, log_x: bool)
     ax.grid(True, linestyle=":", alpha=0.6)
 
 
-def _tightness_panel(fig, ax, settings: list, statistics: dict, level_label: str, legend_columns: int) -> None:
-    """Tightness of every method over a sweep on `ax`, with the line at 1× (the measured quantile) and the legend of
-    the methods and of the markers below the figure. The axis shows TIGHTNESS_RANGE; a line leaves the panel where a
-    method lies outside."""
+def _tightness_panel(ax, settings: list, statistics: dict, level_label: str) -> None:
+    """Tightness of every method over a sweep on `ax`, with the line at 1x (the measured quantile) and the red zone
+    below it, where a method is no bound. The axis shows TIGHTNESS_RANGE; a line leaves the panel where a method lies
+    outside."""
+    from .figures import FAILURE_COLOR, FAILURE_TEXT_COLOR
+    ax.axhspan(TIGHTNESS_RANGE[0], 1.0, color=FAILURE_COLOR, linewidth=0)
+    ax.axhline(1.0, color="black", linewidth=1)
     for name in METHOD_COLORS:
         if name in statistics:
             sweep_line(ax, settings, statistics[name]["tightness"], name, held=statistics[name]["holds"])
-    ax.axhline(1.0, color="black", linewidth=1)
+    ax.text(0.99, 0.03, f"below the measured {level_label}: no bound", transform=ax.transAxes, ha="right", va="bottom", color=FAILURE_TEXT_COLOR)
     ax.set_yscale("log")
     ax.set_ylim(*TIGHTNESS_RANGE)
     ax.set_yticks(TIGHTNESS_TICKS, [f"{tick:g}×" for tick in TIGHTNESS_TICKS])
     ax.yaxis.set_minor_locator(plt.NullLocator())
-    ax.set_ylabel(f"tightness: latency ÷ measured {level_label} (log scale)")
+    ax.set_ylabel(f"tightness: latency ÷ measured {level_label}")
+
+
+def _tightness_legend(ax, settings: list, statistics: dict, ncol: int = 3) -> None:
+    """The legend of the methods and of the markers inside a tightness panel, where it hides the fewest points and
+    bands (legend_inside); the axis keeps TIGHTNESS_RANGE, as in B.1. Call after tight_layout."""
+    from .figures import holds_handles, legend_inside
     handles, labels = ax.get_legend_handles_labels()
-    marker_handles, marker_labels = validity_legend()
-    fig.legend(handles + marker_handles, labels + marker_labels, loc="upper center", bbox_to_anchor=(0.5, 0.0), ncol=legend_columns)
-
-
-def validity_legend() -> tuple:
-    """Handles and labels that explain the filled and the hollow markers of sweep_line."""
-    marker = lambda face: Line2D([], [], linestyle="", marker="o", markersize=6, markerfacecolor=face, markeredgecolor="dimgray", markeredgewidth=1.5)
-    return [marker("dimgray"), marker("white")], ["holds: reaches the confidence level under every seed", "does not hold"]
+    marker_handles, marker_labels = holds_handles()
+    segments = [segment for name in statistics if name in METHOD_COLORS for segment in sweep_segments(settings, statistics[name]["tightness"])]
+    legend_inside(ax, handles + marker_handles, labels + marker_labels, segments, max_doublings=0, ncol=ncol, fontsize=10, framealpha=0.95,
+                  columnspacing=1.0, handletextpad=0.4)

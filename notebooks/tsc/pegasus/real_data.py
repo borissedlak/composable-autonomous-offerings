@@ -389,7 +389,15 @@ def measured_latencies(experiment: str, run_id: str, path: list) -> tuple:
     of every request (traces.csv, total_ms: from entering the first service until leaving the last one, including the
     handover between services), its latency (s) at every node of `path`, waiting plus processing (requests, nodes;
     trace_steps.csv), and the time (s) at which it arrived at every node, counted from the first request that entered
-    the pipeline (requests, nodes)."""
+    the pipeline (requests, nodes).
+    Cached per run and path, because every seed and training source reads the same runs; the arrays are read-only, so
+    a caller that changes them in place fails instead of changing the cache."""
+    return _measured_latencies(experiment, run_id, tuple(path))
+
+
+@lru_cache(maxsize=None)
+def _measured_latencies(experiment: str, run_id: str, path: tuple) -> tuple:
+    path = list(path)
     steps = pipeline_steps(experiment, run_id)
     traces = pd.read_csv(experiment_folder(experiment) / "runs" / run_id / "traces.csv")
     traces = traces[traces["completed"]].sort_values("entered_at_ns").set_index("request_id")
@@ -397,8 +405,11 @@ def measured_latencies(experiment: str, run_id: str, path: list) -> tuple:
     node = node[path].dropna()
     arrived = steps.pivot(index="request_id", columns="node", values="arrived_at_ns")[path]
     order = traces.index[traces.index.isin(node.index)]
-    return (traces.loc[order, "total_ms"].to_numpy() / 1e3, node.loc[order].to_numpy(),
-            (arrived.loc[order].to_numpy() - traces["entered_at_ns"].iloc[0]) / 1e9)
+    result = (traces.loc[order, "total_ms"].to_numpy() / 1e3, node.loc[order].to_numpy(),
+              (arrived.loc[order].to_numpy() - traces["entered_at_ns"].iloc[0]) / 1e9)
+    for array in result:
+        array.setflags(write=False)
+    return result
 
 
 def chain_run_latencies(experiment: str, runs: list = None) -> list:

@@ -1,6 +1,6 @@
 """Draft of the methodology overview (Fig. 2 of the Pegasus paper, Section IV): learn one GP per service, bound each
 service as a queue, compose the service bounds into the PPG of a pipeline that is never executed. Notation as in the
-paper: x_i = <r_i, c_i, kappa_i>, m_i^+ = m_i + z_gamma sigma_ep,i, service bound d_i(epsilon), PPG d_S(x, epsilon, gamma).
+paper: x_i = <r_i, c_i, kappa_i>, |S| services, m_i^+ = m_i + z_gamma sigma_ep,i, service bound d_i(epsilon), PPG d_S(x, epsilon, gamma).
 
 Claim of the figure: only step 1 needs measurements, and only of the individual services; steps 2 and 3 are analytic.
 
@@ -34,12 +34,13 @@ path = ["s2", "s1", "s3"]                 # order of the types in the target pip
 alpha, confidence = 0.05, 0.95            # violation probability epsilon and confidence gamma of the guarantee (c is the number of workers)
 cpu, parallelism = 1.0, 2.0               # the two knobs that are fixed (CPU cores r_i, parallelism); the parallelism is the number of workers c_i of every service
 workers = int(parallelism)
-# external arrivals (items/s); with c_i = 2 workers, a rate of 12 items/s gives the services the same utilization
-# lambda m_i / c_i as 6 items/s at one worker, the setting of the single-worker draft
-workload = dict(process="poisson", rate=12.0)
+# external arrivals (items/s); with c_i = 2 workers this is a moderate load lambda m_i / c_i: the queue of step 2 is still
+# visible, but the bounds of step 3 are not dominated by how loose the queueing bound becomes near saturation (a higher
+# load, or one worker per service, makes the illustration look looser than the method is at typical loads)
+workload = dict(process="poisson", rate=7.2)
 quality_target = 1.25                     # configuration of the target pipeline (quality), inside the gap of the training data
 n_train = 7                               # training configurations per service
-noisy_share, noisy_factor = 0.4, 4.0      # share of the training samples whose noise is noisy_factor times the service's noise level
+noisy_share, noisy_factor = 0.4, 2.0      # share of the training samples whose noise is noisy_factor times the service's noise level
 K = len(path)
 
 # One fixed color per quantity, reused in every panel; the line styles and markers also separate them in grayscale
@@ -101,7 +102,7 @@ snc_bound = network_service_bound(beliefs, epsilon=alpha, holder_exponents=[1] *
 end_to_end = simulate_chain(true_means, noise, n_items=200_000, item_correlation=0.0, rng=np.random.default_rng([seed, 2]),
                             workers=np.full((1, K), workers), **workload)[1][0]
 measured = np.quantile(end_to_end, 1 - alpha)
-print(f"service bounds at epsilon/K (ms): {np.round(1e3 * node_bounds, 1)}; per node {1e3 * per_node_bound:.0f} ms, SNC {1e3 * snc_bound:.0f} ms, "
+print(f"service bounds at epsilon/|S| (ms): {np.round(1e3 * node_bounds, 1)}; per node {1e3 * per_node_bound:.0f} ms, SNC {1e3 * snc_bound:.0f} ms, "
       f"simulated p{100 * (1 - alpha):g} {1e3 * measured:.0f} ms; utilization of the services {np.round(workload['rate'] * true_means[0] / workers, 2)}")
 
 # ------------------------------------------------------------------------------
@@ -192,27 +193,31 @@ for k, y in enumerate(worker_y):
     arrow(ax_queue, (0.715, y + 0.15), (0.80, 0.48))
 arrow(ax_queue, (0.80, 0.48), (0.98, 0.48))
 ax_queue.text(0.89, 0.78, "to the next\nservice", ha="center", va="center")
-ax_queue.text(0.43, -0.12, r"waiting $Q_1$", ha="right", va="center")
+ax_queue.text(0.43, -0.12, r"waiting $W_1$", ha="right", va="center")
 ax_queue.text(0.50, -0.12, rf"execution $Y_1$, $c_1 = {workers}$ workers", ha="left", va="center")
 
 # share of the items that are slower than a latency, on a logarithmic axis, because the bound concerns the tail
 ax_latency = fig.add_subplot(grid[1:3, 1])
 narrow(ax_latency)
+# the tick labels and the y-label stand left of the axes: shifted right, they keep clear of the divider to step 1, and the
+# panel sits in the middle between the two dividers
+position = ax_latency.get_position()
+ax_latency.set_position([position.x0 + 0.018, position.y0, position.width, position.height])
 ordered = np.sort(first_latency)[::200]
 ax_latency.plot(1e3 * ordered, 1 - np.arange(len(ordered)) / len(ordered), color="0.35", linewidth=1.8,
                 label="true latency of s1")
 ax_latency.plot(1e3 * latency_grid, tail_bound, color=C_BOUND, linewidth=2.2, linestyle="-.",
                 label=r"bound from $m_1^+$, $\sigma_{al,1}$ and the" + "\narrival process (Kingman)")
-ax_latency.axhline(alpha / K, color="black", linewidth=1, label=r"share $\epsilon / K$ allowed per service")
+ax_latency.axhline(alpha / K, color="black", linewidth=1, label=r"share $\epsilon / |S|$ allowed per service")
 ax_latency.axvline(1e3 * node_bounds[0], color=C_BOUND, linewidth=2.2)
 ax_latency.plot([1e3 * node_bounds[0]], [alpha / K], "o", color=C_BOUND, markeredgecolor="black", markersize=9)
-ax_latency.annotate("service bound\n" + r"$d_1(\epsilon / K)$", xy=(1e3 * node_bounds[0], alpha / K), xytext=(1e3 * node_bounds[0] + 12, 0.3),
+ax_latency.annotate("service bound\n" + r"$d_1(\epsilon / |S|)$", xy=(1e3 * node_bounds[0], alpha / K), xytext=(1e3 * node_bounds[0] + 12, 0.3),
                     ha="left", va="center", color="darkgreen", arrowprops=dict(arrowstyle="->", color="darkgreen", linewidth=1.2))
 ax_latency.set_yscale("log")
 ax_latency.set_ylim(2e-6, 1.5)
 ax_latency.set_xlim(0, 1e3 * latency_grid[-1])
-ax_latency.set_xlabel(r"latency $d$ of an item at s1, $W_1 = Q_1 + Y_1$ (ms)")
-ax_latency.set_ylabel(r"$P(W_1 > d)$ (log scale)", labelpad=8)
+ax_latency.set_xlabel(r"latency $d$ of an item at s1, $L_1 = W_1 + Y_1$ (ms)")
+ax_latency.set_ylabel(r"$P(L_1 > d)$ (log scale)", labelpad=8)
 ax_latency.grid(True, linestyle=":", alpha=0.6)
 ax_latency.legend(loc="lower left", fontsize=10.5, framealpha=0.95)
 
@@ -242,7 +247,7 @@ ax_compose.axvline(1e3 * measured, color=C_MEASURED, linewidth=1.8, linestyle="-
                    label=f"true end-to-end p{100 * (1 - alpha):g}")
 ax_compose.set_yticks([])
 label_box = dict(facecolor="white", edgecolor="none", pad=1.0, alpha=0.85)
-ax_compose.text(0, 1.29, r" Pegasus Node: sum of the $d_i(\epsilon / K)$", ha="left", va="bottom", bbox=label_box)
+ax_compose.text(0, 1.29, r" Pegasus Node: sum of the $d_i(\epsilon / |S|)$", ha="left", va="bottom", bbox=label_box)
 ax_compose.text(0, 0.29, r" Pegasus SNC: one bound, $\epsilon$ paid once", ha="left", va="bottom", bbox=label_box)
 ax_compose.set_ylim(-1.15, 1.75)
 ax_compose.set_xlim(0, 1e3 * max(per_node_bound, snc_bound) * 1.25)
@@ -250,19 +255,20 @@ ax_compose.set_xlabel(r"PPG $d_S(\mathbf{x}, \epsilon, \gamma)$ of the pipeline 
 ax_compose.grid(True, axis="x", linestyle=":", alpha=0.6)
 ax_compose.legend(loc="lower right", fontsize=11, framealpha=0.95)
 
-# --- Frame: inputs, step titles, the divider between measured and analytic, the return arrow
-fig.text(0.5, 0.965, r"Inputs:   composition $S$ (never executed)     configurations $\mathbf{x} = (x_1, \ldots, x_K)$, $x_i = \langle r_i, c_i, \kappa_i \rangle$"
+# --- Frame: inputs, step titles, the dividers between the steps
+fig.text(0.5, 0.925, r"Inputs:   composition $S$ (never executed)     configurations $\mathbf{x} = (x_1, \ldots, x_{|S|})$, $x_i = \langle r_i, c_i, \kappa_i \rangle$"
                      r"     arrival process ($\lambda$, $C_a^2$)     violation probability $\epsilon$     confidence $\gamma$",
          ha="center", va="center", fontsize=13, bbox=dict(boxstyle="round,pad=0.5", facecolor="0.95", edgecolor="black", linewidth=1.2))
 positions = [model_axes[0].get_position(), ax_queue.get_position(), ax_chain.get_position()]
+# one divider between every two steps: between the columns of the grid, so that both stay clear of the panels
+dividers = [(model_column.x1 + positions[1].x0) / 2 - 0.004, (positions[1].x1 + positions[2].x0) / 2]
+for divider in dividers:
+    fig.add_artist(plt.Line2D([divider, divider], [0.12, 0.88], color="black", linewidth=1.5, linestyle=(0, (6, 4))))
+# every step title is centered in its section, the space between the figure edge and the dividers
+centers = [(0.0 + dividers[0]) / 2, (dividers[0] + dividers[1]) / 2, (dividers[1] + 1.0) / 2]
 titles = ["① Learning: one GP per service", "② Service bounds: each service as a queue", "③ Composition into the PPG"]
-for position, title in zip(positions, titles):
-    fig.text((position.x0 + position.x1) / 2, 0.835, title, ha="center", va="center", fontsize=14, fontweight="bold")
-divider = (model_column.x1 + positions[1].x0) / 2 - 0.004   # the column edge, not the narrower model axes, keeps it clear of panel 2
-fig.add_artist(plt.Line2D([divider, divider], [0.12, 0.915], color="black", linewidth=1.5, linestyle=(0, (6, 4))))
-fig.text((positions[0].x0 + positions[0].x1) / 2 - 0.01, 0.895, "needs data: execution times " + r"$\mathcal{D}_i$" + " of each service,\nalone or in other compositions",
-         ha="center", va="center", fontsize=12, style="italic")
-fig.text((positions[1].x0 + positions[2].x1) / 2, 0.895, "analytic, closed form: no run of the composition", ha="center", va="center", fontsize=12, style="italic")
+for center, title in zip(centers, titles):
+    fig.text(center, 0.86, title, ha="center", va="center", fontsize=14, fontweight="bold")
 fig.legend(handles, labels, loc="upper left", bbox_to_anchor=(0.01, 0.255), ncol=2, fontsize=11, frameon=False, columnspacing=1.0, handletextpad=0.5)
 
 OUTPUT.mkdir(parents=True, exist_ok=True)
