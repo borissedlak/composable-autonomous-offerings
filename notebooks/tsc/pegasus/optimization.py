@@ -22,6 +22,7 @@ from .evaluation import METHOD_COLORS, PROPOSED, PROPOSED_SNC, compare_methods, 
 BEST_OF_RUNS, GRADIENT = "best of the runs", "gradient steps"
 RANDOM_SEARCH = "Random search"
 COLORS = {RANDOM_SEARCH: "black"}                              # to be added to METHOD_COLORS of evaluation.py by the notebook
+STYLES = {RANDOM_SEARCH: ("o", "--")}                          # to be added to METHOD_STYLES of figures.py by the notebook
 EXECUTION_TIME_METHODS = (PROPOSED, PROPOSED_SNC, "GP Sum", "Allen-Cunneen")   # methods that use the execution-time models of fit_services
 
 
@@ -192,24 +193,33 @@ def latency_promises(problem: ChainProblem, visited: list, promised: list) -> di
     return dict(chosen=len(chosen), violated=int(violated.sum()), promised=int(kept_promise.sum()), broken=int((kept_promise & violated).sum()))
 
 
-def optimization_figure(found: dict, title: str) -> None:
-    """One panel per optimizer over the number of evaluated runs, one line per method (median over the seeds, band from
-    the smallest to the largest seed, see sweep_line): the best true SLO fulfillment found so far as a share of the
-    best existing run. found: optimizer -> method -> (evaluations, seeds), from best_found; RANDOM_SEARCH is drawn in
-    every panel."""
-    fig, axes = plt.subplots(1, len(found), figsize=(7.5 * len(found), 4.8), sharey=True)
-    for ax, (optimizer, results) in zip(np.atleast_1d(axes), found.items()):
-        steps = np.arange(1, len(next(iter(results.values()))) + 1)
-        for name, values in results.items():
-            sweep_line(ax, steps, 100 * values, name)
-        ax.axhline(100, color="black", linewidth=1)
-        ax.set_xticks(steps)
-        ax.set_xlabel("evaluated runs of the chain")
-        ax.set_title(f"optimizer: {optimizer}")
-        ax.grid(True, linestyle=":", alpha=0.6)
-    np.atleast_1d(axes)[0].set_ylabel("best SLO fulfillment found (% of the best existing run)")
-    handles, labels = np.atleast_1d(axes)[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.0), ncol=4)
-    fig.suptitle(title)
-    plt.tight_layout()
-    plt.show()
+def optimization_figure(found: dict, title: str, name: str = None) -> None:
+    """One separate figure per optimizer over the number of evaluated runs, in the style of the paper figures
+    (figures.py), one line per method (median over the seeds, band from the smallest to the largest seed, see
+    sweep_line): the best true SLO fulfillment found so far as a share of the best existing run. found: optimizer ->
+    method -> (evaluations, seeds), from best_found; RANDOM_SEARCH is drawn in every figure. The title is printed above
+    the figures; name: file name in figures/tsc, saved as <name>_<optimizer>, or None."""
+    from .evaluation import sweep_segments
+    from .figures import legend_inside, paper_style, save_figure
+    print(title)
+    with paper_style():
+        for optimizer, results in found.items():
+            fig, ax = plt.subplots(figsize=(9, 4.5))
+            steps = np.arange(1, len(next(iter(results.values()))) + 1)
+            segments = []
+            for method, values in results.items():
+                sweep_line(ax, steps, 100 * values, method)
+                segments += sweep_segments(steps, 100 * values)
+            ax.axhline(100, color="black", linewidth=1)
+            ax.set_xticks(steps)
+            ax.set_xlabel("evaluated runs of the chain")
+            ax.set_ylabel("best SLO fulfillment found (% of the best run)")
+            ax.set_title(f"optimizer: {optimizer}", loc="left")
+            ax.grid(True, linestyle=":", alpha=0.6)
+            fig.tight_layout()
+            handles, labels = ax.get_legend_handles_labels()
+            legend_inside(ax, handles, labels, segments, locations=("lower right", "lower center", "center right"), max_doublings=0, ncol=2,
+                          fontsize=10, framealpha=0.95, columnspacing=1.0, handletextpad=0.4)
+            if name is not None:
+                save_figure(fig, f"{name}_{optimizer.replace(' ', '_')}")
+            plt.show()
