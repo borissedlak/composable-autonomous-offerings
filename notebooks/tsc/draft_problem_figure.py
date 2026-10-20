@@ -2,7 +2,7 @@
 
 Claims of the figures:
  (a) Per-service execution times do not add up to the end-to-end tail latency: the gap is the queueing, and it grows
-     with the load, so it cannot be calibrated away with a constant. Adding a per-service queueing term (Allen-Cunneen)
+     with the load, so it cannot be calibrated away with a constant. Adding a per-service queueing term (GP Queue)
      follows the trend of the true latency, but for a single run it falls on both sides of the true latency.
  (b) An accurate point prediction is not a guarantee: for unseen configurations it falls on both sides of the true
      latency, and nothing tells on which side.
@@ -13,7 +13,7 @@ Writes figures/tsc/problem_queueing_draft.pdf and .jpg for (a), and figures/tsc/
 Source of the data: the testbed campaign in statics/results_milos (chain 04e, qr -> cv -> face), loaded with
 pegasus/real_data.py as in the evaluation (`2a_base_case.ipynb` to `2e_iterative.ipynb`). The end-to-end latencies are emulated: the measured processing times of
 every run are replayed through a chain of FIFO queues under Poisson arrivals. The methods are the baselines of
-the evaluation (`2a_base_case.ipynb` to `2e_iterative.ipynb`) (pegasus/evaluation.py): GP Sum, Allen-Cunneen and Quantile Union, trained on single-service data only.
+the evaluation (`2a_base_case.ipynb` to `2e_iterative.ipynb`) (pegasus/evaluation.py): GP Sum, GP Queue and Quantile Union, trained on single-service data only.
 """
 import warnings
 from pathlib import Path
@@ -37,7 +37,7 @@ seed, n_calibration = 35, 20                           # base seed and calibrati
 utilizations = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]   # panel (a): utilization of the busiest service of every run
 base_utilization = 0.5                                 # panel (b): the load of B.1
 seeds = list(range(5))                                 # panel (b): a seed determines the training runs and the randomness of the emulation
-point_predictors = ["Allen-Cunneen", "Quantile Union"]       # panel (b): one analytic and one learned predictor of the latency quantile
+point_predictors = ["GP Queue", "Quantile Union"]       # panel (b): one analytic and one learned predictor of the latency quantile
 p_label = f"p{100 * (1 - alpha):g}"
 
 
@@ -60,7 +60,7 @@ for utilization in utilizations:
     data, methods = load(seeds[0], utilization)
     measured_by_load.append(data.measured / total_execution)
     summed_by_load.append(methods["GP Sum"][1] / total_execution)
-    queueing_by_load.append(methods["Allen-Cunneen"][1] / total_execution)
+    queueing_by_load.append(methods["GP Queue"][1] / total_execution)
 measured_by_load, summed_by_load = np.array(measured_by_load), np.array(summed_by_load)   # (loads, runs)
 queueing_by_load = np.array(queueing_by_load)
 queueing_by_load[~np.isfinite(queueing_by_load)] = np.nan   # the queueing formula has no finite value for a service it predicts to be overloaded
@@ -88,7 +88,7 @@ def save(fig, name):
 fig_load, ax_load = plt.subplots(figsize=(6, 4))
 quartiles = lambda values: np.nanquantile(values, [0.25, 0.5, 0.75], axis=1)
 for values, color, style, label in ((measured_by_load, "tab:purple", "o-", f"true end-to-end {p_label}"),
-                                    (queueing_by_load, METHOD_COLORS["Allen-Cunneen"], "^-.", f"sum of waiting + execution times ({p_label}, Allen-Cunneen)"),
+                                    (queueing_by_load, METHOD_COLORS["GP Queue"], "^-.", f"sum of waiting + execution times ({p_label}, GP Queue)"),
                                     (summed_by_load, METHOD_COLORS["GP Sum"], "s--", f"sum of the per-service execution times ({p_label})")):
     low, middle, high = quartiles(values)
     ax_load.plot(utilizations, middle, style, color=color, linewidth=1.8, markersize=6, label=label)
@@ -135,7 +135,7 @@ print(f"(a) true {p_label} / sum of execution times, median over {measured_by_lo
       f"{gap_high:.2f} at utilization {utilizations[-1]:g}")
 for utilization, queueing, measured in zip(utilizations, queueing_by_load, measured_by_load):
     ratio = queueing / measured
-    print(f"(a) Allen-Cunneen / true {p_label} at utilization {utilization:g}: median {np.nanmedian(ratio):.2f}, "
+    print(f"(a) GP Queue / true {p_label} at utilization {utilization:g}: median {np.nanmedian(ratio):.2f}, "
           f"{np.mean(ratio[np.isfinite(ratio)] < 1):.0%} too low, finite at {np.isfinite(ratio).mean():.0%} of the runs")
 for name in point_predictors:
     ratio = predicted[name][finite[name]] / truth[finite[name]]

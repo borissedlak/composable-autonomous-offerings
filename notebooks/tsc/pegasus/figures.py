@@ -12,7 +12,7 @@ from .evaluation import METHOD_COLORS, PROPOSED, PROPOSED_SNC
 
 FIGURES = Path(__file__).resolve().parents[3] / "figures" / "tsc"
 # marker and line style per method, so that the methods can be told apart in grayscale; the color is METHOD_COLORS
-METHOD_STYLES = {PROPOSED: ("o", "-"), PROPOSED_SNC: ("D", "-"), "GP Sum": ("s", "--"), "DNN Sum": ("X", "--"), "Allen-Cunneen": ("^", "-."),
+METHOD_STYLES = {PROPOSED: ("o", "-"), PROPOSED_SNC: ("D", "-"), "GP Sum": ("s", "--"), "DNN Sum": ("X", "--"), "GP Queue": ("^", "-."),
                  "Quantile Union": ("v", ":"), "Conformal": ("P", ":"), "Oracle": ("*", "--")}
 FAILURE_COLOR, FAILURE_TEXT_COLOR = "mistyrose", "darkred"   # zone where a method is no bound (below the measured quantile)
 WASTE_COLOR = "0.9"                                           # optional zone where a method wastes resources (far above it)

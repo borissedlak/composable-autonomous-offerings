@@ -48,7 +48,7 @@ p_label = f"p{100 * (1 - alpha):g}"
 pegasus_versions = [PROPOSED, PROPOSED_SNC]            # the two versions of the proposed method: union bound over node bounds, network service curve
 competitors = [name for name in METHOD_COLORS if name != "Oracle"]   # the proposed method and the baselines; the Oracle is a reference
 # B.2 to B.6 keep one of the two execution-time baselines. GP Sum stays, because it is the faster one: it uses the GPs that
-# Pegasus and Allen-Cunneen train anyway, while DNN Sum needs a network trained per service.
+# Pegasus and GP Queue train anyway, while DNN Sum needs a network trained per service.
 only_base_case = ("DNN Sum",)
 sweep_competitors = [name for name in competitors if name not in only_base_case]  # the methods of B.2 to B.6 without the Oracle
 
