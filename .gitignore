@@ -4,3 +4,6 @@
 statics/dgp/
 /statics/papers/review/
 __pycache__/
+.idea
+.venv
+statics/results_milos_v2
