@@ -15,8 +15,9 @@ from .baselines import (conformal_service_bounds, joint_gaussian_quantile, queue
                         union_bound_oracle)
 from .service_gp import (RunStatisticsModel, configurations_of, execution_time_belief, run_statistics_belief, train_gp_models,
                          train_run_statistics_models)
-from .bounds import martingale_closed_form_node_bounds, network_service_bound
+from .bounds import martingale_closed_form_node_bound, martingale_closed_form_node_bounds, network_service_bound
 from .data import model_inputs, path_workers
+from .trees import leaf_to_root_paths, max_over_paths, max_path_sum
 
 PROPOSED = "Pegasus Node (ours)"   # union bound over the node bounds
 PROPOSED_SNC = "Pegasus SNC (ours)"    # one bound for the whole chain from its network service curve
@@ -143,6 +144,78 @@ def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alph
         seconds[name] = (training_seconds, elapsed + earlier_seconds.get(name, 0.0))
     if data.node_latencies is not None:         # reference: what a union bound reaches with measured instead of predicted nodes
         methods["Oracle"] = ("reference", union_bound_oracle(data.node_latencies, alpha))
+    return methods, seconds
+
+
+def compare_tree_methods(data, models: dict, alpha: float, confidence: float, n_calibration: int, model_seed: int,
+                         leave_out: tuple = ()) -> tuple:
+    """compare_methods for a fork-join tree (TreeData in data.py) whose services have one worker each. Every method
+    extends from a chain to the tree through the P leaf-to-root paths (trees.py): the end-to-end latency of a frame is the
+    maximum over the paths of its latency through the path run as a chain, so bounds of every path that each fail with
+    probability at most alpha / P give, as their maximum, a bound of the tree at alpha (union bound over the paths).
+    - Pegasus Node: the union bound of every path over its node bounds, with every (path, service) pair at
+      alpha / sum_p K_p (K_p services on path p). The leaf receives the external arrivals; every other service of a path
+      receives the departures of the service before it on that path (propagated spacing), so an aggregator has one node
+      bound per child. The tree gets the largest sum over the paths.
+    - Pegasus SNC: the network service curve of every path at alpha / P, maximum over the paths.
+    - GP Sum: the joint Gaussian quantile of every path at alpha, maximum over the paths (a point prediction per path).
+    - Allen-Cunneen: the quantile of every service at alpha, added along every path, maximum over the paths.
+    - Quantile Union, Conformal: the latency of every service at alpha / N (N services in the tree, the union bound over
+      the services), added along every path, maximum over the paths.
+    - Oracle: the measured node quantiles of data.node_quantiles, added along every path, maximum over the paths.
+    Every node bound and every path is computed on its own, also where two have the same service types, so that the
+    evaluation time is that of a tree of different services. Returns the two dictionaries of compare_methods."""
+    paths, n_services, workload = leaf_to_root_paths(data.children), len(data.path), data.workload
+    services = sorted(set(data.path))
+    x_test = model_inputs(data.x_test, data.workers_column)
+    x_load, x_test_load = model_inputs(data.x_train_load, data.workers_column), model_inputs(data.x_test_load, data.workers_column)   # the rate stays the last column
+    beliefs, lower_means, gp_seconds = models["beliefs"], models["lower_means"], models["seconds"]["gp"]
+    predictions = lambda: {s: models["gp"][s].predict(configurations_of(x_test, s), return_std=True) for s in services}
+    epsilon_node = alpha / sum(len(path) for path in paths)
+
+    def per_service(latency_of):
+        # a baseline that trains its own models per service: latency_of(s) gives (latency per configuration, training time)
+        outputs = {s: latency_of(s) for s in services}
+        return max_path_sum(paths, lambda k, previous: outputs[data.path[k]][0]), sum(seconds for _, seconds in outputs.values())
+
+    def allen_cunneen():
+        predicted = predictions()
+        quantiles = {s: queueing_formula_latency(predicted[s][0], predicted[s][1] ** 2, epsilon=alpha, **workload) for s in services}
+        return max_path_sum(paths, lambda k, previous: quantiles[data.path[k]])
+
+    def gp_sum():
+        predicted = predictions()
+        return max_over_paths(paths, lambda path: joint_gaussian_quantile([predicted[data.path[k]][0] for k in path],
+                                                                          [predicted[data.path[k]][1] for k in path], norm.ppf(1 - alpha)))
+
+    candidates = [
+        (PROPOSED, "proposed", gp_seconds, lambda: max_path_sum(paths, lambda k, previous: martingale_closed_form_node_bound(
+            *beliefs[k], epsilon=epsilon_node, previous_lower_mean=None if previous is None else lower_means[previous],
+            previous_var=None if previous is None else beliefs[previous][1], **workload))),
+        (PROPOSED_SNC, "proposed", gp_seconds, lambda: max_over_paths(paths, lambda path: network_service_bound(
+            [beliefs[k] for k in path], epsilon=alpha / len(paths), holder_exponents=[1] * len(path), **workload))),
+        ("GP Sum", "baseline", gp_seconds, gp_sum),
+        ("Allen-Cunneen", "baseline", gp_seconds, allen_cunneen),
+        ("Quantile Union", "baseline", None, lambda: per_service(lambda s: summed_service_quantiles(
+            x_load, data.monitored_latencies, [s], alpha / n_services, x_test_load, return_seconds=True))),
+        ("Conformal", "baseline", None, lambda: per_service(lambda s: conformal_service_bounds(
+            x_load, data.monitored_latencies, [s], alpha / n_services, x_test_load, miscoverage=1 - confidence, n_calibration=n_calibration,
+            seed=model_seed, return_seconds=True))),
+    ]
+    earlier_seconds = {PROPOSED: models["seconds"]["beliefs"], PROPOSED_SNC: models["seconds"]["beliefs"]}
+    methods, seconds = {}, {}
+    for name, group, training_seconds, compute in candidates:
+        if name in leave_out:
+            continue
+        started = time.perf_counter()
+        latency = compute()
+        elapsed = time.perf_counter() - started
+        if training_seconds is None:
+            latency, training_seconds = latency
+            elapsed -= training_seconds
+        methods[name] = (group, latency)
+        seconds[name] = (training_seconds, elapsed + earlier_seconds.get(name, 0.0))
+    methods["Oracle"] = ("reference", max_path_sum(paths, lambda k, previous: data.node_quantiles[:, k]))
     return methods, seconds
 
 

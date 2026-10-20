@@ -7,7 +7,8 @@
 - "real": the testbed campaign in `statics/results_milos/`, see `real_data.py`: measured processing times of real
   services, replayed through the same FIFO queues.
 
-Both sources return a `ChainData`, so that the experiments do not depend on where the data comes from.
+Both sources return a `ChainData`, so that the experiments do not depend on where the data comes from. The fork-join
+trees of B.3 (synthetic only) are a `TreeData`, a `ChainData` with the tree's structure.
 Units: execution times and latencies in seconds.
 """
 from dataclasses import dataclass, replace
@@ -15,7 +16,8 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 from .service_gp import configurations_of
-from .simulation import execution_times, quantile_with_lower_bound, simulate_chain
+from .simulation import execution_times, fifo_chain_latencies, quantile_with_lower_bound, simulate_chain, simulate_tree
+from .trees import leaf_to_root_paths
 
 # Synthetic service types. The mean execution time (s) of a service at the configuration (CPU, quality, parallelism) is
 # base + cpu / CPU + quality * quality_knob ** power; noise is the standard deviation of one execution time (s). CPU is
@@ -65,6 +67,16 @@ class ChainData:
     x_test_load: dict = None                  # the configuration and the arrival rate, if the rate differs between configurations
     workers_column: object = None             # column of x_test that holds the number of workers of a service (an int, or a
                                               # dictionary service -> int or None like x_test); None: one worker
+
+
+@dataclass
+class TreeData(ChainData):
+    """ChainData of a fork-join tree (trees.py): `path` holds the service at every position of the tree (position 0 is
+    the root, so a service type occurs at several positions), children the children of every position, and
+    node_quantiles the measured latency quantile of every position in the tree (release minus the time at which the
+    frame was complete there), (held-out configurations, positions), for the Oracle."""
+    children: list = None
+    node_quantiles: np.ndarray = None
 
 
 def true_demand(x: np.ndarray, service: dict) -> np.ndarray:
@@ -209,6 +221,67 @@ def synthetic_chain_data(path: list, level: float, coverage_check: dict, seed: i
     return ChainData(path, workload, x_train, y_train, x_test, measured, measured_low, node_latencies,
                      trace_node_latencies, monitored_arrivals, monitored_latencies, x_extra, extra_monitored_latencies,
                      workers_column=WORKERS_COLUMN)
+
+
+def tree_arrival_rate(x: np.ndarray, services: list, utilization: float, service_seed: int = 0) -> np.ndarray:
+    """Arrival rate (items/s) per configuration of x at which the slowest of the synthetic `services`, with one worker,
+    has the given utilization: utilization / max_k m_k(x), with m_k the true mean execution time of service k (s). In a
+    fork-join tree every service receives every frame, so the slowest service is the busiest one."""
+    return utilization / np.max([true_demand(x, synthetic_service(s, service_seed)) for s in services], axis=0)
+
+
+def synthetic_tree_data(children: list, path: list, level: float, node_level: float, coverage_check: dict, seed, utilization: float = 0.5,
+                        arrival_process: str = "poisson", arrival_jitter: float = 0.2, item_correlation: float = 0.0, n_train: int = 50,
+                        n_test: int = 100, n_items: int = 5000, n_trace_items: int = 2000, service_seed: int = 0,
+                        check_paths_up_to: int = 15) -> TreeData:
+    """Simulated data of the fork-join tree `children` (trees.py) with the service types `path` at its positions, every
+    service with one worker. The arrival rate of every configuration is tree_arrival_rate at `utilization`.
+    Training: as in synthetic_chain_data with the same `seed`, so the training configurations, the execution times of
+    every service and the held-out configurations are those of the chain of these services, except that the parallelism
+    of every configuration is one worker. Every service is also monitored alone with n_trace_items items at the training
+    configurations, under the arrival rate that the tree has there; x_train_load and x_test_load hold the configuration
+    and that rate, for the baselines trained on these latencies.
+    Ground truth: the tree simulated with n_items frames at n_test held-out configurations (simulate_tree); `level` is the
+    end-to-end quantile, `node_level` the quantile of every position (node_quantiles), coverage_check as in
+    synthetic_chain_data. For trees with at most check_paths_up_to services, every leaf-to-root path is replayed as a
+    chain with the same arrivals and execution times, and the tree latency must equal the maximum over these chains
+    (the reduction to paths of trees.py, exact with one worker)."""
+    # the same random generators as synthetic_chain_data, so that the configurations and training data are those of the chain
+    rng_train, rng_test, _, rng_monitoring, _ = (np.random.default_rng(s) for s in np.random.SeedSequence(seed).spawn(5))
+    services = sorted(set(path), key=service_index)
+    specs = {s: synthetic_service(s, service_seed) for s in services}
+
+    def one_worker(x):
+        x = x.copy()
+        x[:, WORKERS_COLUMN] = 1
+        return x
+
+    x_train = sample_configurations(n_train, rng_train)
+    y_train = _execution_times(x_train, services, rng_train, service_seed)
+    x_train = one_worker(x_train)
+    x_test = one_worker(sample_configurations(n_test, rng_test))
+    rate_train, rate_test = (tree_arrival_rate(x, services, utilization, service_seed) for x in (x_train, x_test))
+    workload = dict(process=arrival_process, rate=rate_test, jitter=arrival_jitter)
+
+    replay = len(path) <= check_paths_up_to
+    simulated = simulate_tree(np.column_stack([true_demand(x_test, specs[s]) for s in path]), np.array([specs[s]["noise"] for s in path]),
+                              children, n_items=n_items, item_correlation=item_correlation, rng=rng_test, node_level=node_level,
+                              return_execution=replay, **workload)
+    latencies, node_quantiles = simulated[:2]
+    if replay:
+        arrivals, execution = simulated[2:]
+        kept = slice(n_items - latencies.shape[1], None)   # the frames after the warm-up, as in simulate_tree
+        path_maximum = np.max([fifo_chain_latencies(arrivals, execution[:, :, chain])[1][:, kept] for chain in leaf_to_root_paths(children)], axis=0)
+        assert np.allclose(latencies, path_maximum, rtol=0, atol=1e-9), "the tree latency differs from the maximum over its paths"
+    measured, measured_low = quantile_with_lower_bound(latencies, level, **coverage_check)
+
+    # the rate is one per configuration; as a column it scales the gaps of every configuration's own row of items
+    monitoring = dict(workload, rate=rate_train[:, None])
+    monitored_latencies = {s: _simulate(x_train, [s], monitoring, n_trace_items, item_correlation, rng_monitoring, service_seed)[0][:, :, 0]
+                           for s in services}
+    return TreeData(path, workload, x_train, y_train, x_test, measured, measured_low, monitored_latencies=monitored_latencies,
+                    x_train_load=np.column_stack([x_train, rate_train]), x_test_load=np.column_stack([x_test, rate_test]),
+                    workers_column=WORKERS_COLUMN, children=children, node_quantiles=node_quantiles)
 
 
 def synthetic_training_data(services: list, workload: dict, n_train: int, seed, item_correlation: float = 0.0,

@@ -8,11 +8,10 @@ modeled on their own.
 | Notebook | What it is |
 |---|---|
 | `1_method_synthetic.ipynb` | The method: GP model per service, node bounds, compositions, and the baselines of the method section. |
-| `1_method_synthetic_trees.ipynb` | The method on fork-join trees (experiment B3): why the latency of a tree is the maximum over its leaf-to-root paths, every composition applied path by path, and coverage and tightness on balanced and narrow trees with one or several workers per service. |
 | `1_method_real.ipynb` | The method on real services: the same steps as `1_method_synthetic.ipynb` on the testbed campaign (training on run statistics, emulated queueing), without the sections that need a synthetic system. |
 | `2a_base_case.ipynb` | The paper's evaluation (Section V), part 1, on synthetic or real data (`data_source`): the two data sources, the setup (A), the base case B.1 with all methods and the ablation of the compositions, B.1 on all chains of the campaign (real data), and real-data results that do not fit the paper's structure. Writes the base case of B.1 to `statics/evaluation_cache/`, which 2b to 2e read. |
 | `2b_evidence.ipynb` | Evaluation B.2 (varying evidence per service) and B.2b (which configuration to benchmark next). |
-| `2c_depth_and_load.ipynb` | Evaluation B.3 (varying chain depth) and B.4 (varying load and arrival pattern); synthetic data only for now. |
+| `2c_depth_and_load.ipynb` | Evaluation B.3 (varying depth of a map-reduce application: fork-join trees of the services of B.1, why the latency of a tree is the maximum over its leaf-to-root paths, every method applied path by path, balanced and narrow trees) and B.4 (varying load and arrival pattern); synthetic data only for now. |
 | `2d_tails_and_percentiles.ipynb` | Evaluation B.5 (varying tail behaviors) and B.6 (varying percentiles). |
 | `2e_iterative.ipynb` | Evaluation C.1 (fine-tuning a bound with end-to-end samples) and C.2 (choosing a faster configuration of a chain). |
 | `explain_1_why_chernoff_mgf.ipynb` | Why the bounds use moment generating functions and Chernoff bounds, and which alternatives exist. |
@@ -48,22 +47,22 @@ as `from pegasus.bounds import ...`, with the working directory at `notebooks/ts
 |---|---|
 | `bounds.py` | The latency bounds: SNC node bound, martingale node bounds, propagated arrivals, network service curve. |
 | `simulation.py` | The ground truth: simulator of a chain and of a fork-join tree of FIFO services, and the measured quantile with its confidence interval. |
-| `trees.py` | Fork-join trees (B3, `1_method_synthetic_trees`): balanced and narrow topologies, their leaf-to-root paths, and the maximum over paths through which a chain composition extends to a tree. |
+| `trees.py` | Fork-join trees (B.3 in `2c_depth_and_load`): balanced and narrow topologies, their leaf-to-root paths, and the maximum over paths through which a chain composition extends to a tree. |
 | `service_gp.py` | The GP model of one service's execution time, and the belief the bounds take from it. |
 | `baselines.py` | Per-service baselines of the evaluation: GP Sum, DNN Sum, Allen-Cunneen formula, Quantile Union, Conformal, Oracle. |
 | `baselines_chain.py` | Baselines of the method notebook that need runs of the chain: Deep GP, Fluxion-style, replay; independence tests. |
-| `data.py` | Data of the evaluation: the seeded generator of synthetic services, the simulated chain data, and the entry points for both data sources. |
+| `data.py` | Data of the evaluation: the seeded generator of synthetic services, the simulated chain data, the simulated fork-join trees of B.3 (`synthetic_tree_data`), and the entry points for both data sources. |
 | `real_data.py` | The real data source: reader of the testbed campaign in `statics/results_milos/`, and the emulation that replays its measured processing times through FIFO queues. |
 | `evaluation_setup.py` | What the evaluation notebooks 2a to 2e share: the parameters (ε, confidence, seeds, ...), the options per data source, and the base case of B.1 (`b1_base`), computed once and cached in `statics/evaluation_cache/`; every experiment cell keeps its results there too (`cached`). A cache is recomputed when the parameters, the settings or the code of the experiment, or the computation code of `pegasus/` change (not when only a figure changes); `refresh=True` forces it. |
-| `evaluation.py` | What the experiments of the evaluation share: model fitting, the comparison of all methods, coverage, figures. |
+| `evaluation.py` | What the experiments of the evaluation share: model fitting, the comparison of all methods on a chain and on a fork-join tree (`compare_tree_methods`), coverage, figures. |
 | `exploration.py` | Experiment B.2b: sampling strategies that pick the next configuration to benchmark (random, Sobol sequence, and four acquisition functions on the GPs), for the synthetic services and for the measured runs of a real service. |
 | `finetuning.py` | Experiment C.1: split-conformal calibration of a bound with end-to-end samples, and the baselines that are trained on runs of the chain itself (Quantile Sum, Fluxion-style). |
 | `optimization.py` | Experiment C.2: the SLO-fulfillment objective of a chain, and the optimizers that choose the next run with a latency method and refit its models after every evaluated run. |
 | `load_dependence.py` | `explain_6`: how often a service of the campaign used up its CPU quota, how the processing time of an item depends on the state of its service (next to another item, back to back, after idle), and two simulators (a worker pool under a CPU quota, a service that is slower after idle). |
 | `load_independence.py` | `explain_9`: per run and service of the second campaign, the provisioning class, the probe before the run, and within-run ratios of execution times by the state of the service at the start of an item; summaries of ratios over runs and the elasticity of the execution time with respect to the rate within configurations. |
 Dependencies point one way: `load_independence` depends on `real_data`; `load_dependence` depends on `bounds`, `real_data` and `simulation`; `bounds` and `trees` depend on nothing here; `simulation` on `trees`; `service_gp` on nothing; `baselines` on
-`service_gp`; `baselines_chain` on `baselines`, `bounds` and `service_gp`; `data` on `simulation`; `real_data` on `data` and
-`simulation`; `evaluation` on `baselines`, `bounds` and `service_gp`; `exploration` on `data`, `evaluation`, `real_data`
+`service_gp`; `baselines_chain` on `baselines`, `bounds` and `service_gp`; `data` on `simulation` and `trees`; `real_data` on `data` and
+`simulation`; `evaluation` on `baselines`, `bounds`, `data`, `service_gp` and `trees`; `exploration` on `data`, `evaluation`, `real_data`
 and `service_gp`; `finetuning` on `baselines`, `baselines_chain`, `evaluation` and `service_gp`; `optimization` on
 `evaluation`.
 

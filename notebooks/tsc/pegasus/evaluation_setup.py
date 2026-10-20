@@ -26,13 +26,16 @@ from IPython.display import Markdown, display
 from sklearn.exceptions import ConvergenceWarning
 
 from .bounds import martingale_closed_form_node_bound, network_service_bound, propagated_node_bounds, snc_latency_bound
-from .data import (assert_unseen, busiest_utilization, load_chain_data, path_workers, same_configurations, synthetic_chain, with_training_data)
-from .evaluation import (METHOD_COLORS, PROPOSED, PROPOSED_SNC, TIGHTNESS_RANGE, TIGHTNESS_TICKS, arrival_text, compare_methods, coverage,
+from .data import (assert_unseen, busiest_utilization, load_chain_data, model_inputs, path_workers, same_configurations, synthetic_chain,
+                   synthetic_tree_data, with_training_data)
+from .evaluation import (METHOD_COLORS, PROPOSED, PROPOSED_SNC, TIGHTNESS_RANGE, TIGHTNESS_TICKS, arrival_text, compare_methods,
+                         compare_tree_methods, coverage,
                          finite_share, fit_services, ground_truth_conclusion, sweep_conclusion, sweep_seconds, sweep_statistics,
                          tightness_and_time_figure, tightness_figure, tightness_sweep_figure, time_conclusion)
 from .real_data import (BENCHMARKS_V2, CAMPAIGN_V2, campaign_nodes, chain_path, chain_tail_ratios, training_pool, unthrottled_pool,
                         unthrottled_runs)
 from .service_gp import configurations_of
+from .trees import balanced_tree, narrow_tree
 
 alpha = 0.05                                           # violation probability epsilon: a bound at alpha bounds the (1 - alpha) latency quantile
 confidence = 0.95                                      # the pessimistic mean of a bound lies above the true mean with this probability
@@ -54,14 +57,15 @@ CACHE = Path(__file__).resolve().parents[3] / "statics" / "evaluation_cache"
 
 def configure(data_source: str) -> dict:
     """What differs between the two data sources ("synthetic" or "real"): which chain an experiment uses, which loads
-    and depths exist, and which experiments are skipped. A dictionary name -> value for globals().update."""
+    and trees exist, and which experiments are skipped. A dictionary name -> value for globals().update."""
     options = dict(data_source=data_source)
     if data_source == "synthetic":
         options.update(
             chain_options=lambda s: dict(path=synthetic_chain(3), service_seed=s),               # the chain of B.1 under the seed s
-            depth_options=lambda depth, s: dict(path=synthetic_chain(depth), service_seed=s),    # B.3: the chain of a depth
             training_options=lambda s: dict(service_seed=s),                                     # B.2: what with_training_data needs besides the data
-            depths=[1, 2, 5, 10, 20, 50],
+            tree_levels=list(range(1, 9)),                                                       # B.3: levels h of the balanced trees (2^h - 1 services)
+            narrow_levels=list(range(5, 9)),                                                     # B.3: levels h of the narrow trees (2h - 1 services)
+            tree_utilization=0.5,                                                                # B.3: utilization of the slowest service of a tree
             load_option="arrival_rate", loads=[1, 2, 3, 4, 5],                                   # B.4a: arrival rate (items/s) of all configurations
             load_label=lambda load: f"{load:g}/s",
             base_options={},                                                                     # B.1: the default number of training configurations

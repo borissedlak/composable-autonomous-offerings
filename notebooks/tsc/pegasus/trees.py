@@ -1,4 +1,4 @@
-"""Fork-join trees of services (experiment B3 of new_experiments.md): topologies, their leaf-to-root paths, and the
+"""Fork-join trees of services (B.3 in 2c_depth_and_load.ipynb, experiment B3 of new_experiments.md): topologies, their leaf-to-root paths, and the
 maximum over these paths through which every composition of a chain extends to a tree.
 
 A tree is given by `children`: one list per service with the indices of its two children (empty for a leaf); service
