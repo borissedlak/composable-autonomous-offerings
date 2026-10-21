@@ -402,6 +402,7 @@ def tightness_figure(results: dict, data, title: str, level_label: str, seeds_re
     measured quantile (e.g. "p95"). seeds_reached: name -> number of the n_seeds seeds under which the method reaches
     the confidence level; the number is written right of the row, and the box of a method that does not reach the level
     under every seed is hatched instead of filled. The axis shows TIGHTNESS_RANGE; what lies outside is cut off."""
+    from .figures import tightness_label, tightness_tick
     names = list(results)[::-1]   # first method at the top
     rows = np.arange(1, len(names) + 1)
     fig, ax = plt.subplots(figsize=(10, 0.45 * len(names) + 1.6))
@@ -419,9 +420,9 @@ def tightness_figure(results: dict, data, title: str, level_label: str, seeds_re
     ax.axvline(1.0, color="black", linewidth=1)
     ax.set_xscale("log")
     ax.set_xlim(*TIGHTNESS_RANGE)
-    ax.set_xticks(TIGHTNESS_TICKS, [f"{tick:g}×" for tick in TIGHTNESS_TICKS])
+    ax.set_xticks(TIGHTNESS_TICKS, [tightness_tick(tick) for tick in TIGHTNESS_TICKS])
     ax.minorticks_off()
-    ax.set_xlabel(f"tightness: end-to-end latency ÷ measured {level_label} (log scale)")
+    ax.set_xlabel(tightness_label(level_label))
     ax.set_yticks(rows, names)
     ax.grid(True, axis="x", linestyle=":", alpha=0.6)
     groups = [group for group in GROUP_COLORS if any(results[name][0] == group for name in names)]
@@ -463,65 +464,88 @@ def sweep_segments(settings, values: np.ndarray) -> list:
 
 
 def tightness_sweep_figure(settings: list, statistics: dict, xlabel: str, title: str, level_label: str, tick_labels: list = None,
-                           log_x: bool = True, name: str = None) -> None:
+                           log_x: bool = True, name: str = None, half: str = None) -> None:
     """Tightness of every method over a sweep, one panel: per method the median over the seeds with the band from the
     smallest to the largest seed (sweep_line), a filled marker where the method holds and a hollow one where it does
     not. statistics: from sweep_statistics; tick_labels: text of every setting on the horizontal axis (default: its
     value); level_label: name of the measured quantile (e.g. "p95"). A method has no point where, under half of the
     seeds or more, it has no finite latency at half of the held-out configurations or more. The title is printed above
-    the figure instead of drawn into it (no title in a paper figure); name: file name in figures/tsc, or None."""
-    from .figures import paper_style, save_figure
+    the figure instead of drawn into it (no title in a paper figure); name: file name in figures/tsc, or None.
+    half: "left" or "right" for one of two figures side by side in the width of one (half_figure), with the same
+    methods. The left one has the labels of the vertical axis and the first half of the legend; the right one shares
+    the vertical axis and has the rest of the legend and the text of the red zone."""
+    from .figures import fit_x_tick_labels, half_figure, paper_figure, paper_style, save_figure
     print(title)
     with paper_style():
-        fig, ax = plt.subplots(figsize=(9, 4.5))
+        fig, ax = half_figure(half) if half else paper_figure()
         _sweep_axis(ax, settings, xlabel, tick_labels, log_x)
-        _tightness_panel(ax, settings, statistics, level_label)
-        fig.tight_layout()
-        _tightness_legend(ax, settings, statistics)
+        _tightness_panel(ax, settings, statistics, level_label, failure_text=half != "left", wrap_text=bool(half))
+        if half == "right":
+            ax.set_ylabel("")
+            ax.tick_params(labelleft=False)
+        if not log_x:
+            fit_x_tick_labels(ax)
+        _tightness_legend(ax, settings, statistics, ncol=1 if half else 3, half=half)
         if name is not None:
             save_figure(fig, name)
         plt.show()
 
 
 def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xlabel: str, title: str, level_label: str,
-                              tick_labels: list = None, log_x: bool = True, name: str = None) -> None:
+                              tick_labels: list = None, log_x: bool = True, name: str = None, time_halves: tuple = None) -> None:
     """Three separate figures over a sweep. First: the tightness of every method, as in tightness_sweep_figure.
     Second: the training time (s), one line per set of trained models; methods that use the same models (same_models)
     share a line, and its legend names them. Third: the evaluation time (s) of every method. Lines and bands of the time
     figures are the median and the range over the seeds (sweep_line). statistics: from sweep_statistics; times: from
     sweep_seconds. The title is printed above the figures; name: file name in figures/tsc, saved as <name>_tightness,
-    <name>_training and <name>_evaluation, or None."""
-    from .figures import legend_inside, paper_style, save_figure
+    <name>_training and <name>_evaluation, or None. time_halves: (xlabel, tick_labels) of the two time figures as
+    half figures side by side in the width of one (half_figure, each with its own vertical axis), which need a shorter
+    horizontal axis; None: full figures with the axis of the tightness figure."""
+    from .figures import fit_half_pair, fit_x_tick_labels, half_figure, legend_inside, paper_figure, paper_style, plain_log_ticks, save_figure
     print(title)
     short = lambda method: method.replace(" (ours)", "")
     with paper_style():
-        fig, ax = plt.subplots(figsize=(9, 4.5))
+        fig, ax = paper_figure()
         _sweep_axis(ax, settings, xlabel, tick_labels, log_x)
         _tightness_panel(ax, settings, statistics, level_label)
-        fig.tight_layout()
+        if not log_x:
+            fit_x_tick_labels(ax)
         _tightness_legend(ax, settings, statistics)
         if name is not None:
             save_figure(fig, f"{name}_tightness")
         plt.show()
-        for what in ("training", "evaluation"):
-            fig, ax = plt.subplots(figsize=(9, 4.5))
-            _sweep_axis(ax, settings, xlabel, tick_labels, log_x)
+        panels = []   # (what, figure, axes, segments) of the two time figures, completed together so that a pair can be sized together
+        for what, side in (("training", "left"), ("evaluation", "right")):
+            fig, ax = half_figure(side, shared_y=False) if time_halves else paper_figure()
+            _sweep_axis(ax, settings, *(time_halves or (xlabel, tick_labels)), log_x)
             segments = []
-            # training: one line per set of shared models; evaluation: one line per method
-            lines = [(group[0], ", ".join(short(method) for method in group)) for group in same_models(times, list(times))] if what == "training" \
+            # training: one line per set of shared models, whose names a half figure writes one per line; evaluation: one line per method
+            group_label = lambda group: (",\n" if time_halves else ", ").join(short(method) for method in group)
+            lines = [(group[0], group_label(group)) for group in same_models(times, list(times))] if what == "training" \
                 else [(method, method) for method in times]
             for method, label in lines:
                 sweep_line(ax, settings, times[method][what], method, label=label)
                 segments += sweep_segments(settings, times[method][what])
             ax.set_yscale("log")
+            plain_log_ticks(ax.yaxis)
             ax.set_ylabel(f"{what} time (s, log scale)")
-            fig.tight_layout()
+            panels.append((what, fig, ax, segments))
+        if time_halves:
+            # each half as wide as its own labels need, the rest of the width to the two plot areas
+            fit_half_pair([ax for _, _, ax, _ in panels])
+        for what, fig, ax, segments in panels:
+            if not log_x:
+                fit_x_tick_labels(ax)
             handles, labels = ax.get_legend_handles_labels()
-            legend_inside(ax, handles, labels, segments, max_doublings=0, title="models trained for" if what == "training" else None, ncol=2,
-                          fontsize=10, title_fontsize=10, framealpha=0.95, columnspacing=1.0, handletextpad=0.4)
+            # the times span the whole width at the top, so the log axis may grow upward to make room for the legend; the legend
+            # of the evaluation time in a half figure is too tall for that (one column, one row per method), so there the axis
+            # keeps the range of the data and the legend may cover the upper end of the lines of Pegasus
+            keep_range = time_halves and what == "evaluation"
+            legend_inside(ax, handles, labels, segments, max_doublings=0 if keep_range else 3, title="models trained for" if what == "training" else None,
+                          ncol=1 if time_halves else 2, fontsize=10, title_fontsize=10, framealpha=0.95, columnspacing=1.0, handletextpad=0.4)
             if name is not None:
                 save_figure(fig, f"{name}_{what}")
-            plt.show()
+        plt.show()
 
 
 def _sweep_axis(ax, settings: list, xlabel: str, tick_labels: list, log_x: bool) -> None:
@@ -534,30 +558,39 @@ def _sweep_axis(ax, settings: list, xlabel: str, tick_labels: list, log_x: bool)
     ax.grid(True, linestyle=":", alpha=0.6)
 
 
-def _tightness_panel(ax, settings: list, statistics: dict, level_label: str) -> None:
+def _tightness_panel(ax, settings: list, statistics: dict, level_label: str, failure_text: bool = True, wrap_text: bool = False) -> None:
     """Tightness of every method over a sweep on `ax`, with the line at 1x (the measured quantile) and the red zone
     below it, where a method is no bound. The axis shows TIGHTNESS_RANGE; a line leaves the panel where a method lies
     outside."""
-    from .figures import FAILURE_COLOR, FAILURE_TEXT_COLOR
+    from .figures import FAILURE_COLOR, FAILURE_TEXT_COLOR, tightness_label, tightness_tick
     ax.axhspan(TIGHTNESS_RANGE[0], 1.0, color=FAILURE_COLOR, linewidth=0)
     ax.axhline(1.0, color="black", linewidth=1)
     for name in METHOD_COLORS:
         if name in statistics:
             sweep_line(ax, settings, statistics[name]["tightness"], name, held=statistics[name]["holds"])
-    ax.text(0.99, 0.03, f"below the measured {level_label}: no bound", transform=ax.transAxes, ha="right", va="bottom", color=FAILURE_TEXT_COLOR)
+    if failure_text:
+        # wrap_text: in two lines, for a panel of half the width
+        ax.text(0.99, 0.03, f"below the measured {level_label}:{chr(10) if wrap_text else ' '}no bound", transform=ax.transAxes, ha="right",
+                va="bottom", color=FAILURE_TEXT_COLOR)
     ax.set_yscale("log")
     ax.set_ylim(*TIGHTNESS_RANGE)
-    ax.set_yticks(TIGHTNESS_TICKS, [f"{tick:g}×" for tick in TIGHTNESS_TICKS])
+    ax.set_yticks(TIGHTNESS_TICKS, [tightness_tick(tick) for tick in TIGHTNESS_TICKS])
     ax.yaxis.set_minor_locator(plt.NullLocator())
-    ax.set_ylabel(f"tightness: latency ÷ measured {level_label}")
+    ax.set_ylabel(tightness_label(level_label))
 
 
-def _tightness_legend(ax, settings: list, statistics: dict, ncol: int = 3) -> None:
+def _tightness_legend(ax, settings: list, statistics: dict, ncol: int = 3, half: str = None) -> None:
     """The legend of the methods and of the markers inside a tightness panel, where it hides the fewest points and
-    bands (legend_inside); the axis keeps TIGHTNESS_RANGE, as in B.1. Call after tight_layout."""
+    bands (legend_inside); the axis keeps TIGHTNESS_RANGE, as in B.1. Call when the axes are complete. half: "left" lists the
+    first half of the methods, "right" the rest and the markers, so that the two halves of a pair share one legend."""
     from .figures import holds_handles, legend_inside
     handles, labels = ax.get_legend_handles_labels()
     marker_handles, marker_labels = holds_handles()
+    first = (len(handles) + 1) // 2
+    if half == "left":
+        handles, labels, marker_handles, marker_labels = handles[:first], labels[:first], [], []
+    elif half == "right":
+        handles, labels = handles[first:], labels[first:]
     segments = [segment for name in statistics if name in METHOD_COLORS for segment in sweep_segments(settings, statistics[name]["tightness"])]
     legend_inside(ax, handles + marker_handles, labels + marker_labels, segments, max_doublings=0, ncol=ncol, fontsize=10, framealpha=0.95,
                   columnspacing=1.0, handletextpad=0.4)

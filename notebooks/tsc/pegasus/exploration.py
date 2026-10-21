@@ -129,6 +129,7 @@ def exploration_figure(sizes: list, statistics: dict, errors: dict, title: str, 
     time. statistics: from sweep_statistics, with the strategies in place of the methods; errors: strategy -> (sizes,
     seeds); xlabel: what the sizes count. The title is printed above the figures; name: file name in figures/tsc, saved
     as <name>_tightness and <name>_error, or None."""
+    from .figures import paper_figure, tightness_label, tightness_tick
     print(title)
 
     def axis(ax):
@@ -139,7 +140,7 @@ def exploration_figure(sizes: list, statistics: dict, errors: dict, title: str, 
         ax.grid(True, linestyle=":", alpha=0.6)
 
     with paper_style():
-        fig, ax = plt.subplots(figsize=(9, 4.5))
+        fig, ax = paper_figure()
         ax.axhspan(TIGHTNESS_RANGE[0], 1.0, color=FAILURE_COLOR, linewidth=0)
         ax.axhline(1.0, color="black", linewidth=1)
         segments = []
@@ -150,29 +151,27 @@ def exploration_figure(sizes: list, statistics: dict, errors: dict, title: str, 
         ax.text(0.99, 0.03, f"below the measured {level_label}: no bound", transform=ax.transAxes, ha="right", va="bottom", color=FAILURE_TEXT_COLOR)
         ax.set_yscale("log")
         ax.set_ylim(*TIGHTNESS_RANGE)
-        ax.set_yticks(TIGHTNESS_TICKS, [f"{tick:g}×" for tick in TIGHTNESS_TICKS])
+        ax.set_yticks(TIGHTNESS_TICKS, [tightness_tick(tick) for tick in TIGHTNESS_TICKS])
         ax.yaxis.set_minor_locator(plt.NullLocator())
-        ax.set_ylabel(f"tightness: latency ÷ measured {level_label}")
-        fig.tight_layout()
+        ax.set_ylabel(tightness_label(level_label))
         handles, labels = ax.get_legend_handles_labels()
         marker_handles, marker_labels = holds_handles()
-        legend_inside(ax, handles + marker_handles, labels + marker_labels, segments, max_doublings=0, ncol=3, fontsize=10, framealpha=0.95,
+        legend_inside(ax, handles + marker_handles, labels + marker_labels, segments, max_doublings=0, ncol=2, fontsize=10, framealpha=0.95,
                       columnspacing=1.0, handletextpad=0.4)
         if name is not None:
             save_figure(fig, f"{name}_tightness")
         plt.show()
 
-        fig, ax = plt.subplots(figsize=(9, 4.5))
+        fig, ax = paper_figure()
         segments = []
         for strategy in statistics:
             sweep_line(ax, sizes, 100 * errors[strategy], strategy)
             segments += sweep_segments(sizes, 100 * errors[strategy])
         axis(ax)
-        ax.set_ylabel("error of the predicted mean execution time (%)")
+        ax.set_ylabel("error of the predicted mean (%)")   # of the execution time; a longer label does not fit the height
         ax.set_ylim(bottom=0)
-        fig.tight_layout()
         handles, labels = ax.get_legend_handles_labels()
-        legend_inside(ax, handles, labels, segments, max_doublings=0, ncol=3, fontsize=10, framealpha=0.95, columnspacing=1.0, handletextpad=0.4)
+        legend_inside(ax, handles, labels, segments, max_doublings=0, ncol=2, fontsize=10, framealpha=0.95, columnspacing=1.0, handletextpad=0.4)
         if name is not None:
             save_figure(fig, f"{name}_error")
         plt.show()

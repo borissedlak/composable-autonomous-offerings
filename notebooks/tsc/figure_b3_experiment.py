@@ -221,6 +221,6 @@ ax_run.axis("off")
 ax_run.set_title("(d) One run, to scale in frames: the length of a run is a number of frames, not a duration", pad=4)
 
 OUTPUT.mkdir(parents=True, exist_ok=True)
-fig.savefig(OUTPUT / "b3_experiment_setup.pdf", bbox_inches='tight')
-fig.savefig(OUTPUT / "b3_experiment_setup.jpg", dpi=300, bbox_inches='tight', facecolor='white')
+fig.savefig(OUTPUT / "b3_experiment_setup.pdf", bbox_inches='tight', pad_inches=0)
+fig.savefig(OUTPUT / "b3_experiment_setup.jpg", dpi=300, bbox_inches='tight', pad_inches=0, facecolor='white')
 plt.show()

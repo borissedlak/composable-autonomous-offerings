@@ -98,43 +98,41 @@ def finetuning_methods(data, methods: dict, samples: np.ndarray, test: np.ndarra
 
 
 def finetuning_figure(sizes: list, statistics: dict, level_label: str, output: Path = None) -> None:
-    """Tightness of every method of C.1 over the number of end-to-end samples, in the style of the draft figures
-    (draft_problem_figure.py): per method the median over the seeds (line) and the band from the smallest to the
-    largest seed, the measured quantile as a black line at 1x. A filled marker is a sample size at which the method
-    holds (statistics[name]["holds"]), a hollow one where it does not. statistics: from sweep_statistics over `sizes`;
-    a method without a value at a size (the baselines at n = 0) has no point there. output: path without suffix to save
-    the figure as .pdf and .jpg (300 dpi), or None."""
-    with plt.style.context("default"), plt.rc_context({"font.size": 12}):
-        fig, ax = plt.subplots(figsize=(6, 4))
+    """Tightness of every method of C.1 over the number of end-to-end samples, in the style of the tightness figures of
+    B (evaluation.py, figures.py): per method the median over the seeds with the band from the smallest to the largest
+    seed (sweep_line), a filled marker where the method holds (statistics[name]["holds"]) and a hollow one where it does
+    not, the measured quantile as a black line at 1x and the red zone below it, where a method is no bound. Unlike the
+    figures of B, the vertical axis is linear and zoomed to the values of C.1, which lie close above 1x, so that their
+    differences are visible. statistics: from sweep_statistics over `sizes`; a method without a value at a size (the
+    baselines at n = 0) has no point there. output: path without suffix; its name is the file name in figures/tsc
+    (save_figure), or None."""
+    from matplotlib.ticker import FuncFormatter
+    from .evaluation import sweep_line, sweep_segments
+    from .figures import (FAILURE_COLOR, FAILURE_TEXT_COLOR, METHOD_STYLES, holds_handles, legend_inside, paper_figure, paper_style, save_figure,
+                          tightness_label, tightness_tick)
+    METHOD_STYLES.update({name: (style[0], style[1:]) for name, style in STYLES.items()})   # sweep_line draws a method by its name
+    names = [name for name in STYLES if name in statistics]
+    with paper_style():
+        fig, ax = paper_figure()
+        segments = []
+        for name in names:
+            sweep_line(ax, sizes, statistics[name]["tightness"], name, held=statistics[name]["holds"])
+            segments += sweep_segments(sizes, statistics[name]["tightness"])
+        # zoomed: from a little below 1x, so that the red zone shows, to a little above the highest band
+        top = max(high for _, _, high in segments)
+        ax.set_ylim(1 - 0.1 * (top - 1), top + 0.1 * (top - 1))
+        ax.axhspan(ax.get_ylim()[0], 1.0, color=FAILURE_COLOR, linewidth=0)
         ax.axhline(1.0, color="black", linewidth=1)
-        handles, labels = [Line2D([], [], color="black", linewidth=1)], [f"measured {level_label}"]
-        for name, style in STYLES.items():
-            if name not in statistics:
-                continue
-            marker, linestyle, color = style[0], style[1:], METHOD_COLORS[name]
-            tightness, held = statistics[name]["tightness"], np.asarray(statistics[name]["holds"])
-            shown = ~np.isnan(tightness).all(axis=1)   # the baselines have no value at n = 0
-            x, values, held = np.asarray(sizes)[shown], tightness[shown], held[shown]
-            median = np.nanmedian(values, axis=1)
-            ax.fill_between(x, np.nanmin(values, axis=1), np.nanmax(values, axis=1), color=color, alpha=0.2, linewidth=0)
-            ax.plot(x, median, linestyle, color=color, linewidth=1.8)
-            ax.plot(x[held], median[held], marker, color=color, markersize=6, linestyle="none")
-            ax.plot(x[~held], median[~held], marker, color=color, markerfacecolor="white", markersize=6, linestyle="none")
-            handles.append(Line2D([], [], marker=marker, linestyle=linestyle, color=color, linewidth=1.8, markersize=6))
-            labels.append(name)
-        handles += [Line2D([], [], marker="o", color="0.4", linestyle="none", markersize=6),
-                    Line2D([], [], marker="o", color="0.4", markerfacecolor="white", linestyle="none", markersize=6)]
-        labels += ["holds (every seed)", "does not hold"]
+        ax.text(0.99, 0.01, f"below the measured {level_label}: no bound", transform=ax.transAxes, ha="right", va="bottom", color=FAILURE_TEXT_COLOR)
+        ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: tightness_tick(value)))
+        ax.set_ylabel(tightness_label(level_label))
         ax.set_xticks(sizes)
         ax.set_xlabel("end-to-end samples n")
-        ax.set_ylabel(f"tightness: latency ÷ measured {level_label}")
-        top = max(np.nanmax(line.get_ydata()) for line in ax.get_lines() if len(line.get_ydata()))
-        ax.set_ylim(0, 1.65 * top)   # headroom above the lines for the legend
         ax.grid(True, linestyle=":", alpha=0.6)
-        ax.legend(handles, labels, loc="upper right", fontsize=11, ncol=2)
-        fig.tight_layout()
+        handles, labels = ax.get_legend_handles_labels()
+        marker_handles, marker_labels = holds_handles()
+        legend_inside(ax, handles + marker_handles, labels + marker_labels, segments, locations=("upper right", "upper center", "upper left"),
+                      max_doublings=0, ncol=2, fontsize=10, framealpha=0.95, columnspacing=1.0, handletextpad=0.4)
         if output is not None:
-            output.parent.mkdir(parents=True, exist_ok=True)
-            fig.savefig(output.with_suffix(".pdf"), bbox_inches="tight")
-            fig.savefig(output.with_suffix(".jpg"), dpi=300, bbox_inches="tight", facecolor="white")
+            save_figure(fig, output.name)
         plt.show()

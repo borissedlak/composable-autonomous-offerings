@@ -272,6 +272,6 @@ for center, title in zip(centers, titles):
 fig.legend(handles, labels, loc="upper left", bbox_to_anchor=(0.01, 0.255), ncol=2, fontsize=11, frameon=False, columnspacing=1.0, handletextpad=0.5)
 
 OUTPUT.mkdir(parents=True, exist_ok=True)
-fig.savefig(OUTPUT / "methodology_overview_draft.pdf", bbox_inches="tight")
-fig.savefig(OUTPUT / "methodology_overview_draft.jpg", dpi=300, bbox_inches="tight", facecolor="white")
+fig.savefig(OUTPUT / "methodology_overview_draft.pdf", bbox_inches="tight", pad_inches=0)
+fig.savefig(OUTPUT / "methodology_overview_draft.jpg", dpi=300, bbox_inches="tight", pad_inches=0, facecolor="white")
 print(f"written to {OUTPUT / 'methodology_overview_draft.pdf'} and .jpg")

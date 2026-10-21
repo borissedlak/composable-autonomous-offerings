@@ -200,11 +200,12 @@ def optimization_figure(found: dict, title: str, name: str = None) -> None:
     method -> (evaluations, seeds), from best_found; RANDOM_SEARCH is drawn in every figure. The title is printed above
     the figures; name: file name in figures/tsc, saved as <name>_<optimizer>, or None."""
     from .evaluation import sweep_segments
-    from .figures import legend_inside, paper_style, save_figure
+    from .figures import legend_inside, paper_figure, paper_style, save_figure
     print(title)
     with paper_style():
         for optimizer, results in found.items():
-            fig, ax = plt.subplots(figsize=(9, 4.5))
+            print(f"optimizer: {optimizer}")   # above the figure, not in it (no title in a paper figure)
+            fig, ax = paper_figure()
             steps = np.arange(1, len(next(iter(results.values()))) + 1)
             segments = []
             for method, values in results.items():
@@ -213,10 +214,8 @@ def optimization_figure(found: dict, title: str, name: str = None) -> None:
             ax.axhline(100, color="black", linewidth=1)
             ax.set_xticks(steps)
             ax.set_xlabel("evaluated runs of the chain")
-            ax.set_ylabel("best SLO fulfillment found (% of the best run)")
-            ax.set_title(f"optimizer: {optimizer}", loc="left")
+            ax.set_ylabel("best SLO fulfillment (% of best run)")   # the best found so far; as long as the tightness label, which fits the height
             ax.grid(True, linestyle=":", alpha=0.6)
-            fig.tight_layout()
             handles, labels = ax.get_legend_handles_labels()
             legend_inside(ax, handles, labels, segments, locations=("lower right", "lower center", "center right"), max_doublings=0, ncol=2,
                           fontsize=10, framealpha=0.95, columnspacing=1.0, handletextpad=0.4)

@@ -80,8 +80,8 @@ OUTPUT.mkdir(parents=True, exist_ok=True)
 
 def save(fig, name):
     fig.tight_layout()
-    fig.savefig(OUTPUT / f"{name}.pdf", bbox_inches="tight")
-    fig.savefig(OUTPUT / f"{name}.jpg", dpi=300, bbox_inches="tight", facecolor="white")
+    fig.savefig(OUTPUT / f"{name}.pdf", bbox_inches="tight", pad_inches=0)
+    fig.savefig(OUTPUT / f"{name}.jpg", dpi=300, bbox_inches="tight", pad_inches=0, facecolor="white")
 
 
 # --- (a) -----------------------------------------------------------------------

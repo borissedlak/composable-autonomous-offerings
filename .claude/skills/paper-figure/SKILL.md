@@ -39,8 +39,17 @@ description: Create, restyle, or export a matplotlib/seaborn figure intended for
   - export with `save_figure(fig, name)` (→ `figures/tsc/<name>.pdf` + `.jpg`).
 - Elsewhere: `plt.style.use('default')` and `plt.rcParams.update({'font.size': 12})` at the
   top of the cell, not per axis, and the same rules as above by hand.
-- Size: single panel `figsize=(9, 4.5)`; row of two panels `(15, 4.8)`. Figures are scaled
-  down in LaTeX, so keep fonts ≥ 12 and lines ≥ 1.5 pt.
+- Size and layout (TSC): `fig, ax = paper_figure()` from `pegasus/figures.py`: exactly `FIGSIZE`
+  (6.5 × 4 in) with the plot area at fixed margins, the same in every evaluation figure, so that all
+  files have the same size and LaTeX scales them alike. Never `tight_layout` or a cropped export.
+  The margins hold one row of tick labels and one axis label per axis: put a second value in
+  parentheses (`"3 (7)"`), not in a second tick row; keep the y label no longer than the tightness
+  label; write log ticks as plain numbers (`plain_log_ticks`); widen a linear x axis whose end
+  labels stick out with `fit_x_tick_labels`. Two related figures side by side in the width of one:
+  `half_figure("left" | "right")` (e.g. `tightness_sweep_figure(..., half=...)` in B.4): short x
+  labels, y labels only on the left, the legend split over both halves; two halves with their own
+  y axes (`shared_y=False`) get `fit_half_pair` so short tick labels leave no empty strip; in
+  LaTeX include both at the same height. Figures are scaled down in LaTeX, so keep fonts ≥ 12 and lines ≥ 1.5 pt.
 - Colors: one fixed color per method or process, reused across all figures of a paper
   (e.g. PPG always green, oracle always purple). Also distinguish series by marker or
   linestyle, so the figure reads in grayscale.
@@ -54,7 +63,9 @@ description: Create, restyle, or export a matplotlib/seaborn figure intended for
 ## 3. Export
 - Save to `figures/<experiment>/<snake_case_name>.pdf` (vector, for LaTeX) and a `.jpg`
   next to it (dpi=300, `facecolor='white'`) for slides.
-- Always `bbox_inches='tight'`; also `plt.show()` so it renders in the notebook.
+- TSC: `save_figure(fig, name)` saves at exactly the figure size (the fixed margins leave no white
+  border) and prints a note if a label reaches beyond the figure: fix the label, don't ignore the
+  note. Elsewhere: `bbox_inches='tight', pad_inches=0`. Also `plt.show()` so it renders in the notebook.
 - Don't overwrite an existing figure file without saying so; mention the path in the reply.
 
 ## 4. Explain the figure (per the CLAUDE.md explanation rule)
