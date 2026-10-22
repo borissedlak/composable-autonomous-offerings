@@ -2,7 +2,7 @@
 three subsections: (1) learn one GP per service, (2) turn it into a pessimistic execution-time model and the load
 phi_i(theta) of every service, (3) compose: Pegasus Node bounds every service by Kingman's bound and adds the service
 bounds d_i(epsilon / K); Pegasus SNC bounds the whole application in one step from the product of M_i / (1 - phi_i).
-Notation as in the paper: x_i = <r_i, c_i, kappa_i>, K services, m_i^+ = m_i + z_gamma sigma_ep,i, load
+Notation as in the paper: x_i = <r_i, kappa_i>, c_i workers, K services, m_i^+ = m_i + z_gamma sigma_ep,i, load
 phi_i(theta) = M_i(theta) E[exp(-theta T)]^c_i, decay rate theta_i^*, service bound d_i(epsilon), PPG d_S(x, epsilon, gamma).
 
 Claim of the figure: only step 1 needs measurements, and only of the individual services; steps 2 and 3 are analytic,
@@ -118,7 +118,7 @@ print(f"decay rates theta_i^* (1/s): {np.round(theta_star, 1)}; service bounds a
 # ------------------------------------------------------------------------------
 # Figure
 # ------------------------------------------------------------------------------
-fig = plt.figure(figsize=(15, 7.2))
+fig = plt.figure(figsize=(14, 7.2))   # narrower than the first version (15 in), so that the text is larger at the width of the page
 grid = fig.add_gridspec(4, 3, left=0.055, right=0.985, top=0.80, bottom=0.17, wspace=0.24, hspace=0.42, width_ratios=[1.0, 0.85, 1.3],
                         height_ratios=[1, 1, 1, 0.001])
 # the three service models are shorter than the other panels, so that their legend fits below them in the same column
@@ -294,9 +294,11 @@ fig.add_artist(ConnectionPatch(xyA=(1e3 * node_bounds[0], alpha / K), coordsA=ax
                                connectionstyle="arc3,rad=-0.2"))
 
 # --- Frame: inputs, step titles, the dividers between the steps
-fig.text(0.5, 0.925, r"Inputs:   composition $S$ (never executed)     configurations $\mathbf{x} = (x_1, \ldots, x_K)$, $x_i = \langle r_i, c_i, \kappa_i \rangle$"
-                     r"     arrival process ($\lambda$, $C_a^2$)     violation probability $\epsilon$     confidence $\gamma$",
-         ha="center", va="center", fontsize=13, bbox=dict(boxstyle="round,pad=0.5", facecolor="0.95", edgecolor="black", linewidth=1.2))
+# x_i as in Section III-A of the paper: resources and knobs; the workers c_i are a separate input. "Never executed" is left
+# to step 3, so that the box fits the width of the figure
+fig.text(0.5, 0.925, r"Inputs:   composition $S$    configurations $\mathbf{x} = (x_1, \ldots, x_K)$, $x_i = \langle r_i, \kappa_i \rangle$"
+                     r"    workers $c_i$    arrival process ($\lambda$, $C_a^2$)    violation probability $\epsilon$    confidence $\gamma$",
+         ha="center", va="center", fontsize=12, bbox=dict(boxstyle="round,pad=0.5", facecolor="0.95", edgecolor="black", linewidth=1.2))
 positions = [model_axes[0].get_position(), ax_queue.get_position(), ax_chain.get_position()]
 # one divider between every two steps: between the columns of the grid, so that both stay clear of the panels
 dividers = [(model_column.x1 + positions[1].x0) / 2 - 0.004, (positions[1].x1 + positions[2].x0) / 2]
