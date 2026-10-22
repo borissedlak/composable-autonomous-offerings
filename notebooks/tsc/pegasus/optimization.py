@@ -214,7 +214,7 @@ def optimization_figure(found: dict, title: str, name: str = None) -> None:
             ax.axhline(100, color="black", linewidth=1)
             ax.set_xticks(steps)
             ax.set_xlabel("evaluated runs of the chain")
-            ax.set_ylabel("best SLO fulfillment (% of best run)")   # the best found so far; as long as the tightness label, which fits the height
+            ax.set_ylabel("best fulfillment (% of best run)")   # of the SLO, the best found so far; without "SLO", which does not fit the height of FIGSIZE
             ax.grid(True, linestyle=":", alpha=0.6)
             handles, labels = ax.get_legend_handles_labels()
             legend_inside(ax, handles, labels, segments, locations=("lower right", "lower center", "center right"), max_doublings=0, ncol=2,

@@ -19,7 +19,7 @@ METHOD_STYLES = {PROPOSED: ("o", "-"), PROPOSED_SNC: ("D", "-"), "GP Sum": ("s",
 FAILURE_COLOR, FAILURE_TEXT_COLOR = "mistyrose", "darkred"   # zone where a method is no bound (below the measured quantile)
 WASTE_COLOR = "0.9"                                           # optional zone where a method wastes resources (far above it)
 BAND_ALPHA = 0.2                                              # bands over seeds or quantiles, drawn without an edge
-FIGSIZE = (6.0, 3.7)                                          # (width, height) in inches of every single-panel evaluation figure, so that
+FIGSIZE = (6.0, 3.3)                                          # (width, height) in inches of every single-panel evaluation figure, so that
                                                               # LaTeX scales them all by the same factor and their fonts match; small
                                                               # enough that the fonts stay readable in one column of the paper, large
                                                               # enough that two half figures still fit their legends
@@ -33,7 +33,7 @@ MARGIN_LEFT, MARGIN_RIGHT, MARGIN_BOTTOM, MARGIN_TOP, HALF_GAP = 0.88, 0.1, 0.55
 
 def tightness_label(level_label: str) -> str:
     """Label of every tightness axis: the latency of a method divided by the measured quantile level_label (e.g. "p95")."""
-    return f"tightness: latency ÷ measured {level_label}"
+    return f"latency ÷ measured {level_label}"   # without "tightness: ", which does not fit the height of FIGSIZE
 
 
 def tightness_tick(value: float) -> str:
