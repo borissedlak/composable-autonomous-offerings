@@ -15,8 +15,9 @@ Source of the data: the synthetic service types s1, s2, s3 of pegasus/data.py (s
 quality, a software knob kappa_i) varied and the other two fixed, so that a model can be drawn as a curve. Everything
 shown is computed: the GP fits, the loads, the simulated latency of the first service, the bounds and the simulated
 end-to-end latency. It is an illustration on a setting chosen for readability, not a result of the evaluation.
-Unlike the first version, every service has one worker: Pegasus SNC needs the items to leave every service in the
-order of arrival (Section IV-C), so with several workers only Pegasus Node would apply.
+As in the first version, every service has two workers, to show how c_i enters the load. Section IV-C requires one
+worker per service for Pegasus SNC (items must leave every service in the order of arrival); its bar is computed with
+cyclic assignment like the node bounds, as an illustration of the composition, not as a guarantee for this setting.
 """
 from pathlib import Path
 
@@ -38,11 +39,12 @@ seed, service_seed = 35, 0
 services = ["s1", "s2", "s3"]             # synthetic service types; their training data is drawn in this order
 path = ["s2", "s1", "s3"]                 # order of the types in the target pipeline; the figure names them by position, s1 to s3
 alpha, confidence = 0.05, 0.95            # violation probability epsilon and confidence gamma of the guarantee
-cpu, parallelism = 1.0, 2.0               # the two knobs that are fixed (CPU cores r_i, parallelism), as in the first version
-workers = 1                               # workers c_i of every service: one, so that Pegasus SNC applies (module docstring)
-# external arrivals (items/s): a utilization lambda m_i of about 0.2, so that the queue of the first service is visible
-# in step 3 while the bounds are not dominated by how loose the queueing bound becomes near saturation
-workload = dict(process="poisson", rate=2.5)
+cpu, parallelism = 1.0, 2.0               # the two knobs that are fixed (CPU cores r_i, parallelism); the parallelism is the number of workers c_i of every service
+workers = int(parallelism)
+# external arrivals (items/s), as in the first version; with c_i = 2 workers this is a moderate load lambda m_i / c_i: the
+# queue of the first service is still visible, but the bounds of step 3 are not dominated by how loose the queueing bound
+# becomes near saturation
+workload = dict(process="poisson", rate=7.2)
 quality_target = 1.25                     # configuration of the target pipeline (quality), inside the gap of the training data
 n_train = 7                               # training configurations per service
 noisy_share, noisy_factor = 0.4, 2.0      # share of the training samples whose noise is noisy_factor times the service's noise level
@@ -184,25 +186,33 @@ for row, ax in enumerate(model_axes):
 # --- Step 2: one service as a queue, and the load of every service ------------------
 ax_queue = fig.add_subplot(grid[0, 1])
 ax_queue.set_axis_off()
+# taller than one row of the grid (the load panel below gives up the same height), so that the two workers and the
+# two lines on the execution time fit below the queue
+QUEUE_EXTRA = 0.08   # figure height
+position = ax_queue.get_position()
+ax_queue.set_position([position.x0, position.y0 - QUEUE_EXTRA, position.width, position.height + QUEUE_EXTRA])
 ax_queue.set_xlim(0, 1)
-ax_queue.set_ylim(-0.55, 1.0)
+ax_queue.set_ylim(-0.75, 1.0)
 ax_queue.text(0.12, 0.84, "arrivals\n" + r"($\lambda$, $C_a^2$)", ha="center", va="center")
-arrow(ax_queue, (0.02, 0.48), (0.25, 0.48))
+arrow(ax_queue, (0.02, 0.47), (0.25, 0.47))
 for j in range(4):
-    ax_queue.add_patch(Rectangle((0.27 + 0.055 * j, 0.33), 0.045, 0.30, facecolor="0.8" if j else "white", edgecolor="black", linewidth=1.5))
-arrow(ax_queue, (0.495, 0.48), (0.55, 0.48))
-box(ax_queue, 0.56, 0.31, 0.18, 0.34, r"$s_i$", facecolor=C_ALEATORIC, alpha=0.6)
-arrow(ax_queue, (0.75, 0.48), (0.98, 0.48))
-ax_queue.text(0.87, 0.80, "to the next\nservice", ha="center", va="center")
-ax_queue.text(0.37, 0.16, r"waiting $W_i$", ha="center", va="center")
-ax_queue.text(0.65, 0.16, rf"$c_i = {workers}$", ha="center", va="center")
-ax_queue.text(0.5, -0.17, r"execution $Y_i \sim \mathcal{N}(m_i^+, \sigma_{al,i}^2)$", ha="center", va="center")
-ax_queue.text(0.5, -0.42, r"pessimistic mean $m_i^+ = m_i + z_\gamma \sigma_{ep,i}$", ha="center", va="center")
+    ax_queue.add_patch(Rectangle((0.27 + 0.045 * j, 0.33), 0.037, 0.28, facecolor="0.8" if j else "white", edgecolor="black", linewidth=1.5))
+# the c_i workers of s_i; under cyclic assignment, the bound sends every c_i-th item to the same worker
+for k, y in enumerate((0.58, 0.08)):
+    arrow(ax_queue, (0.455, 0.47), (0.535, y + 0.14))
+    box(ax_queue, 0.54, y, 0.17, 0.28, rf"$s_i$ ({k + 1})", facecolor=C_ALEATORIC, alpha=0.6)
+    arrow(ax_queue, (0.715, y + 0.14), (0.80, 0.47))
+arrow(ax_queue, (0.80, 0.47), (0.98, 0.47))
+ax_queue.text(0.90, 0.88, "to the next\nservice", ha="center", va="center")
+ax_queue.text(0.34, 0.20, r"waiting $W_i$", ha="center", va="center")
+ax_queue.text(0.625, -0.12, rf"$c_i = {workers}$ workers", ha="center", va="center")
+ax_queue.text(0.5, -0.40, r"execution $Y_i \sim \mathcal{N}(m_i^+, \sigma_{al,i}^2)$", ha="center", va="center")
+ax_queue.text(0.5, -0.65, r"pessimistic mean $m_i^+ = m_i + z_\gamma \sigma_{ep,i}$", ha="center", va="center")
 
 ax_load = fig.add_subplot(grid[1:3, 1])
 narrow(ax_load, by=0.03)
 position = ax_load.get_position()
-ax_load.set_position([position.x0 + 0.012, position.y0, position.width, position.height])
+ax_load.set_position([position.x0 + 0.012, position.y0, position.width, position.height - QUEUE_EXTRA])
 ax_load.axhline(0.0, color="black", linewidth=1, label=r"$\phi_i = 1$: limit of stability")
 for j, (curve, (gray, linestyle)) in enumerate(zip(log_load, SERVICE_STYLES)):
     ax_load.plot(theta_grid, curve, color=gray, linestyle=linestyle, linewidth=2.2)
