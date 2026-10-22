@@ -1,5 +1,5 @@
 """Style of the paper figures of the TSC paper: one color, marker and line style per method, the light-red zone where a
-method is no bound, and the export to figures/tsc. The style follows draft_problem_figure.py; see the paper-figure skill.
+method is no bound, and the export to figures/tsc. The style follows problem_figure.py; see the paper-figure skill.
 """
 from contextlib import contextmanager
 from pathlib import Path

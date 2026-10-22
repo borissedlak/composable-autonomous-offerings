@@ -29,13 +29,13 @@ their own. Start with `explain_3` for the fundamentals of the two bounds.
 
 ## Figure scripts
 
-Scripts that draw one figure of the paper each. Both are drafts: the file names of their outputs end in `_draft`.
-Run a script from `notebooks/tsc/` with the venv, e.g. `../../venv/Scripts/python draft_problem_figure.py`; the
+Scripts that draw one figure of the paper each. The methodology figures are drafts: the file names of their outputs end
+in `_draft`. Run a script from `notebooks/tsc/` with the venv, e.g. `../../venv/Scripts/python problem_figure.py`; the
 script writes a `.pdf` and a `.jpg` to `figures/tsc/`.
 
 | Script | Figure | Data | Output in `figures/tsc/` |
 |---|---|---|---|
-| `draft_problem_figure.py` | The two problems the paper addresses (Section II-A): per-service execution times do not add up to the end-to-end tail latency, and an accurate point prediction is not a guarantee. | Real: chain `04e-chain-qr-cv-face` of the testbed campaign, with emulated queueing as in the evaluation notebooks. | `problem_overview_draft` |
+| `problem_figure.py` | The two problems the paper addresses (Section II-A): per-service execution times do not add up to the end-to-end tail latency, and an accurate point prediction is not a guarantee. | Real: chain `04e-chain-qr-cv-face` of the testbed campaign, with emulated queueing as in the evaluation notebooks. | `problem_queueing`, `problem_prediction` |
 | `draft_methodology_figure.py` | The methodology overview (Fig. 1): learn one model per service, bound each service as a queue, compose the service bounds for a pipeline that is never executed. | Synthetic: the services `s1`, `s2`, `s3` of `pegasus/data.py`, on a setting chosen for readability; an illustration, not a result of the evaluation. | `methodology_overview_draft` |
 | `draft_methodology_figure_v2.py` | Alternative methodology overview, structured like Section IV: learn one model per service; turn it into a pessimistic execution-time model and the load $\phi_i(\theta)$ of every service; compose per service (Pegasus Node: Kingman's bound, the $d_i(\epsilon/K)$ added) or for the whole pipeline (Pegasus SNC). Every service has two workers, as in the first version; the SNC bar is then an illustration only (the paper requires one worker for Pegasus SNC). | As `draft_methodology_figure.py`. | `methodology_overview_v2_draft` |
 
@@ -71,7 +71,7 @@ and `service_gp`; `finetuning` on `baselines`, `baselines_chain`, `evaluation` a
 
 | Path | Contents |
 |---|---|
-| `statics/results_milos/` | The testbed campaign that `real_data.py` reads: one folder per experiment (single services, chains, trees, deep chains). The real data source of `1_method_real.ipynb`, the evaluation notebooks (`2a` to `2e`), `explain_5`, `explain_6` and `draft_problem_figure.py` needs this folder. The folder is not part of the repository: it is not committed, so a fresh clone does not contain it. |
+| `statics/results_milos/` | The testbed campaign that `real_data.py` reads: one folder per experiment (single services, chains, trees, deep chains). The real data source of `1_method_real.ipynb`, the evaluation notebooks (`2a` to `2e`), `explain_5`, `explain_6` and `problem_figure.py` needs this folder. The folder is not part of the repository: it is not committed, so a fresh clone does not contain it. |
 | `statics/load_independence/results_milos_v2_b1/run_states.csv` | Cache of `run_states` (`load_independence.py`) for `explain_9`: one row per run and service of the second campaign. Recomputed from `statics/results_milos_v2/b1/` when missing. |
 | `figures/tsc/` | Outputs of the figure scripts. |
 

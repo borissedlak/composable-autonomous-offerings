@@ -1,4 +1,4 @@
-"""Draft of two early figures (Section II-A) that show the two problems the paper addresses, on the real chain of B.1.
+"""Two early figures (Section II-A) that show the two problems the paper addresses, on the real chain of B.1.
 
 Claims of the figures:
  (a) Per-service execution times do not add up to the end-to-end tail latency: the gap is the queueing, and it grows
@@ -6,8 +6,8 @@ Claims of the figures:
  (b) An accurate point prediction is not a guarantee: for unseen configurations it falls on both sides of the true
      latency, and nothing tells on which side.
 
-Run from `notebooks/tsc/` with the venv:  ../../venv/Scripts/python draft_problem_figure.py
-Writes figures/tsc/problem_queueing_draft.pdf and .jpg for (a), and figures/tsc/problem_prediction_draft.pdf and .jpg for (b).
+Run from `notebooks/tsc/` with the venv:  ../../venv/Scripts/python problem_figure.py
+Writes figures/tsc/problem_queueing.pdf and .jpg for (a), and figures/tsc/problem_prediction.pdf and .jpg for (b).
 
 Source of the data: the testbed campaign in statics/results_milos (chain 04e, qr -> cv -> face), loaded with
 pegasus/real_data.py as in the evaluation (`2a_base_case.ipynb` to `2e_iterative.ipynb`). The end-to-end latencies are emulated: the measured processing times of
@@ -98,7 +98,7 @@ ax_load.set_xlabel("load: utilization of the busiest service")
 ax_load.set_ylabel("latency (ms)")
 ax_load.grid(True, linestyle=":", alpha=0.6)
 ax_load.legend(loc="upper left", fontsize=11)
-save(fig_load, "problem_queueing_draft")
+save(fig_load, "problem_queueing")
 
 # --- (b) -----------------------------------------------------------------------
 fig_scatter, ax_scatter = plt.subplots(figsize=FIGSIZE)
@@ -119,7 +119,7 @@ ax_scatter.set_xscale("log")
 ax_scatter.set_yscale("log")
 ax_scatter.set_xlim(low, high)
 ax_scatter.set_ylim(low, high)
-ax_scatter.set_xlabel(f"true end-to-end {p_label} (ms)")   # log scale, visible from the ticks
+ax_scatter.set_xlabel(f"true end-to-end latency {p_label} (ms)")   # log scale, visible from the ticks
 ax_scatter.set_ylabel(f"predicted {p_label} (ms)")
 ax_scatter.grid(True, linestyle=":", alpha=0.6)
 ticks = [t for t in (20, 50, 100, 200, 500, 1000) if low <= t <= high]
@@ -127,7 +127,7 @@ ax_scatter.set_xticks(ticks, [str(t) for t in ticks])
 ax_scatter.set_yticks(ticks, [str(t) for t in ticks])
 ax_scatter.minorticks_off()
 ax_scatter.legend(loc="upper left", bbox_to_anchor=(0, 0.88), fontsize=10, handlelength=1, borderpad=0.3, framealpha=0.8)   # in the empty corner below the zone label
-save(fig_scatter, "problem_prediction_draft")
+save(fig_scatter, "problem_prediction")
 
 print(f"(a) true {p_label} / sum of execution times, median over {measured_by_load.shape[1]} runs: {gap_low:.2f} at utilization {utilizations[0]:g}, "
       f"{gap_high:.2f} at utilization {utilizations[-1]:g}")
@@ -135,4 +135,4 @@ for name in point_predictors:
     ratio = predicted[name][finite[name]] / truth[finite[name]]
     print(f"(b) {name}: {np.mean(ratio < 1):.0%} too low, median ratio {np.median(ratio):.2f}, 5th to 95th percentile {np.quantile(ratio, 0.05):.2f} to "
           f"{np.quantile(ratio, 0.95):.2f}, finite at {finite[name].mean():.0%} of {len(truth)} predictions")
-print(f"written to {OUTPUT / 'problem_queueing_draft.pdf'} and {OUTPUT / 'problem_prediction_draft.pdf'}, each also as .jpg")
+print(f"written to {OUTPUT / 'problem_queueing.pdf'} and {OUTPUT / 'problem_prediction.pdf'}, each also as .jpg")
