@@ -45,7 +45,7 @@ as `from pegasus.bounds import ...`, with the working directory at `notebooks/ts
 
 | Module | Contents |
 |---|---|
-| `bounds.py` | The latency bounds: SNC node bound, martingale node bounds, propagated arrivals, network service curve. |
+| `bounds.py` | The latency bounds: SNC node bound, martingale node bounds, propagated arrivals, network service curve. Pegasus Node is the closed-form martingale node bound with the external arrivals at every service; the propagated bounds (minimum spacing of the departures) are explored variants, not part of Pegasus. |
 | `simulation.py` | The ground truth: simulator of a chain and of a fork-join tree of FIFO services, and the measured quantile with its confidence interval. |
 | `trees.py` | Fork-join trees (B.3 in `2c_depth_and_load`): balanced and narrow topologies, their leaf-to-root paths, and the maximum over paths through which a chain composition extends to a tree. |
 | `service_gp.py` | The GP model of one service's execution time, and the belief the bounds take from it. |

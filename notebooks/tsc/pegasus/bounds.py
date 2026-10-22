@@ -18,8 +18,13 @@ E[exp(-theta T)] becomes E[exp(-theta T)]^c for i.i.d. gaps. Every bound below a
 (`workers`: one number, or one per configuration; `path_workers`: one such entry per node; default one worker, which
 gives the single-server bounds unchanged). The bound is looser than the true multi-server wait, because a worker of
 the cyclic system may wait while another one is free.
-A node with several workers can release items out of order and several at almost the same time, so the minimum spacing
-that a node gives the next one (propagated bounds) is only used after a node with one worker.
+
+Which bounds are Pegasus. Pegasus Node (evaluation.pegasus_bound) is the union bound over
+martingale_closed_form_node_bounds, which bounds every node with the external arrival process; Pegasus SNC
+(evaluation.pegasus_snc_bound) is network_service_bound. The propagated bounds (propagated_node_moments,
+propagated_node_bounds, martingale_propagated_node_bound(s), spacing_decay_rate) are explored variants and not part of
+Pegasus: they use the minimum spacing that a node gives the next one. A node with several workers can release items out
+of order and several at almost the same time, so they use that spacing only after a node with one worker.
 """
 import numpy as np
 from scipy.special import logsumexp
@@ -89,7 +94,7 @@ def snc_latency_bound(mean, var, process, rate, epsilon, jitter=0.1, workers=1):
 
 
 # ------------------------------------------------------------------------------
-# SNC bound with propagated arrival models (node k is fed by the departures of node k-1)
+# SNC bound with propagated arrival models (node k is fed by the departures of node k-1); explored variant, not Pegasus
 # ------------------------------------------------------------------------------
 def queue_log_moment(log_mgf_node, log_spacing):
     """ln sum_n M_Y(theta)^(n+1) E[exp(-theta A_n)], where log_spacing[..., n] bounds ln E[exp(-theta A_n)].
@@ -322,7 +327,7 @@ def spacing_decay_rate(mean, var, previous_lower_mean, previous_var, workers, pr
 def martingale_propagated_node_bound(mean, var, previous_lower_mean, previous_var, process, rate, epsilon, jitter=0.1,
                                      bins=4000, iterations=30, workers=1, previous_workers=1):
     """Martingale bound of a node that receives the departures of the node before it (previous_lower_mean None for the
-    first node). The waiting-time tail is the smaller of the martingale tail with external arrivals (waiting_time_tail)
+    first node); an explored variant, not part of Pegasus Node (module docstring). The waiting-time tail is the smaller of the martingale tail with external arrivals (waiting_time_tail)
     and Kingman's bound exp(-theta_s w) for the spacing that the node before gives (spacing_decay_rate).
     The node before enters with its lower (optimistic) mean, because a faster node spaces items less. epsilon may be a
     scalar or a sequence, as in martingale_node_bound. workers, previous_workers: workers of the node and of the node
@@ -371,8 +376,7 @@ def martingale_propagated_node_bounds(path_beliefs, path_lower_means, process, r
 # ------------------------------------------------------------------------------
 # Martingale bound in closed form (Kingman's bound with a Gaussian execution time)
 # ------------------------------------------------------------------------------
-def martingale_closed_form_node_bound(mean, var, process, rate, epsilon, jitter=0.1, previous_lower_mean=None, previous_var=None,
-                                      iterations=40, cv2=1.0, workers=1, previous_workers=1):
+def martingale_closed_form_node_bound(mean, var, process, rate, epsilon, jitter=0.1, iterations=40, cv2=1.0, workers=1):
     """Smallest d with P(Q + Y > d) <= epsilon from a closed formula, per configuration; inf for overloaded nodes.
     Q is the waiting time and Y ~ N(mean, var) the item's own execution time (s), independent of Q.
     1. Waiting time: Kingman's martingale bound P(Q > w) <= exp(-theta w) for w >= 0, with theta the decay rate of
@@ -380,21 +384,15 @@ def martingale_closed_form_node_bound(mean, var, process, rate, epsilon, jitter=
     2. Latency: P(Q + Y > d) = E_Y[P(Q > d - Y)] <= E_Y[min(1, exp(-theta (d - Y)))], which for a Gaussian Y is
        P(Y > d) + exp(-theta (d - mean) + theta^2 var / 2) * Phi((d - mean - theta var) / sd), with Phi the standard
        normal distribution function. No discretization of X is needed; d is found by bisection on this formula.
-    With previous_lower_mean and previous_var (the optimistic mean and the variance of the node before, see
-    martingale_propagated_node_bound), the node receives the departures of that node: the waiting time then also obeys
-    exp(-theta_s w) (spacing_decay_rate), and the smaller of two exponential tails is the one with the larger rate, so
-    theta = max(theta, theta_s). The assumptions are those of the numerical bounds (martingale_node_bound,
-    martingale_propagated_node_bound). workers, previous_workers: workers of the node and of the node before, see the
-    module docstring.
+    Every node is bounded with the external arrival process, also inside a chain (unlike
+    martingale_propagated_node_bound, it does not use the minimum spacing that the node before gives). The assumptions
+    are those of martingale_node_bound. workers: workers of the node, see the module docstring.
     Unlike martingale_node_bound it does not use the Pollaczek-Khinchine refinement for Poisson arrivals (a waiting-time
     tail that starts at the share of items that wait, not at 1), so for Poisson arrivals it is somewhat larger.
     The bisection over [mean, mean + 60 s] returns its upper end, so it can only err upwards, by 60 s / 2^iterations."""
     mean, var = np.atleast_1d(mean).astype(float), np.atleast_1d(var).astype(float)
     workers = worker_counts(workers, len(mean))
     sd, theta = np.sqrt(var), martingale_theta(mean, var, process, rate, jitter, cv2=cv2, workers=workers)
-    if previous_lower_mean is not None:
-        theta_spacing = spacing_decay_rate(mean, var, previous_lower_mean, previous_var, workers, worker_counts(previous_workers, len(mean)))
-        theta = np.fmax(theta, np.where(theta_spacing > 0, theta_spacing, np.nan))   # fmax ignores a nan on one side
     rate_of_decay = np.nan_to_num(theta, nan=1.0)   # placeholder where there is no valid rate; those entries become inf below
 
     def tail(d):   # bound on P(Q + Y > d); the second term in log space, because theta^2 var can be very large
@@ -409,13 +407,9 @@ def martingale_closed_form_node_bound(mean, var, process, rate, epsilon, jitter=
     return np.where(np.isnan(theta), np.inf, high)
 
 
-def martingale_closed_form_node_bounds(path_beliefs, path_lower_means, process, rate, epsilon, jitter=0.1, cv2=1.0, path_workers=None):
-    """martingale_closed_form_node_bound for every node of a path, each node receiving the departures of the node before
-    it; one row per node, one column per configuration. path_lower_means: the lower (optimistic) mean of every node.
-    path_workers: workers of every node, default one each."""
+def martingale_closed_form_node_bounds(path_beliefs, process, rate, epsilon, jitter=0.1, cv2=1.0, path_workers=None):
+    """martingale_closed_form_node_bound for every node of a path, each with the external arrival process; one row per
+    node, one column per configuration. path_workers: workers of every node, default one each."""
     path_workers = [1] * len(path_beliefs) if path_workers is None else path_workers
-    return np.array([martingale_closed_form_node_bound(mean, var, process, rate, epsilon, jitter,
-                                                       None if k == 0 else path_lower_means[k - 1],
-                                                       None if k == 0 else path_beliefs[k - 1][1], cv2=cv2,
-                                                       workers=path_workers[k], previous_workers=1 if k == 0 else path_workers[k - 1])
+    return np.array([martingale_closed_form_node_bound(mean, var, process, rate, epsilon, jitter, cv2=cv2, workers=path_workers[k])
                      for k, (mean, var) in enumerate(path_beliefs)])

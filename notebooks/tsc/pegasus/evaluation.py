@@ -67,15 +67,12 @@ def fit_services(data, x_train, y_train: dict, model_seed: int, confidence: floa
 
 
 def pegasus_bound(data, models: dict, alpha: float) -> np.ndarray:
-    """Pegasus Node: the union bound over the closed-form martingale node bounds with propagated service spacing, per
-    held-out configuration (s). The waiting time at a service is bounded by Kingman's martingale bound exp(-theta w);
-    with a Gaussian execution time, the latency bound of the service follows from one formula. The first service
-    receives the external arrivals; every later one receives the departures of the service before it, which cannot be
-    closer together than that service's execution times. Every position of the chain gets its own node bound. A service
-    with several workers is bounded by cyclic assignment (bounds.py) and gives the next service no minimum spacing."""
+    """Pegasus Node: the union bound over the closed-form martingale node bounds, per held-out configuration (s). The
+    waiting time at a service is bounded by Kingman's martingale bound exp(-theta w); with a Gaussian execution time,
+    the latency bound of the service follows from one formula. Every service is bounded with the external arrivals
+    (the paper's assumption on internal arrivals). A service with several workers is bounded by cyclic assignment (bounds.py)."""
     K = len(data.path)
-    return martingale_closed_form_node_bounds(models["beliefs"], models["lower_means"], epsilon=alpha / K, path_workers=path_workers(data),
-                                              **data.workload).sum(axis=0)
+    return martingale_closed_form_node_bounds(models["beliefs"], epsilon=alpha / K, path_workers=path_workers(data), **data.workload).sum(axis=0)
 
 
 def pegasus_snc_bound(data, models: dict, alpha: float) -> np.ndarray:
@@ -154,9 +151,8 @@ def compare_tree_methods(data, models: dict, alpha: float, confidence: float, n_
     maximum over the paths of its latency through the path run as a chain, so bounds of every path that each fail with
     probability at most alpha / P give, as their maximum, a bound of the tree at alpha (union bound over the paths).
     - Pegasus Node: the union bound of every path over its node bounds, with every (path, service) pair at
-      alpha / sum_p K_p (K_p services on path p). The leaf receives the external arrivals; every other service of a path
-      receives the departures of the service before it on that path (propagated spacing), so an aggregator has one node
-      bound per child. The tree gets the largest sum over the paths.
+      alpha / sum_p K_p (K_p services on path p), every service bounded with the external arrivals. The tree gets the
+      largest sum over the paths.
     - Pegasus SNC: the network service curve of every path at alpha / P, maximum over the paths.
     - GP Sum: the joint Gaussian quantile of every path at alpha, maximum over the paths (a point prediction per path).
     - GP Queue: the quantile of every service at alpha, added along every path, maximum over the paths.
@@ -169,7 +165,7 @@ def compare_tree_methods(data, models: dict, alpha: float, confidence: float, n_
     services = sorted(set(data.path))
     x_test = model_inputs(data.x_test, data.workers_column)
     x_load, x_test_load = model_inputs(data.x_train_load, data.workers_column), model_inputs(data.x_test_load, data.workers_column)   # the rate stays the last column
-    beliefs, lower_means, gp_seconds = models["beliefs"], models["lower_means"], models["seconds"]["gp"]
+    beliefs, gp_seconds = models["beliefs"], models["seconds"]["gp"]
     predictions = lambda: {s: models["gp"][s].predict(configurations_of(x_test, s), return_std=True) for s in services}
     epsilon_node = alpha / sum(len(path) for path in paths)
 
@@ -190,8 +186,7 @@ def compare_tree_methods(data, models: dict, alpha: float, confidence: float, n_
 
     candidates = [
         (PROPOSED, "proposed", gp_seconds, lambda: max_path_sum(paths, lambda k, previous: martingale_closed_form_node_bound(
-            *beliefs[k], epsilon=epsilon_node, previous_lower_mean=None if previous is None else lower_means[previous],
-            previous_var=None if previous is None else beliefs[previous][1], **workload))),
+            *beliefs[k], epsilon=epsilon_node, **workload))),
         (PROPOSED_SNC, "proposed", gp_seconds, lambda: max_over_paths(paths, lambda path: network_service_bound(
             [beliefs[k] for k in path], epsilon=alpha / len(paths), holder_exponents=[1] * len(path), **workload))),
         ("GP Sum", "baseline", gp_seconds, gp_sum),

@@ -72,14 +72,12 @@ quality_grid = np.linspace(0.5, 2.0, 200)
 z_c = norm.ppf(confidence)
 target = np.array([[quality_target]])
 beliefs = [execution_time_belief(models[s], target, confidence) for s in path]            # (pessimistic mean, variance per item)
-lower_means = [execution_time_belief(models[s], target, 1 - confidence)[0] for s in path]   # optimistic means
 
 # ------------------------------------------------------------------------------
 # Step 2: the first service as a queue (simulated for the picture) and its bound
 # ------------------------------------------------------------------------------
-# every service has several workers, so no service gets the minimum spacing of its predecessor (Eq. (10) of the paper)
 path_workers = [workers] * K
-node_bounds = martingale_closed_form_node_bounds(beliefs, lower_means, epsilon=alpha / K, path_workers=path_workers, **workload)[:, 0]   # d_i(epsilon / K), s
+node_bounds = martingale_closed_form_node_bounds(beliefs, epsilon=alpha / K, path_workers=path_workers, **workload)[:, 0]   # d_i(epsilon / K), s
 true_means = np.array([[true_demand(configurations(quality_target), specs[s])[0] for s in path]])
 noise = [specs[s]["noise"] for s in path]
 first_latency = simulate_chain(true_means[:, :1], noise[:1], n_items=200_000, item_correlation=0.0, rng=np.random.default_rng([seed, 1]),
