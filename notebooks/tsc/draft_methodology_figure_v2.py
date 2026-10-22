@@ -253,7 +253,7 @@ ax_load.text(0.97, 0.04, "stable\n(load < 1)", transform=ax_load.transAxes, ha="
 load_ticks = np.array([0.25, 0.5, 1, 2, 4])
 load_ticks = load_ticks[(np.log(load_ticks) >= ax_load.get_ylim()[0]) & (np.log(load_ticks) <= ax_load.get_ylim()[1])]
 ax_load.set_yticks(np.log(load_ticks), [f"{tick:g}" for tick in load_ticks])
-ax_load.set_xlabel(r"rate $\theta$ (1/s)")
+ax_load.set_xlabel(r"candidate rate $\theta$ (1/s)")   # theta_i^* is the largest candidate that keeps the load below 1
 ax_load.set_ylabel(r"service load $\phi_i(\theta)$", labelpad=4)   # the tick values show the log scale
 ax_load.grid(True, linestyle=":", alpha=0.6)
 ax_load.legend(loc="upper left", fontsize=10.5, framealpha=0.95, borderaxespad=0.3)
