@@ -261,7 +261,8 @@ ax_load.legend(loc="upper left", fontsize=10.5, framealpha=0.95, borderaxespad=0
 # --- Step 3: the target application and the two compositions ---------------------------
 ax_chain = fig.add_subplot(grid[0, 2])
 ax_chain.set_axis_off()
-place(ax_chain, Y_PANELS, Y_PANELS + CHAIN_HEIGHT)
+CHAIN_RAISE = 0.12   # in; the sketch starts above the other panels, so that it sits close under the header of step 3
+place(ax_chain, Y_PANELS - CHAIN_RAISE, Y_PANELS + CHAIN_HEIGHT - CHAIN_RAISE)
 ax_chain.set_xlim(0, 1)
 ax_chain.set_ylim(0, 1)
 ax_chain.add_patch(FancyBboxPatch((0.03, 0.22), 0.94, 0.62, boxstyle="round,pad=0.01,rounding_size=0.03", linewidth=1.5, linestyle="--",
@@ -332,7 +333,7 @@ for divider in dividers:
                               linestyle=(0, (6, 4))))
 # every step title is centered in its section, the space between the figure edge and the dividers
 centers = [(0.0 + dividers[0]) / 2, (dividers[0] + dividers[1]) / 2, (dividers[1] + 1.0) / 2]
-titles = ["① Learn service performance", "② Model service load", "③ Composition into the PPG"]
+titles = ["① Learn service performance", "② Model service load", "③ Compose service models"]
 for center, title in zip(centers, titles):
     fig.text(center, from_top(Y_TITLES), title, ha="center", va="center", fontsize=13, fontweight="bold")
 # below the x label of the service models, in two columns so that it takes three rows; the check below the figure
