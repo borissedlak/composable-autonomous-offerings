@@ -38,6 +38,7 @@ base_utilization = 0.5                                 # panel (b): the load of 
 seeds = list(range(5))                                 # panel (b): a seed determines the training runs and the randomness of the emulation
 point_predictors = ["GP Queue", "Quantile Union"]       # panel (b): one analytic and one learned predictor of the latency quantile
 p_label = f"p{100 * (1 - alpha):g}"
+FIGSIZE = (6, 3)                                       # (width, height) in inches of each panel; lower than the evaluation figures (6 x 3.7) so that Fig. 1 takes less space
 
 
 def load(s, utilization):
@@ -81,7 +82,7 @@ def save(fig, name):
 
 
 # --- (a) -----------------------------------------------------------------------
-fig_load, ax_load = plt.subplots(figsize=(6, 4))
+fig_load, ax_load = plt.subplots(figsize=FIGSIZE)
 quartiles = lambda values: np.nanquantile(values, [0.25, 0.5, 0.75], axis=1)
 for values, color, style, label in ((measured_by_load, "tab:purple", "o-", f"true end-to-end {p_label}"),
                                     (summed_by_load, METHOD_COLORS["GP Sum"], "s--", f"sum of the per-service execution times ({p_label})")):
@@ -93,37 +94,37 @@ ax_load.annotate("", xy=(utilizations[-2], np.median(measured_by_load[-2])), xyt
                  arrowprops=dict(arrowstyle="<->", color="black", linewidth=1.2))
 ax_load.text(utilizations[-2] + 0.012, (np.median(measured_by_load[-2]) + np.median(summed_by_load[-2])) / 2, "queueing", ha="left", va="center")
 ax_load.set_xlabel("load: utilization of the busiest service")
-ax_load.set_ylabel("latency ÷ total mean execution time")
+ax_load.set_ylabel("normalized latency")   # divided by the total mean execution time of the run, as defined in the caption
 ax_load.grid(True, linestyle=":", alpha=0.6)
 ax_load.legend(loc="upper left", fontsize=11)
 save(fig_load, "problem_queueing_draft")
 
 # --- (b) -----------------------------------------------------------------------
-fig_scatter, ax_scatter = plt.subplots(figsize=(6, 4))
+fig_scatter, ax_scatter = plt.subplots(figsize=FIGSIZE)
 finite = {name: np.isfinite(values) for name, values in predicted.items()}
 low = 1e3 * 0.7 * min(truth.min(), *(predicted[name][finite[name]].min() for name in point_predictors))
 high = 1e3 * 1.4 * max(truth.max(), *(predicted[name][finite[name]].max() for name in point_predictors))
 ax_scatter.fill_between([low, high], [low, high], [high, high], color="0.9", linewidth=0)   # above the diagonal: overestimated
 ax_scatter.fill_between([low, high], [low, low], [low, high], color="mistyrose", linewidth=0)   # below: underestimated
-ax_scatter.plot([low, high], [low, high], color="black", linewidth=1, label="prediction = true latency")
+ax_scatter.plot([low, high], [low, high], color="black", linewidth=1)   # no legend entry: the two zones it separates are labeled
 for name, marker in zip(point_predictors, ("o", "^")):
     below = np.mean(predicted[name][finite[name]] < truth[finite[name]])
     ax_scatter.plot(1e3 * truth[finite[name]], 1e3 * predicted[name][finite[name]], marker, color=METHOD_COLORS[name], markersize=5, alpha=0.6,
-                    linestyle="none", label=f"{name}: {below:.0%} of the predictions too low")
-ax_scatter.text(0.03, 0.97, "latency overestimated:\nresources wasted", transform=ax_scatter.transAxes, ha="left", va="top")
-ax_scatter.text(0.97, 0.36, "latency underestimated:\nSLO violated", transform=ax_scatter.transAxes, ha="right", va="bottom", color="darkred")
+                    linestyle="none", label=f"{name}: {below:.0%} too low")
+ax_scatter.text(0.03, 0.97, "overestimated: resources wasted", transform=ax_scatter.transAxes, ha="left", va="top")
+ax_scatter.text(0.97, 0.03, "underestimated: SLO violated", transform=ax_scatter.transAxes, ha="right", va="bottom", color="darkred")
 ax_scatter.set_xscale("log")
 ax_scatter.set_yscale("log")
 ax_scatter.set_xlim(low, high)
 ax_scatter.set_ylim(low, high)
-ax_scatter.set_xlabel(f"true end-to-end {p_label} latency (ms, log scale)")
-ax_scatter.set_ylabel(f"predicted {p_label} latency (ms, log scale)")
+ax_scatter.set_xlabel(f"true end-to-end {p_label} (ms, log)")
+ax_scatter.set_ylabel(f"predicted {p_label} (ms, log)")
 ax_scatter.grid(True, linestyle=":", alpha=0.6)
 ticks = [t for t in (20, 50, 100, 200, 500, 1000) if low <= t <= high]
 ax_scatter.set_xticks(ticks, [str(t) for t in ticks])
 ax_scatter.set_yticks(ticks, [str(t) for t in ticks])
 ax_scatter.minorticks_off()
-ax_scatter.legend(loc="lower right", fontsize=11, framealpha=0.95)
+ax_scatter.legend(loc="lower right", bbox_to_anchor=(1, 0.1), fontsize=11, framealpha=0.8)
 save(fig_scatter, "problem_prediction_draft")
 
 print(f"(a) true {p_label} / sum of execution times, median over {measured_by_load.shape[1]} runs: {gap_low:.2f} at utilization {utilizations[0]:g}, "
