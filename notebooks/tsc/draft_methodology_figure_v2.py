@@ -120,12 +120,12 @@ print(f"decay rates theta_i^* (1/s): {np.round(theta_star, 1)}; service bounds a
 # Figure
 # ------------------------------------------------------------------------------
 fig = plt.figure(figsize=(12, 7.2))   # narrower than the first version (15 in), so that the text is larger at the width of the page
-grid = fig.add_gridspec(4, 3, left=0.055, right=0.985, top=0.80, bottom=0.17, wspace=0.24, hspace=0.42, width_ratios=[0.95, 0.8, 1.4],
+grid = fig.add_gridspec(4, 3, left=0.055, right=0.985, top=0.80, bottom=0.17, wspace=0.24, hspace=0.42, width_ratios=[0.88, 0.8, 1.5],
                         height_ratios=[1, 1, 1, 0.001])
 # the three service models are shorter than the other panels, so that their legend fits below them in the same column
 model_column = grid[0:3, 0].get_position(fig)
 # and start further right, so that the dataset D_i of every service can be drawn to their left
-model_grid = fig.add_gridspec(3, 1, left=model_column.x0 + 0.058, right=model_column.x1 - 0.025, top=0.80, bottom=0.33, hspace=0.3)
+model_grid = fig.add_gridspec(3, 1, left=model_column.x0 + 0.052, right=model_column.x1 - 0.02, top=0.80, bottom=0.33, hspace=0.3)
 
 
 def box(ax, x, y, w, h, text, **style):
@@ -152,21 +152,23 @@ for row, s in enumerate(path):
     # both kinds of uncertainty as +-z_gamma bands, because step 2 treats them differently: the epistemic one shifts the
     # mean to m_i^+, the aleatoric one remains the variance per item
     band_aleatoric, band_epistemic = z_c * np.sqrt(var_aleatoric), z_c * np.sqrt(var_epistemic)
+    # labels in words: the figure is an overview, the symbols are defined in the text and the caption
     ax.fill_between(quality_grid, 1e3 * (mu - band_aleatoric), 1e3 * (mu + band_aleatoric), color="#fdd0a2", linewidth=0,
-                    label=r"aleatoric $\pm z_\gamma \sigma_{al,i}$")
+                    label="aleatoric uncertainty")
     ax.fill_between(quality_grid, 1e3 * (mu - band_epistemic), 1e3 * (mu + band_epistemic), color="#a6c8e6", linewidth=0,
-                    label=r"epistemic $\pm z_\gamma \sigma_{ep,i}$")
-    ax.plot(quality_grid, 1e3 * mu, color=C_MEAN, linewidth=1.8, label=r"predicted mean $m_i$")
-    ax.plot(quality_train, 1e3 * y_train[s], "o", color=C_ALEATORIC, markeredgecolor="black", markersize=6, label=r"observed $Y_i$ ($\mathcal{D}_i$)")
-    ax.axvline(quality_target, color="black", linewidth=1, linestyle=":", label=r"target $x_i$")
-    ax.text(0.02, 0.93, rf"$Y_{row + 1}$ (ms)", transform=ax.transAxes, ha="left", va="top")
+                    label="epistemic uncertainty")
+    ax.plot(quality_grid, 1e3 * mu, color=C_MEAN, linewidth=1.8, label="predicted mean")
+    ax.plot(quality_train, 1e3 * y_train[s], "o", color=C_ALEATORIC, markeredgecolor="black", markersize=6, label="observed execution time")
+    ax.axvline(quality_target, color="black", linewidth=1, linestyle=":", label="target configuration")
+    ax.text(0.02, 0.93, f"s{row + 1} (ms)", transform=ax.transAxes, ha="left", va="top")
     ax.grid(True, linestyle=":", alpha=0.6)
     ax.margins(x=0)
     if row < K - 1:
         ax.tick_params(labelbottom=False)
-model_axes[-1].set_xlabel(r"quality $\kappa_i$ of the service")
+model_axes[-1].set_xlabel("quality knob of the service")
 model_axes[-1].set_xticks([0.5, 1.0, 1.5, 2.0])
 handles, labels = model_axes[0].get_legend_handles_labels()
+handles, labels = [handles[i] for i in (3, 2, 1, 0, 4)], [labels[i] for i in (3, 2, 1, 0, 4)]   # data, model, then the target
 
 # the dataset D_i of every service, a database cylinder with an arrow into its model (figure coordinates)
 cylinder_x, cylinder_w, cylinder_h, cap_h = 0.008, 0.034, 0.075, 0.02
@@ -181,7 +183,7 @@ for row, ax in enumerate(model_axes):
         fig.add_artist(plt.Line2D([x, x], [bottom, top], color="black", linewidth=1.3))
     fig.add_artist(Ellipse((cylinder_x + cylinder_w / 2, top), cylinder_w, cap_h, **style))
     fig.text(cylinder_x + cylinder_w / 2, y_center - cap_h / 4, rf"$\mathcal{{D}}_{row + 1}$", ha="center", va="center", fontsize=13)
-    fig.add_artist(FancyArrowPatch((cylinder_x + cylinder_w + 0.004, y_center), (position.x0 - 0.04, y_center), arrowstyle="-|>",
+    fig.add_artist(FancyArrowPatch((cylinder_x + cylinder_w + 0.004, y_center), (position.x0 - 0.039, y_center), arrowstyle="-|>",
                                    mutation_scale=14, linewidth=1.4, color="black", transform=fig.transFigure))
 
 # --- Step 2: one service as a queue, and the load of every service ------------------
@@ -205,16 +207,17 @@ for k, y in enumerate((0.58, 0.08)):
     arrow(ax_queue, (0.715, y + 0.14), (0.80, 0.47))
 arrow(ax_queue, (0.80, 0.47), (0.98, 0.47))
 ax_queue.text(1.0, 0.86, "to next\nservice", ha="right", va="center")   # right of the workers, so that it clears s_i (1)
-ax_queue.text(0.26, 0.18, r"waiting $W_i$", ha="center", va="center")
+ax_queue.text(0.26, 0.18, "queue", ha="center", va="center")
 ax_queue.text(0.625, -0.12, rf"$c_i = {workers}$ workers", ha="center", va="center")
-ax_queue.text(0.5, -0.40, r"execution $Y_i \sim \mathcal{N}(m_i^+, \sigma_{al,i}^2)$", ha="center", va="center")
-ax_queue.text(0.5, -0.65, r"pessimistic mean $m_i^+ = m_i + z_\gamma \sigma_{ep,i}$", ha="center", va="center")
+# the pessimistic execution-time model (Eq. belief of the paper) in words; the formula is in the text
+ax_queue.text(0.5, -0.50, "pessimistic execution time:\nmean + epistemic margin", ha="center", va="center")
 
 ax_load = fig.add_subplot(grid[1:3, 1])
 narrow(ax_load, by=0.03)
 position = ax_load.get_position()
-ax_load.set_position([position.x0 + 0.012, position.y0, position.width, position.height - QUEUE_EXTRA])
-ax_load.axhline(0.0, color="black", linewidth=1, label=r"$\phi_i = 1$")
+# shifted right, so that the y label keeps clear of the divider to step 1
+ax_load.set_position([position.x0 + 0.03, position.y0, position.width - 0.012, position.height - QUEUE_EXTRA])
+ax_load.axhline(0.0, color="black", linewidth=1, label="stability limit")
 for j, (curve, (gray, linestyle)) in enumerate(zip(log_load, SERVICE_STYLES)):
     ax_load.plot(theta_grid, curve, color=gray, linestyle=linestyle, linewidth=2.2)
     # every curve named at its right end instead of in the legend, which would otherwise hide the dip or theta_i^*
@@ -222,14 +225,16 @@ for j, (curve, (gray, linestyle)) in enumerate(zip(log_load, SERVICE_STYLES)):
                  bbox=dict(facecolor="white", edgecolor="none", pad=0.5, alpha=0.85))
 ax_load.plot(theta_star, np.zeros(K), "o", color=C_BOUND, markeredgecolor="black", markersize=9, linestyle="none",
              label=r"decay rate $\theta_i^*$", zorder=3)
-ax_load.text(0.03, 0.96, r"$\phi_i(\theta) = M_i(\theta)\,\mathbb{E}[e^{-\theta T}]^{c_i}$", transform=ax_load.transAxes, ha="left", va="top",
-             bbox=dict(facecolor="white", edgecolor="none", pad=1.5, alpha=0.85))
 ax_load.set_xlim(0, theta_grid[-1])
 # room above the highest curve for its name, and below the deepest dip for the legend
 lowest, highest = min(curve.min() for curve in log_load), max(curve.max() for curve in log_load)
 ax_load.set_ylim(lowest - 0.55 * (highest - lowest), highest + 0.12 * (highest - lowest))
+# the curves are ln phi_i; the ticks show phi_i itself, so that the axis reads as a load on a log scale
+load_ticks = np.array([0.25, 0.5, 1, 2, 4])
+load_ticks = load_ticks[(np.log(load_ticks) >= ax_load.get_ylim()[0]) & (np.log(load_ticks) <= ax_load.get_ylim()[1])]
+ax_load.set_yticks(np.log(load_ticks), [f"{tick:g}" for tick in load_ticks])
 ax_load.set_xlabel(r"$\theta$ (1/s)")
-ax_load.set_ylabel(r"load $\ln \phi_i(\theta)$ of service $s_i$", labelpad=4)
+ax_load.set_ylabel(r"load $\phi_i(\theta)$ (log scale)", labelpad=4)
 ax_load.grid(True, linestyle=":", alpha=0.6)
 # right of the dip and below the crossings, the corner that no curve reaches
 ax_load.legend(loc="lower right", fontsize=10.5, framealpha=0.95)
@@ -247,25 +252,25 @@ for j, s in enumerate(path):
         arrow(ax_chain, (0.10 + 0.30 * (j - 1) + 0.18, 0.53), (0.10 + 0.30 * j - 0.01, 0.53))
 ax_chain.text(0.5, 0.06, "target pipeline: never executed", ha="center", va="center", style="italic")
 
-compose_grid = grid[1:3, 2].subgridspec(1, 2, width_ratios=[0.9, 1.35], wspace=0.22)
+compose_grid = grid[1:3, 2].subgridspec(1, 2, width_ratios=[1.1, 1.15], wspace=0.22)
 # Pegasus Node, per service: Kingman's bound on the tail of the latency of s1 gives its service bound d_1(epsilon / K)
 ax_tail = fig.add_subplot(compose_grid[0, 0])
 # shifted right, so that its tick labels and y label keep clear of the divider to step 2
 position = ax_tail.get_position()
 ax_tail.set_position([position.x0 + 0.045, position.y0, position.width - 0.045, position.height])
 ordered = np.sort(first_latency)[::200]
-ax_tail.plot(1e3 * ordered, 1 - np.arange(len(ordered)) / len(ordered), color="0.35", linewidth=1.8, label="true")
-ax_tail.plot(1e3 * latency_grid, tail_bound, color=C_BOUND, linewidth=2.2, linestyle="-.", label="Kingman")
-ax_tail.axhline(alpha / K, color="black", linewidth=1, label=r"$\epsilon / K$")
+ax_tail.plot(1e3 * ordered, 1 - np.arange(len(ordered)) / len(ordered), color="0.35", linewidth=1.8, label="true latency")
+ax_tail.plot(1e3 * latency_grid, tail_bound, color=C_BOUND, linewidth=2.2, linestyle="-.", label="Kingman bound")
+ax_tail.axhline(alpha / K, color="black", linewidth=1, label=r"share $\epsilon / K$")
 ax_tail.plot([1e3 * node_bounds[0]], [alpha / K], "o", color=C_BOUND, markeredgecolor="black", markersize=9, zorder=3)
 ax_tail.set_yscale("log")
 ax_tail.set_ylim(2e-6, 1.5)
 ax_tail.set_xlim(0, 1e3 * latency_grid[-1])
 ax_tail.set_xlabel(r"latency $d$ at s1 (ms)")
-ax_tail.set_ylabel(r"$P(L_1 > d)$", labelpad=6)
+ax_tail.set_ylabel(r"P(latency $> d$)", labelpad=6)
 ax_tail.grid(True, linestyle=":", alpha=0.6)
-ax_tail.legend(loc="lower left", fontsize=10.5, framealpha=0.95, handlelength=1.0, handletextpad=0.3, borderaxespad=0.2, borderpad=0.3)   # short handles: the panel is narrow
-ax_tail.set_title(r"Node: $d_1(\epsilon / K)$ of s1", fontsize=12)
+ax_tail.legend(loc="lower left", fontsize=10.5, framealpha=0.95, handlelength=1.1, handletextpad=0.3, borderaxespad=0.2, borderpad=0.3)
+ax_tail.set_title("Node: bound $d_1$ of s1", fontsize=12)
 
 # both compositions as bars against the true end-to-end quantile
 ax_compose = fig.add_subplot(compose_grid[0, 1])
@@ -276,17 +281,14 @@ for j, (bound, hatch) in enumerate(zip(node_bounds, ("", "//", ".."))):
                     bbox=dict(facecolor="white", edgecolor="none", pad=1.5, alpha=0.85))
     left += 1e3 * bound
 ax_compose.barh(0, 1e3 * snc_bound, height=0.5, color=C_SNC, alpha=0.75, edgecolor="black", linewidth=1.2)
-# the formula of Pegasus SNC inside its bar, as the d_i inside the bar of Pegasus Node
-ax_compose.text(1e3 * snc_bound / 2, 0, r"$\Pi_i\, M_i / (1 - \phi_i)$", ha="center", va="center", fontsize=13,
-                bbox=dict(facecolor="white", edgecolor="none", pad=1.5, alpha=0.85))
 ax_compose.axvline(1e3 * measured, color=C_MEASURED, linewidth=1.8, linestyle="--", label=f"true end-to-end p{100 * (1 - alpha):g}")
 ax_compose.set_yticks([])
 label_box = dict(facecolor="white", edgecolor="none", pad=1.0, alpha=0.85)
-ax_compose.text(0, 1.29, r" Node: $d_1 + d_2 + d_3$", ha="left", va="bottom", bbox=label_box)
-ax_compose.text(0, 0.29, r" SNC: $\epsilon$ paid once", ha="left", va="bottom", bbox=label_box)
+ax_compose.text(0, 1.29, r" Node: sum of the $d_i$", ha="left", va="bottom", bbox=label_box)
+ax_compose.text(0, 0.29, " SNC: one bound", ha="left", va="bottom", bbox=label_box)
 ax_compose.set_ylim(-1.15, 1.75)
 ax_compose.set_xlim(0, 1e3 * max(per_node_bound, snc_bound) * 1.12)
-ax_compose.set_xlabel(r"PPG $d_S(\mathbf{x}, \epsilon, \gamma)$ (ms)")
+ax_compose.set_xlabel("PPG of the pipeline (ms)")
 ax_compose.grid(True, axis="x", linestyle=":", alpha=0.6)
 ax_compose.legend(loc="lower right", fontsize=10.5, framealpha=0.95)
 # the service bound of s1 is the first part of the sum of Pegasus Node
@@ -295,9 +297,8 @@ fig.add_artist(ConnectionPatch(xyA=(1e3 * node_bounds[0], alpha / K), coordsA=ax
                                connectionstyle="arc3,rad=-0.2"))
 
 # --- Frame: inputs, step titles, the dividers between the steps
-# x_i as in Section III-A of the paper: resources and knobs; the workers c_i are a separate input. Short labels ("never
-# executed" is left to step 3, the configuration of one service stands for the vector x), so that the box fits on one line
-inputs = fig.text(0.5, 0.925, r"Inputs:   composition $S$    configurations $x_i = \langle r_i, \kappa_i \rangle$"
+# the inputs by name and symbol only; x_i (resources and knobs) and the workers c_i are defined in Section III-A of the paper
+inputs = fig.text(0.5, 0.925, r"Inputs:   composition $S$    configurations $x_i$"
                      r"    workers $c_i$    arrivals ($\lambda$, $C_a^2$)    violation probability $\epsilon$    confidence $\gamma$",
          ha="center", va="center", fontsize=12, bbox=dict(boxstyle="round,pad=0.5", facecolor="0.95", edgecolor="black", linewidth=1.2))
 positions = [model_axes[0].get_position(), ax_queue.get_position(), ax_chain.get_position()]
@@ -307,10 +308,11 @@ for divider in dividers:
     fig.add_artist(plt.Line2D([divider, divider], [0.12, 0.88], color="black", linewidth=1.5, linestyle=(0, (6, 4))))
 # every step title is centered in its section, the space between the figure edge and the dividers
 centers = [(0.0 + dividers[0]) / 2, (dividers[0] + dividers[1]) / 2, (dividers[1] + 1.0) / 2]
-titles = ["① Learning: one GP per service", "② Execution time and load", "③ Composition into the PPG"]
+titles = ["① Learning service performance", "② Execution time and load", "③ Composition into the PPG"]
 for center, title in zip(centers, titles):
-    fig.text(center, 0.86, title, ha="center", va="center", fontsize=14, fontweight="bold")
-fig.legend(handles, labels, loc="upper left", bbox_to_anchor=(0.01, 0.255), ncol=2, fontsize=11, frameon=False, columnspacing=1.0, handletextpad=0.5)
+    fig.text(center, 0.86, title, ha="center", va="center", fontsize=13, fontweight="bold")
+# one column: the labels are words now, two columns would reach into step 2
+fig.legend(handles, labels, loc="upper left", bbox_to_anchor=(0.01, 0.255), ncol=1, fontsize=11, frameon=False, handletextpad=0.5, labelspacing=0.3)
 
 # the export is cropped to the drawn content, but matplotlib's tight crop counts only the text of the inputs, not its frame,
 # which reaches 6 pt beyond the text: crop to the union of both, plus half the frame's line width
