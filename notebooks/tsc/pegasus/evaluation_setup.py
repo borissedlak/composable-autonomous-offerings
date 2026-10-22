@@ -128,10 +128,11 @@ def _cache_key(data_source: str, options: dict) -> str:
     package = Path(__file__).resolve().parent
     code = b""
     for name in CACHED_CODE:
-        text = (package / name).read_bytes()
+        # as text, so that the line endings (CRLF in a Windows checkout) neither change the key nor break the split below
+        text = (package / name).read_text(encoding="utf-8")
         if name == "evaluation.py":
-            text = text.split(b"\n# Figures\n")[0]
-        code += text
+            text = text.split("\n# Figures\n")[0]
+        code += text.encode()
     parameters = repr((data_source, alpha, confidence, coverage_check, seed, seeds, n_calibration, options["base_options"])).encode()
     code += b"".join(_function_code(function) for function in (configure, base_case, b1_base))
     return hashlib.sha256(parameters + code).hexdigest()[:16]
@@ -178,7 +179,7 @@ def _computation_code() -> bytes:
     for path in sorted(package.glob("*.py")):
         if path.name == "figures.py":
             continue
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")   # independent of the locale, like _cache_key
         if path.name == "evaluation.py":
             text = text.split("\n# Figures\n")[0]
         lines = text.splitlines(keepends=True)
