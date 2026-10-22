@@ -119,8 +119,8 @@ print(f"decay rates theta_i^* (1/s): {np.round(theta_star, 1)}; service bounds a
 # ------------------------------------------------------------------------------
 # Figure
 # ------------------------------------------------------------------------------
-fig = plt.figure(figsize=(13, 7.2))   # narrower than the first version (15 in), so that the text is larger at the width of the page
-grid = fig.add_gridspec(4, 3, left=0.055, right=0.985, top=0.80, bottom=0.17, wspace=0.24, hspace=0.42, width_ratios=[1.0, 0.85, 1.3],
+fig = plt.figure(figsize=(12, 7.2))   # narrower than the first version (15 in), so that the text is larger at the width of the page
+grid = fig.add_gridspec(4, 3, left=0.055, right=0.985, top=0.80, bottom=0.17, wspace=0.24, hspace=0.42, width_ratios=[0.95, 0.8, 1.4],
                         height_ratios=[1, 1, 1, 0.001])
 # the three service models are shorter than the other panels, so that their legend fits below them in the same column
 model_column = grid[0:3, 0].get_position(fig)
@@ -204,8 +204,8 @@ for k, y in enumerate((0.58, 0.08)):
     box(ax_queue, 0.54, y, 0.17, 0.28, rf"$s_i$ ({k + 1})", facecolor=C_ALEATORIC, alpha=0.6)
     arrow(ax_queue, (0.715, y + 0.14), (0.80, 0.47))
 arrow(ax_queue, (0.80, 0.47), (0.98, 0.47))
-ax_queue.text(0.90, 0.88, "to the next\nservice", ha="center", va="center")
-ax_queue.text(0.34, 0.20, r"waiting $W_i$", ha="center", va="center")
+ax_queue.text(1.0, 0.86, "to next\nservice", ha="right", va="center")   # right of the workers, so that it clears s_i (1)
+ax_queue.text(0.26, 0.18, r"waiting $W_i$", ha="center", va="center")
 ax_queue.text(0.625, -0.12, rf"$c_i = {workers}$ workers", ha="center", va="center")
 ax_queue.text(0.5, -0.40, r"execution $Y_i \sim \mathcal{N}(m_i^+, \sigma_{al,i}^2)$", ha="center", va="center")
 ax_queue.text(0.5, -0.65, r"pessimistic mean $m_i^+ = m_i + z_\gamma \sigma_{ep,i}$", ha="center", va="center")
@@ -214,7 +214,7 @@ ax_load = fig.add_subplot(grid[1:3, 1])
 narrow(ax_load, by=0.03)
 position = ax_load.get_position()
 ax_load.set_position([position.x0 + 0.012, position.y0, position.width, position.height - QUEUE_EXTRA])
-ax_load.axhline(0.0, color="black", linewidth=1, label=r"$\phi_i = 1$: limit of stability")
+ax_load.axhline(0.0, color="black", linewidth=1, label=r"$\phi_i = 1$")
 for j, (curve, (gray, linestyle)) in enumerate(zip(log_load, SERVICE_STYLES)):
     ax_load.plot(theta_grid, curve, color=gray, linestyle=linestyle, linewidth=2.2)
     # every curve named at its right end instead of in the legend, which would otherwise hide the dip or theta_i^*
@@ -247,12 +247,12 @@ for j, s in enumerate(path):
         arrow(ax_chain, (0.10 + 0.30 * (j - 1) + 0.18, 0.53), (0.10 + 0.30 * j - 0.01, 0.53))
 ax_chain.text(0.5, 0.06, "target pipeline: never executed", ha="center", va="center", style="italic")
 
-compose_grid = grid[1:3, 2].subgridspec(1, 2, width_ratios=[0.9, 1.35], wspace=0.30)
+compose_grid = grid[1:3, 2].subgridspec(1, 2, width_ratios=[0.9, 1.35], wspace=0.22)
 # Pegasus Node, per service: Kingman's bound on the tail of the latency of s1 gives its service bound d_1(epsilon / K)
 ax_tail = fig.add_subplot(compose_grid[0, 0])
 # shifted right, so that its tick labels and y label keep clear of the divider to step 2
 position = ax_tail.get_position()
-ax_tail.set_position([position.x0 + 0.03, position.y0, position.width - 0.03, position.height])
+ax_tail.set_position([position.x0 + 0.045, position.y0, position.width - 0.045, position.height])
 ordered = np.sort(first_latency)[::200]
 ax_tail.plot(1e3 * ordered, 1 - np.arange(len(ordered)) / len(ordered), color="0.35", linewidth=1.8, label="true")
 ax_tail.plot(1e3 * latency_grid, tail_bound, color=C_BOUND, linewidth=2.2, linestyle="-.", label="Kingman")
@@ -264,7 +264,7 @@ ax_tail.set_xlim(0, 1e3 * latency_grid[-1])
 ax_tail.set_xlabel(r"latency $d$ at s1 (ms)")
 ax_tail.set_ylabel(r"$P(L_1 > d)$", labelpad=6)
 ax_tail.grid(True, linestyle=":", alpha=0.6)
-ax_tail.legend(loc="lower left", fontsize=10.5, framealpha=0.95, handlelength=1.4, handletextpad=0.4, borderaxespad=0.3)   # short handles: the panel is narrow
+ax_tail.legend(loc="lower left", fontsize=10.5, framealpha=0.95, handlelength=1.0, handletextpad=0.3, borderaxespad=0.2, borderpad=0.3)   # short handles: the panel is narrow
 ax_tail.set_title(r"Node: $d_1(\epsilon / K)$ of s1", fontsize=12)
 
 # both compositions as bars against the true end-to-end quantile
@@ -282,8 +282,8 @@ ax_compose.text(1e3 * snc_bound / 2, 0, r"$\Pi_i\, M_i / (1 - \phi_i)$", ha="cen
 ax_compose.axvline(1e3 * measured, color=C_MEASURED, linewidth=1.8, linestyle="--", label=f"true end-to-end p{100 * (1 - alpha):g}")
 ax_compose.set_yticks([])
 label_box = dict(facecolor="white", edgecolor="none", pad=1.0, alpha=0.85)
-ax_compose.text(0, 1.29, r" Node: sum of the $d_i(\epsilon / K)$", ha="left", va="bottom", bbox=label_box)
-ax_compose.text(0, 0.29, r" SNC: one bound, $\epsilon$ once", ha="left", va="bottom", bbox=label_box)
+ax_compose.text(0, 1.29, r" Node: $d_1 + d_2 + d_3$", ha="left", va="bottom", bbox=label_box)
+ax_compose.text(0, 0.29, r" SNC: $\epsilon$ paid once", ha="left", va="bottom", bbox=label_box)
 ax_compose.set_ylim(-1.15, 1.75)
 ax_compose.set_xlim(0, 1e3 * max(per_node_bound, snc_bound) * 1.12)
 ax_compose.set_xlabel(r"PPG $d_S(\mathbf{x}, \epsilon, \gamma)$ (ms)")
@@ -295,10 +295,10 @@ fig.add_artist(ConnectionPatch(xyA=(1e3 * node_bounds[0], alpha / K), coordsA=ax
                                connectionstyle="arc3,rad=-0.2"))
 
 # --- Frame: inputs, step titles, the dividers between the steps
-# x_i as in Section III-A of the paper: resources and knobs; the workers c_i are a separate input. "Never executed" is left
-# to step 3, so that the box fits the width of the figure
-inputs = fig.text(0.5, 0.925, r"Inputs:   composition $S$   configurations $\mathbf{x} = (x_1, \ldots, x_K)$, $x_i = \langle r_i, \kappa_i \rangle$"
-                     r"    workers $c_i$    arrival process ($\lambda$, $C_a^2$)    violation probability $\epsilon$    confidence $\gamma$",
+# x_i as in Section III-A of the paper: resources and knobs; the workers c_i are a separate input. Short labels ("never
+# executed" is left to step 3, the configuration of one service stands for the vector x), so that the box fits on one line
+inputs = fig.text(0.5, 0.925, r"Inputs:   composition $S$    configurations $x_i = \langle r_i, \kappa_i \rangle$"
+                     r"    workers $c_i$    arrivals ($\lambda$, $C_a^2$)    violation probability $\epsilon$    confidence $\gamma$",
          ha="center", va="center", fontsize=12, bbox=dict(boxstyle="round,pad=0.5", facecolor="0.95", edgecolor="black", linewidth=1.2))
 positions = [model_axes[0].get_position(), ax_queue.get_position(), ax_chain.get_position()]
 # one divider between every two steps: between the columns of the grid, so that both stay clear of the panels
