@@ -129,7 +129,7 @@ def exploration_figure(sizes: list, statistics: dict, errors: dict, title: str, 
     time. statistics: from sweep_statistics, with the strategies in place of the methods; errors: strategy -> (sizes,
     seeds); xlabel: what the sizes count. The title is printed above the figures; name: file name in figures/tsc, saved
     as <name>_tightness and <name>_error, or None."""
-    from .figures import paper_figure, tightness_label, tightness_tick
+    from .figures import math_label, paper_figure, tightness_label, tightness_tick
     print(title)
 
     def axis(ax):
@@ -148,7 +148,7 @@ def exploration_figure(sizes: list, statistics: dict, errors: dict, title: str, 
             sweep_line(ax, sizes, statistics[strategy]["tightness"], strategy, held=statistics[strategy]["holds"])
             segments += sweep_segments(sizes, statistics[strategy]["tightness"])
         axis(ax)
-        ax.text(0.99, 0.03, f"below the measured {level_label}: no bound", transform=ax.transAxes, ha="right", va="bottom", color=FAILURE_TEXT_COLOR)
+        ax.text(0.99, 0.03, f"below the measured {math_label(level_label)}: no bound", transform=ax.transAxes, ha="right", va="bottom", color=FAILURE_TEXT_COLOR)
         ax.set_yscale("log")
         ax.set_ylim(*TIGHTNESS_RANGE)
         ax.set_yticks(TIGHTNESS_TICKS, [tightness_tick(tick) for tick in TIGHTNESS_TICKS])

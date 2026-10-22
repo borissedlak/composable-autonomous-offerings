@@ -30,14 +30,14 @@ plt.rcParams.update({'font.size': 12})
 
 OUTPUT = Path(__file__).resolve().parents[2] / "figures" / "tsc"
 experiment = "04e-chain-qr-cv-face"
-alpha, confidence = 0.05, 0.95                         # violation probability epsilon (the bounded quantile is p95) and confidence, as in pegasus/evaluation_setup.py
+alpha, confidence = 0.05, 0.95                         # violation probability epsilon (the bounded quantile is $P_{95}$) and confidence, as in pegasus/evaluation_setup.py
 coverage_check = dict(n_batches=10, confidence=0.95)
 seed, n_calibration = 35, 20                           # base seed and calibration size, as in pegasus/evaluation_setup.py
 utilizations = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]   # panel (a): utilization of the busiest service of every run
 base_utilization = 0.5                                 # panel (b): the load of B.1
 seeds = list(range(5))                                 # panel (b): a seed determines the training runs and the randomness of the emulation
 point_predictors = ["GP Queue", "Quantile Union"]       # panel (b): one analytic and one learned predictor of the latency quantile
-p_label = f"p{100 * (1 - alpha):g}"
+p_label = f"$P_{{{100 * (1 - alpha):g}}}$"
 FIGSIZE = (6, 2.5)                                      # (width, height) in inches of each panel; lower than the evaluation figures (6 x 3.7) so that Fig. 1 takes less space
 
 

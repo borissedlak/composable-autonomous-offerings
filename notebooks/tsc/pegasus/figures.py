@@ -31,9 +31,15 @@ FIGSIZE = (6.0, 3.3)                                          # (width, height) 
 MARGIN_LEFT, MARGIN_RIGHT, MARGIN_BOTTOM, MARGIN_TOP, HALF_GAP = 0.88, 0.1, 0.55, 0.09, 0.2
 
 
+def math_label(level_label: str) -> str:
+    """A quantile name in the LaTeX math notation of the paper: "p95" becomes "$P_{95}$", "pX" becomes "$P_{X}$". A name
+    that is already in math notation stays as it is."""
+    return level_label if level_label.startswith("$") else f"$P_{{{level_label[1:]}}}$"
+
+
 def tightness_label(level_label: str) -> str:
     """Label of every tightness axis: the latency of a method divided by the measured quantile level_label (e.g. "p95")."""
-    return f"latency ÷ measured {level_label}"   # without "tightness: ", which does not fit the height of FIGSIZE
+    return f"latency ÷ measured {math_label(level_label)}"   # without "tightness: ", which does not fit the height of FIGSIZE
 
 
 def tightness_tick(value: float) -> str:

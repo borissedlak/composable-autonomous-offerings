@@ -109,7 +109,7 @@ def finetuning_figure(sizes: list, statistics: dict, level_label: str, output: P
     from matplotlib.ticker import FuncFormatter
     from .evaluation import sweep_line, sweep_segments
     from .figures import (FAILURE_COLOR, FAILURE_TEXT_COLOR, METHOD_STYLES, holds_handles, legend_inside, paper_figure, paper_style, save_figure,
-                          tightness_label, tightness_tick)
+                          math_label, tightness_label, tightness_tick)
     METHOD_STYLES.update({name: (style[0], style[1:]) for name, style in STYLES.items()})   # sweep_line draws a method by its name
     names = [name for name in STYLES if name in statistics]
     with paper_style():
@@ -123,7 +123,7 @@ def finetuning_figure(sizes: list, statistics: dict, level_label: str, output: P
         ax.set_ylim(1 - 0.1 * (top - 1), top + 0.1 * (top - 1))
         ax.axhspan(ax.get_ylim()[0], 1.0, color=FAILURE_COLOR, linewidth=0)
         ax.axhline(1.0, color="black", linewidth=1)
-        ax.text(0.99, 0.01, f"below the measured {level_label}: no bound", transform=ax.transAxes, ha="right", va="bottom", color=FAILURE_TEXT_COLOR)
+        ax.text(0.99, 0.01, f"below the measured {math_label(level_label)}: no bound", transform=ax.transAxes, ha="right", va="bottom", color=FAILURE_TEXT_COLOR)
         ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: tightness_tick(value)))
         ax.set_ylabel(tightness_label(level_label))
         ax.set_xticks(sizes)

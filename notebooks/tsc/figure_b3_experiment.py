@@ -34,7 +34,7 @@ utilization = 0.5                                    # arrival rate x mean proce
 slowest_processing = (0.010, 0.040)                  # s, range of the mean processing time of the slowest service of a run
 calibration_frames, calibration_rate = 200, 2.0      # frames, frames/s
 warmup_frames, measured_frames, n_batches = 500, 5000, 10
-quantile_label = "p95"                               # the ground truth is the 95th percentile of the end-to-end latency
+quantile_label = "$P_{95}$"                          # the ground truth is the 95th percentile of the end-to-end latency
 
 # Example times of panel (b), in ms since the arrival of frame k. The two children release their results at different
 # times, and the aggregator is still busy with frame k-1 when the second result arrives, so all three phases appear.
