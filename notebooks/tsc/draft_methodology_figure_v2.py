@@ -38,7 +38,7 @@ plt.rcParams.update({'font.size': 12})
 OUTPUT = Path(__file__).resolve().parents[2] / "figures" / "tsc"
 seed, service_seed = 35, 0
 services = ["s1", "s2", "s3"]             # synthetic service types; their training data is drawn in this order
-path = ["s2", "s1", "s3"]                 # order of the types in the target pipeline; the figure names them by position, s1 to s3
+path = ["s2", "s1", "s3"]                 # order of the types in the target application; the figure names them by position, s1 to s3
 alpha, confidence = 0.05, 0.95            # violation probability epsilon and confidence gamma of the guarantee
 cpu, parallelism = 1.0, 2.0               # the two knobs that are fixed (CPU cores r_i, parallelism); the parallelism is the number of workers c_i of every service
 workers = int(parallelism)
@@ -46,7 +46,7 @@ workers = int(parallelism)
 # queue of the first service is still visible, but the bounds of step 3 are not dominated by how loose the queueing bound
 # becomes near saturation
 workload = dict(process="poisson", rate=7.2)
-quality_target = 1.25                     # configuration of the target pipeline (quality), inside the gap of the training data
+quality_target = 1.25                     # configuration of the target application (quality), inside the gap of the training data
 n_train = 7                               # training configurations per service
 noisy_share, noisy_factor = 0.4, 2.0      # share of the training samples whose noise is noisy_factor times the service's noise level
 K = len(path)
@@ -92,7 +92,7 @@ log_gap = log_worker_gap_mgf(workload["process"], workload["rate"], np.array([wo
 log_load = [theta_grid * mean[0] + 0.5 * theta_grid ** 2 * var[0] + log_gap for mean, var in beliefs]          # ln phi_i(theta)
 
 # ------------------------------------------------------------------------------
-# Step 3: Pegasus Node (service bounds, added) and Pegasus SNC (one bound), and the simulated pipeline for reference
+# Step 3: Pegasus Node (service bounds, added) and Pegasus SNC (one bound), and the simulated application for reference
 # ------------------------------------------------------------------------------
 node_bounds = martingale_closed_form_node_bounds(beliefs, epsilon=alpha / K, path_workers=path_workers, **workload)[:, 0]   # d_i(epsilon / K), s
 per_node_bound = node_bounds.sum()
@@ -134,7 +134,7 @@ def from_top(inches):
 Y_INPUTS, Y_TITLES, Y_PANELS = 0.25, 0.66, 0.92   # centers of the inputs box and the step titles, top of the panels
 Y_BOTTOM = FIG_H - 0.55                           # bottom of the lowest panels; their x labels sit below
 Y_MODELS_BOTTOM = FIG_H - 1.2                     # bottom of the service models; their x label and legend sit below
-QUEUE_HEIGHT, CHAIN_HEIGHT = 1.62, 1.0            # the sketches of one service (step 2) and of the pipeline (step 3)
+QUEUE_HEIGHT, CHAIN_HEIGHT = 1.62, 1.0            # the sketches of one service (step 2) and of the application (step 3)
 grid = fig.add_gridspec(1, 3, left=0.055, right=0.985, top=from_top(Y_PANELS), bottom=from_top(Y_BOTTOM), wspace=0.24,
                         width_ratios=[0.93, 0.78, 1.47])
 columns = [grid[0, k].get_position(fig) for k in range(3)]
@@ -185,8 +185,9 @@ for row, s in enumerate(path):
 model_axes[-1].set_xlabel("quality knob of the service")
 model_axes[-1].set_xticks([0.5, 1.0, 1.5, 2.0])
 handles, labels = model_axes[0].get_legend_handles_labels()
-# two columns, filled column by column: data, model and target on the left, the two uncertainties on the right
-order = (3, 2, 4, 1, 0)
+# two columns, filled column by column: the two uncertainties and the target on the left, data and model on the right
+# (the right column has the shorter labels, so the legend ends further left)
+order = (1, 0, 4, 3, 2)
 handles, labels = [handles[i] for i in order], [labels[i] for i in order]
 
 # the dataset D_i of every service, a database cylinder with an arrow into its model (figure coordinates)
@@ -253,11 +254,11 @@ load_ticks = np.array([0.25, 0.5, 1, 2, 4])
 load_ticks = load_ticks[(np.log(load_ticks) >= ax_load.get_ylim()[0]) & (np.log(load_ticks) <= ax_load.get_ylim()[1])]
 ax_load.set_yticks(np.log(load_ticks), [f"{tick:g}" for tick in load_ticks])
 ax_load.set_xlabel(r"rate $\theta$ (1/s)")
-ax_load.set_ylabel(r"load $\phi_i(\theta)$", labelpad=4)   # the tick values show the log scale
+ax_load.set_ylabel(r"service load $\phi_i(\theta)$", labelpad=4)   # the tick values show the log scale
 ax_load.grid(True, linestyle=":", alpha=0.6)
 ax_load.legend(loc="upper left", fontsize=10.5, framealpha=0.95, borderaxespad=0.3)
 
-# --- Step 3: the target pipeline and the two compositions ---------------------------
+# --- Step 3: the target application and the two compositions ---------------------------
 ax_chain = fig.add_subplot(grid[0, 2])
 ax_chain.set_axis_off()
 place(ax_chain, Y_PANELS, Y_PANELS + CHAIN_HEIGHT)
@@ -269,9 +270,9 @@ for j, s in enumerate(path):
     box(ax_chain, 0.10 + 0.30 * j, 0.36, 0.17, 0.34, f"s{j + 1}", facecolor=C_ALEATORIC, alpha=0.6)
     if j:
         arrow(ax_chain, (0.10 + 0.30 * (j - 1) + 0.18, 0.53), (0.10 + 0.30 * j - 0.01, 0.53))
-ax_chain.text(0.5, 0.06, "target pipeline: never executed", ha="center", va="center", style="italic")
+ax_chain.text(0.5, 0.06, "target application: never executed", ha="center", va="center", style="italic")
 
-# below the pipeline, with room for the title of the Node panel
+# below the application, with room for the title of the Node panel
 compose_grid = fig.add_gridspec(1, 2, left=columns[2].x0, right=columns[2].x1, top=from_top(Y_PANELS + CHAIN_HEIGHT + 0.4),
                                 bottom=from_top(Y_BOTTOM), width_ratios=[1.1, 1.15], wspace=0.12)
 # Pegasus Node, per service: Kingman's bound on the tail of the latency of s1 gives its service bound d_1(epsilon / K)
@@ -309,7 +310,8 @@ ax_compose.text(0, 1.29, r" Node: sum of the $d_i$", ha="left", va="bottom", bbo
 ax_compose.text(0, 0.29, " SNC: one bound", ha="left", va="bottom", bbox=label_box)
 ax_compose.set_ylim(-1.15, 1.75)
 ax_compose.set_xlim(0, 1e3 * max(per_node_bound, snc_bound) * 1.12)
-ax_compose.set_xlabel("PPG of the pipeline (ms)")
+ax_compose.set_xlabel("end-to-end latency (ms)")
+ax_compose.set_title("Node vs. SNC: PPG", fontsize=12)   # a header like the one of the Node panel
 ax_compose.grid(True, axis="x", linestyle=":", alpha=0.6)
 ax_compose.legend(loc="lower right", fontsize=10.5, framealpha=0.95)
 # the service bound of s1 is the first part of the sum of Pegasus Node
@@ -335,7 +337,7 @@ for center, title in zip(centers, titles):
     fig.text(center, from_top(Y_TITLES), title, ha="center", va="center", fontsize=13, fontweight="bold")
 # below the x label of the service models, in two columns so that it takes three rows; the check below the figure
 # reports if it reaches past the divider to step 2
-STEP1_LEGEND_FONT = 10
+STEP1_LEGEND_FONT = 10.5
 step1_legend = fig.legend(handles, labels, loc="upper left", bbox_to_anchor=(0.005, from_top(Y_MODELS_BOTTOM + 0.6)), ncol=2,
                           fontsize=STEP1_LEGEND_FONT, frameon=False, handlelength=1.5, handletextpad=0.4, columnspacing=0.9,
                           labelspacing=0.3, borderaxespad=0.0)
