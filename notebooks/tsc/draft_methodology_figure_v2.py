@@ -119,13 +119,13 @@ print(f"decay rates theta_i^* (1/s): {np.round(theta_star, 1)}; service bounds a
 # ------------------------------------------------------------------------------
 # Figure
 # ------------------------------------------------------------------------------
-fig = plt.figure(figsize=(14, 7.2))   # narrower than the first version (15 in), so that the text is larger at the width of the page
+fig = plt.figure(figsize=(13, 7.2))   # narrower than the first version (15 in), so that the text is larger at the width of the page
 grid = fig.add_gridspec(4, 3, left=0.055, right=0.985, top=0.80, bottom=0.17, wspace=0.24, hspace=0.42, width_ratios=[1.0, 0.85, 1.3],
                         height_ratios=[1, 1, 1, 0.001])
 # the three service models are shorter than the other panels, so that their legend fits below them in the same column
 model_column = grid[0:3, 0].get_position(fig)
 # and start further right, so that the dataset D_i of every service can be drawn to their left
-model_grid = fig.add_gridspec(3, 1, left=model_column.x0 + 0.05, right=model_column.x1 - 0.025, top=0.80, bottom=0.33, hspace=0.3)
+model_grid = fig.add_gridspec(3, 1, left=model_column.x0 + 0.058, right=model_column.x1 - 0.025, top=0.80, bottom=0.33, hspace=0.3)
 
 
 def box(ax, x, y, w, h, text, **style):
@@ -157,8 +157,8 @@ for row, s in enumerate(path):
     ax.fill_between(quality_grid, 1e3 * (mu - band_epistemic), 1e3 * (mu + band_epistemic), color="#a6c8e6", linewidth=0,
                     label=r"epistemic $\pm z_\gamma \sigma_{ep,i}$")
     ax.plot(quality_grid, 1e3 * mu, color=C_MEAN, linewidth=1.8, label=r"predicted mean $m_i$")
-    ax.plot(quality_train, 1e3 * y_train[s], "o", color=C_ALEATORIC, markeredgecolor="black", markersize=6, label=r"observed $Y_i$ (dataset $\mathcal{D}_i$)")
-    ax.axvline(quality_target, color="black", linewidth=1, linestyle=":", label=r"target configuration $x_i$")
+    ax.plot(quality_train, 1e3 * y_train[s], "o", color=C_ALEATORIC, markeredgecolor="black", markersize=6, label=r"observed $Y_i$ ($\mathcal{D}_i$)")
+    ax.axvline(quality_target, color="black", linewidth=1, linestyle=":", label=r"target $x_i$")
     ax.text(0.02, 0.93, rf"$Y_{row + 1}$ (ms)", transform=ax.transAxes, ha="left", va="top")
     ax.grid(True, linestyle=":", alpha=0.6)
     ax.margins(x=0)
@@ -181,7 +181,7 @@ for row, ax in enumerate(model_axes):
         fig.add_artist(plt.Line2D([x, x], [bottom, top], color="black", linewidth=1.3))
     fig.add_artist(Ellipse((cylinder_x + cylinder_w / 2, top), cylinder_w, cap_h, **style))
     fig.text(cylinder_x + cylinder_w / 2, y_center - cap_h / 4, rf"$\mathcal{{D}}_{row + 1}$", ha="center", va="center", fontsize=13)
-    fig.add_artist(FancyArrowPatch((cylinder_x + cylinder_w + 0.004, y_center), (position.x0 - 0.03, y_center), arrowstyle="-|>",
+    fig.add_artist(FancyArrowPatch((cylinder_x + cylinder_w + 0.004, y_center), (position.x0 - 0.04, y_center), arrowstyle="-|>",
                                    mutation_scale=14, linewidth=1.4, color="black", transform=fig.transFigure))
 
 # --- Step 2: one service as a queue, and the load of every service ------------------
@@ -254,7 +254,7 @@ ax_tail = fig.add_subplot(compose_grid[0, 0])
 position = ax_tail.get_position()
 ax_tail.set_position([position.x0 + 0.03, position.y0, position.width - 0.03, position.height])
 ordered = np.sort(first_latency)[::200]
-ax_tail.plot(1e3 * ordered, 1 - np.arange(len(ordered)) / len(ordered), color="0.35", linewidth=1.8, label="true latency")
+ax_tail.plot(1e3 * ordered, 1 - np.arange(len(ordered)) / len(ordered), color="0.35", linewidth=1.8, label="true")
 ax_tail.plot(1e3 * latency_grid, tail_bound, color=C_BOUND, linewidth=2.2, linestyle="-.", label="Kingman")
 ax_tail.axhline(alpha / K, color="black", linewidth=1, label=r"$\epsilon / K$")
 ax_tail.plot([1e3 * node_bounds[0]], [alpha / K], "o", color=C_BOUND, markeredgecolor="black", markersize=9, zorder=3)
