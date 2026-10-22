@@ -332,7 +332,7 @@ for divider in dividers:
                               linestyle=(0, (6, 4))))
 # every step title is centered in its section, the space between the figure edge and the dividers
 centers = [(0.0 + dividers[0]) / 2, (dividers[0] + dividers[1]) / 2, (dividers[1] + 1.0) / 2]
-titles = ["① Learn service performance", "② Execution time and load", "③ Composition into the PPG"]
+titles = ["① Learn service performance", "② Model service load", "③ Composition into the PPG"]
 for center, title in zip(centers, titles):
     fig.text(center, from_top(Y_TITLES), title, ha="center", va="center", fontsize=13, fontweight="bold")
 # below the x label of the service models, in two columns so that it takes three rows; the check below the figure
