@@ -23,7 +23,7 @@ from sklearn.exceptions import ConvergenceWarning
 
 from pegasus.data import load_chain_data
 from pegasus.evaluation import METHOD_COLORS, compare_methods, fit_services
-from pegasus.real_data import chain_run_execution_times
+from pegasus.figures import METHOD_STYLES
 
 plt.style.use('default')
 plt.rcParams.update({'font.size': 12})
@@ -33,7 +33,7 @@ experiment = "04e-chain-qr-cv-face"
 alpha, confidence = 0.05, 0.95                         # violation probability epsilon (the bounded quantile is $P_{95}$) and confidence, as in pegasus/evaluation_setup.py
 coverage_check = dict(n_batches=10, confidence=0.95)
 seed, n_calibration = 35, 20                           # base seed and calibration size, as in pegasus/evaluation_setup.py
-utilizations = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]   # panel (a): utilization of the busiest service of every run
+utilizations = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]   # panel (a): utilization of the busiest service of every run
 base_utilization = 0.5                                 # panel (b): the load of B.1
 seeds = list(range(5))                                 # panel (b): a seed determines the training runs and the randomness of the emulation
 point_predictors = ["GP Queue", "Quantile Union"]       # panel (b): one analytic and one learned predictor of the latency quantile
@@ -51,15 +51,13 @@ def load(s, utilization):
     return data, methods
 
 
-# Panel (a): the true end-to-end quantile and the sum of the predicted execution times against the load, first seed.
-# Every run is divided by the sum of its true mean execution times, so that runs whose latencies differ by orders of
-# magnitude can be shown together: 1 means "as long as the mean execution of all services".
-total_execution = np.array([times.mean(axis=0).sum() for times in chain_run_execution_times(experiment)])   # s, per run of the chain
+# Panel (a): the true end-to-end quantile and the sum of the predicted execution times against the load, first seed,
+# in ms per held-out run of the chain
 measured_by_load, summed_by_load = [], []
 for utilization in utilizations:
     data, methods = load(seeds[0], utilization)
-    measured_by_load.append(data.measured / total_execution)
-    summed_by_load.append(methods["GP Sum"][1] / total_execution)
+    measured_by_load.append(1e3 * data.measured)
+    summed_by_load.append(1e3 * methods["GP Sum"][1])
 measured_by_load, summed_by_load = np.array(measured_by_load), np.array(summed_by_load)   # (loads, runs)
 
 # Panel (b): predicted against true quantile for every held-out run and seed at the load of B.1
@@ -84,18 +82,20 @@ def save(fig, name):
 # --- (a) -----------------------------------------------------------------------
 fig_load, ax_load = plt.subplots(figsize=FIGSIZE)
 quartiles = lambda values: np.nanquantile(values, [0.25, 0.5, 0.75], axis=1)
-for values, color, style, label in ((measured_by_load, "tab:purple", "o-", f"true end-to-end {p_label}"),
-                                    (summed_by_load, METHOD_COLORS["GP Sum"], "s--", f"sum of the per-service execution times ({p_label})")):
+gp_sum_style = "".join(METHOD_STYLES["GP Sum"])   # marker and line style of GP Sum in the evaluation figures
+for values, color, style, label in ((measured_by_load, "tab:purple", "o-", f"true end-to-end latency ({p_label})"),
+                                    (summed_by_load, METHOD_COLORS["GP Sum"], gp_sum_style, f"sum of the per-service execution times ({p_label})")):
     low, middle, high = quartiles(values)
     ax_load.plot(utilizations, middle, style, color=color, linewidth=1.8, markersize=6, label=label)
     ax_load.fill_between(utilizations, low, high, color=color, alpha=0.2, linewidth=0)
 gap_low, gap_high = (np.median(measured_by_load[i]) / np.median(summed_by_load[i]) for i in (0, -1))
-ax_load.annotate("", xy=(utilizations[-2], np.median(measured_by_load[-2])), xytext=(utilizations[-2], np.median(summed_by_load[-2])),
-                 arrowprops=dict(arrowstyle="<->", color="black", linewidth=1.2))
-ax_load.text(utilizations[-2] + 0.012, (np.median(measured_by_load[-2]) + np.median(summed_by_load[-2])) / 2, "queueing", ha="left", va="center")
+# the gap at the highest load, where it is largest; the label sits left of the arrow, inside the axes, and in the lower
+# part of the gap, below the steep end of the curve
+gap_bottom, gap_top = np.median(summed_by_load[-1]), np.median(measured_by_load[-1])
+ax_load.annotate("", xy=(utilizations[-1], gap_top), xytext=(utilizations[-1], gap_bottom), arrowprops=dict(arrowstyle="<->", color="black", linewidth=1.2))
+ax_load.text(utilizations[-1] - 0.015, gap_bottom + 0.3 * (gap_top - gap_bottom), "queueing", ha="right", va="center")
 ax_load.set_xlabel("load: utilization of the busiest service")
-ax_load.set_ylabel("normalized latency")   # divided by the total mean execution time of the run, as defined in the caption
-ax_load.yaxis.set_major_locator(plt.MultipleLocator(1))   # the default locator leaves only two ticks at this height
+ax_load.set_ylabel("latency (ms)")
 ax_load.grid(True, linestyle=":", alpha=0.6)
 ax_load.legend(loc="upper left", fontsize=11)
 save(fig_load, "problem_queueing_draft")
@@ -108,7 +108,8 @@ high = 1e3 * 1.4 * max(truth.max(), *(predicted[name][finite[name]].max() for na
 ax_scatter.fill_between([low, high], [low, high], [high, high], color="0.9", linewidth=0)   # above the diagonal: overestimated
 ax_scatter.fill_between([low, high], [low, low], [low, high], color="mistyrose", linewidth=0)   # below: underestimated
 ax_scatter.plot([low, high], [low, high], color="black", linewidth=1)   # no legend entry: the two zones it separates are labeled
-for name, marker in zip(point_predictors, ("o", "^")):
+for name in point_predictors:
+    marker = METHOD_STYLES[name][0]   # the marker of the method in the evaluation figures
     below = np.mean(predicted[name][finite[name]] < truth[finite[name]])
     ax_scatter.plot(1e3 * truth[finite[name]], 1e3 * predicted[name][finite[name]], marker, color=METHOD_COLORS[name], markersize=5, alpha=0.6,
                     linestyle="none", label=f"{name}: {below:.0%} too low")
