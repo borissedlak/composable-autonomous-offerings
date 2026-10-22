@@ -134,7 +134,7 @@ def from_top(inches):
 Y_INPUTS, Y_TITLES, Y_PANELS = 0.25, 0.66, 0.92   # centers of the inputs box and the step titles, top of the panels
 Y_BOTTOM = FIG_H - 0.55                           # bottom of the lowest panels; their x labels sit below
 Y_MODELS_BOTTOM = FIG_H - 1.2                     # bottom of the service models; their x label and legend sit below
-QUEUE_HEIGHT, CHAIN_HEIGHT = 1.8, 1.0             # the sketches of one service (step 2) and of the pipeline (step 3)
+QUEUE_HEIGHT, CHAIN_HEIGHT = 1.62, 1.0            # the sketches of one service (step 2) and of the pipeline (step 3)
 grid = fig.add_gridspec(1, 3, left=0.055, right=0.985, top=from_top(Y_PANELS), bottom=from_top(Y_BOTTOM), wspace=0.24,
                         width_ratios=[0.93, 0.78, 1.47])
 columns = [grid[0, k].get_position(fig) for k in range(3)]
@@ -229,8 +229,8 @@ ax_queue.text(0.5, -0.50, "pessimistic execution time:\nmean + epistemic margin"
 
 ax_load = fig.add_subplot(grid[0, 1])
 # narrower than its column and shifted right, so that the y label keeps clear of the divider to step 1
-place(ax_load, Y_PANELS + QUEUE_HEIGHT + 0.2, Y_BOTTOM, left=columns[1].x0 + 0.045, right=columns[1].x1 - 0.003)
-ax_load.axhline(0.0, color="black", linewidth=1, label="stability limit")
+place(ax_load, Y_PANELS + QUEUE_HEIGHT + 0.12, Y_BOTTOM, left=columns[1].x0 + 0.04, right=columns[1].x1)
+ax_load.axhline(0.0, color="black", linewidth=1)
 for j, (curve, (gray, linestyle)) in enumerate(zip(log_load, SERVICE_STYLES)):
     ax_load.plot(theta_grid, curve, color=gray, linestyle=linestyle, linewidth=2.2)
     # every curve named at its right end instead of in the legend, which would otherwise hide the dip or theta_i^*
@@ -243,11 +243,16 @@ ax_load.set_xlim(0, theta_grid[-1])
 # at load 1 and dip below it)
 lowest, highest = min(curve.min() for curve in log_load), max(curve.max() for curve in log_load)
 ax_load.set_ylim(lowest - 0.08 * (highest - lowest), highest + 0.15 * (highest - lowest))
+# the stable region, load below 1: a rate theta is usable where the curve of a service stays in it, so theta_i^* is where
+# the curve leaves it again
+ax_load.axhspan(ax_load.get_ylim()[0], 0.0, color=C_BOUND, alpha=0.12, linewidth=0)
+# named inside the shading, at its lower right, which the curves have left again; a legend entry would hide the curve names
+ax_load.text(0.97, 0.04, "stable\n(load < 1)", transform=ax_load.transAxes, ha="right", va="bottom", color="darkgreen", linespacing=1.1)
 # the curves are ln phi_i; the ticks show phi_i itself, so that the axis reads as a load on a log scale
 load_ticks = np.array([0.25, 0.5, 1, 2, 4])
 load_ticks = load_ticks[(np.log(load_ticks) >= ax_load.get_ylim()[0]) & (np.log(load_ticks) <= ax_load.get_ylim()[1])]
 ax_load.set_yticks(np.log(load_ticks), [f"{tick:g}" for tick in load_ticks])
-ax_load.set_xlabel(r"$\theta$ (1/s)")
+ax_load.set_xlabel(r"rate $\theta$ (1/s)")
 ax_load.set_ylabel(r"load $\phi_i(\theta)$", labelpad=4)   # the tick values show the log scale
 ax_load.grid(True, linestyle=":", alpha=0.6)
 ax_load.legend(loc="upper left", fontsize=10.5, framealpha=0.95, borderaxespad=0.3)
@@ -268,7 +273,7 @@ ax_chain.text(0.5, 0.06, "target pipeline: never executed", ha="center", va="cen
 
 # below the pipeline, with room for the title of the Node panel
 compose_grid = fig.add_gridspec(1, 2, left=columns[2].x0, right=columns[2].x1, top=from_top(Y_PANELS + CHAIN_HEIGHT + 0.4),
-                                bottom=from_top(Y_BOTTOM), width_ratios=[1.1, 1.15], wspace=0.22)
+                                bottom=from_top(Y_BOTTOM), width_ratios=[1.1, 1.15], wspace=0.12)
 # Pegasus Node, per service: Kingman's bound on the tail of the latency of s1 gives its service bound d_1(epsilon / K)
 ax_tail = fig.add_subplot(compose_grid[0, 0])
 # shifted right, so that its tick labels and y label keep clear of the divider to step 2
@@ -331,7 +336,7 @@ for center, title in zip(centers, titles):
 # below the x label of the service models, in two columns so that it takes three rows; the check below the figure
 # reports if it reaches past the divider to step 2
 STEP1_LEGEND_FONT = 10
-step1_legend = fig.legend(handles, labels, loc="upper left", bbox_to_anchor=(0.005, from_top(Y_MODELS_BOTTOM + 0.48)), ncol=2,
+step1_legend = fig.legend(handles, labels, loc="upper left", bbox_to_anchor=(0.005, from_top(Y_MODELS_BOTTOM + 0.6)), ncol=2,
                           fontsize=STEP1_LEGEND_FONT, frameon=False, handlelength=1.5, handletextpad=0.4, columnspacing=0.9,
                           labelspacing=0.3, borderaxespad=0.0)
 
