@@ -1,4 +1,4 @@
-"""Alternative draft of the methodology overview (Fig. 2 of the Pegasus paper, Section IV), restructured to match the
+"""The methodology overview (Fig. 2 of the Pegasus paper, Section IV), structured like the
 three subsections: (1) learn one GP per service, (2) turn it into a pessimistic execution-time model and the load
 phi_i(theta) of every service, (3) compose: Pegasus Node bounds every service by Kingman's bound and adds the service
 bounds d_i(epsilon / K); Pegasus SNC bounds the whole application in one step from the product of M_i / (1 - phi_i).
@@ -8,8 +8,8 @@ phi_i(theta) = M_i(theta) E[exp(-theta T)]^c_i, decay rate theta_i^*, service bo
 Claim of the figure: only step 1 needs measurements, and only of the individual services; steps 2 and 3 are analytic,
 and both versions of Pegasus build on the same execution-time models and loads of step 2.
 
-Run from `notebooks/tsc/` with the venv:  ../../venv/Scripts/python draft_methodology_figure_v2.py
-Writes figures/tsc/methodology_overview_v2_draft.pdf and .jpg (the first version, draft_methodology_figure.py, is kept).
+Run from `notebooks/tsc/` with the venv:  ../../venv/Scripts/python methodology_figure.py
+Writes figures/tsc/methodology_overview.pdf and .jpg (an earlier draft, draft_methodology_figure.py, is kept).
 
 Source of the data: the synthetic service types s1, s2, s3 of pegasus/data.py (service_seed below), with one knob (the
 quality, a software knob kappa_i) varied and the other two fixed, so that a model can be drawn as a curve. Everything
@@ -355,6 +355,6 @@ frame = inputs.get_bbox_patch().get_window_extent(renderer).transformed(to_inche
 frame = Bbox.from_extents(frame.x0 - 0.01, frame.y0 - 0.01, frame.x1 + 0.01, frame.y1 + 0.01)
 crop = Bbox.union([fig.get_tightbbox(renderer), frame])
 OUTPUT.mkdir(parents=True, exist_ok=True)
-fig.savefig(OUTPUT / "methodology_overview_v2_draft.pdf", bbox_inches=crop, pad_inches=0)
-fig.savefig(OUTPUT / "methodology_overview_v2_draft.jpg", dpi=300, bbox_inches=crop, pad_inches=0, facecolor="white")
-print(f"written to {OUTPUT / 'methodology_overview_v2_draft.pdf'} and .jpg")
+fig.savefig(OUTPUT / "methodology_overview.pdf", bbox_inches=crop, pad_inches=0)
+fig.savefig(OUTPUT / "methodology_overview.jpg", dpi=300, bbox_inches=crop, pad_inches=0, facecolor="white")
+print(f"written to {OUTPUT / 'methodology_overview.pdf'} and .jpg")

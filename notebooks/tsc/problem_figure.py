@@ -83,11 +83,12 @@ def save(fig, name):
 fig_load, ax_load = plt.subplots(figsize=FIGSIZE)
 quartiles = lambda values: np.nanquantile(values, [0.25, 0.5, 0.75], axis=1)
 gp_sum_style = "".join(METHOD_STYLES["GP Sum"])   # marker and line style of GP Sum in the evaluation figures
-for values, color, style, label in ((measured_by_load, "tab:purple", "o-", f"true end-to-end latency ({p_label})"),
-                                    (summed_by_load, METHOD_COLORS["GP Sum"], gp_sum_style, f"sum of the per-service execution times ({p_label})")):
+# the band of the black truth is fainter, so that it does not look like the gray band of the sum
+for values, color, style, band_alpha, label in ((measured_by_load, "black", "o-", 0.1, f"true end-to-end latency ({p_label})"),
+                                                (summed_by_load, METHOD_COLORS["GP Sum"], gp_sum_style, 0.2, f"sum of the per-service execution times ({p_label})")):
     low, middle, high = quartiles(values)
     ax_load.plot(utilizations, middle, style, color=color, linewidth=1.8, markersize=6, label=label)
-    ax_load.fill_between(utilizations, low, high, color=color, alpha=0.2, linewidth=0)
+    ax_load.fill_between(utilizations, low, high, color=color, alpha=band_alpha, linewidth=0)
 gap_low, gap_high = (np.median(measured_by_load[i]) / np.median(summed_by_load[i]) for i in (0, -1))
 # the gap at the highest load, where it is largest; the label sits left of the arrow, inside the axes, and in the lower
 # part of the gap, below the steep end of the curve
