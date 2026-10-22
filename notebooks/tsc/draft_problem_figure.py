@@ -38,7 +38,7 @@ base_utilization = 0.5                                 # panel (b): the load of 
 seeds = list(range(5))                                 # panel (b): a seed determines the training runs and the randomness of the emulation
 point_predictors = ["GP Queue", "Quantile Union"]       # panel (b): one analytic and one learned predictor of the latency quantile
 p_label = f"p{100 * (1 - alpha):g}"
-FIGSIZE = (6, 3)                                       # (width, height) in inches of each panel; lower than the evaluation figures (6 x 3.7) so that Fig. 1 takes less space
+FIGSIZE = (6, 2.5)                                      # (width, height) in inches of each panel; lower than the evaluation figures (6 x 3.7) so that Fig. 1 takes less space
 
 
 def load(s, utilization):
@@ -95,6 +95,7 @@ ax_load.annotate("", xy=(utilizations[-2], np.median(measured_by_load[-2])), xyt
 ax_load.text(utilizations[-2] + 0.012, (np.median(measured_by_load[-2]) + np.median(summed_by_load[-2])) / 2, "queueing", ha="left", va="center")
 ax_load.set_xlabel("load: utilization of the busiest service")
 ax_load.set_ylabel("normalized latency")   # divided by the total mean execution time of the run, as defined in the caption
+ax_load.yaxis.set_major_locator(plt.MultipleLocator(1))   # the default locator leaves only two ticks at this height
 ax_load.grid(True, linestyle=":", alpha=0.6)
 ax_load.legend(loc="upper left", fontsize=11)
 save(fig_load, "problem_queueing_draft")
@@ -117,14 +118,14 @@ ax_scatter.set_xscale("log")
 ax_scatter.set_yscale("log")
 ax_scatter.set_xlim(low, high)
 ax_scatter.set_ylim(low, high)
-ax_scatter.set_xlabel(f"true end-to-end {p_label} (ms, log)")
-ax_scatter.set_ylabel(f"predicted {p_label} (ms, log)")
+ax_scatter.set_xlabel(f"true end-to-end {p_label} (ms)")   # log scale, visible from the ticks
+ax_scatter.set_ylabel(f"predicted {p_label} (ms)")
 ax_scatter.grid(True, linestyle=":", alpha=0.6)
 ticks = [t for t in (20, 50, 100, 200, 500, 1000) if low <= t <= high]
 ax_scatter.set_xticks(ticks, [str(t) for t in ticks])
 ax_scatter.set_yticks(ticks, [str(t) for t in ticks])
 ax_scatter.minorticks_off()
-ax_scatter.legend(loc="lower right", bbox_to_anchor=(1, 0.1), fontsize=11, framealpha=0.8)
+ax_scatter.legend(loc="upper left", bbox_to_anchor=(0, 0.88), fontsize=10, handlelength=1, borderpad=0.3, framealpha=0.8)   # in the empty corner below the zone label
 save(fig_scatter, "problem_prediction_draft")
 
 print(f"(a) true {p_label} / sum of execution times, median over {measured_by_load.shape[1]} runs: {gap_low:.2f} at utilization {utilizations[0]:g}, "
