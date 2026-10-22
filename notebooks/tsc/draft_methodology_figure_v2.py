@@ -119,13 +119,36 @@ print(f"decay rates theta_i^* (1/s): {np.round(theta_star, 1)}; service bounds a
 # ------------------------------------------------------------------------------
 # Figure
 # ------------------------------------------------------------------------------
-fig = plt.figure(figsize=(12, 7.2))   # narrower than the first version (15 in), so that the text is larger at the width of the page
-grid = fig.add_gridspec(4, 3, left=0.055, right=0.985, top=0.80, bottom=0.17, wspace=0.24, hspace=0.42, width_ratios=[0.88, 0.8, 1.5],
-                        height_ratios=[1, 1, 1, 0.001])
-# the three service models are shorter than the other panels, so that their legend fits below them in the same column
-model_column = grid[0:3, 0].get_position(fig)
-# and start further right, so that the dataset D_i of every service can be drawn to their left
-model_grid = fig.add_gridspec(3, 1, left=model_column.x0 + 0.052, right=model_column.x1 - 0.02, top=0.80, bottom=0.33, hspace=0.3)
+# narrower than the first version (15 in), so that the text is larger at the width of the page; the exported file is
+# cropped to the content, about 0.1 in less high than FIG_H
+FIG_W, FIG_H = 12, 5.1   # in
+fig = plt.figure(figsize=(FIG_W, FIG_H))
+
+
+def from_top(inches):
+    """Figure coordinate of a height given in inches from the top edge: the text keeps its size when FIG_H changes, so
+    the vertical layout is set in inches."""
+    return 1 - inches / FIG_H
+
+
+Y_INPUTS, Y_TITLES, Y_PANELS = 0.25, 0.66, 0.92   # centers of the inputs box and the step titles, top of the panels
+Y_BOTTOM = FIG_H - 0.55                           # bottom of the lowest panels; their x labels sit below
+Y_MODELS_BOTTOM = FIG_H - 1.55                    # bottom of the service models; their x label and legend sit below
+QUEUE_HEIGHT, CHAIN_HEIGHT = 1.8, 1.0             # the sketches of one service (step 2) and of the pipeline (step 3)
+grid = fig.add_gridspec(1, 3, left=0.055, right=0.985, top=from_top(Y_PANELS), bottom=from_top(Y_BOTTOM), wspace=0.24,
+                        width_ratios=[0.88, 0.8, 1.5])
+columns = [grid[0, k].get_position(fig) for k in range(3)]
+model_column = columns[0]
+# the service models start further right, so that the dataset D_i of every service can be drawn to their left
+model_grid = fig.add_gridspec(3, 1, left=model_column.x0 + 0.052, right=model_column.x1 - 0.02, top=from_top(Y_PANELS),
+                              bottom=from_top(Y_MODELS_BOTTOM), hspace=0.3)
+
+
+def place(ax, top, bottom, left=None, right=None):
+    """Puts ax between `top` and `bottom` (in inches from the top edge), and optionally `left` and `right` (figure coordinates)."""
+    position = ax.get_position()
+    left, right = position.x0 if left is None else left, position.x1 if right is None else right
+    ax.set_position([left, from_top(bottom), right - left, from_top(top) - from_top(bottom)])
 
 
 def box(ax, x, y, w, h, text, **style):
@@ -135,12 +158,6 @@ def box(ax, x, y, w, h, text, **style):
 
 def arrow(ax, start, end, **style):
     ax.add_patch(FancyArrowPatch(start, end, arrowstyle="-|>", mutation_scale=16, linewidth=1.5, color="black", **style))
-
-
-def narrow(ax, by=0.045):
-    """Takes `by` (figure width) off ax, half on each side, so that it stays centered under its step."""
-    position = ax.get_position()
-    ax.set_position([position.x0 + by / 2, position.y0, position.width - by, position.height])
 
 
 # --- Step 1: the three service models ----------------------------------------------
@@ -171,7 +188,7 @@ handles, labels = model_axes[0].get_legend_handles_labels()
 handles, labels = [handles[i] for i in (3, 2, 1, 0, 4)], [labels[i] for i in (3, 2, 1, 0, 4)]   # data, model, then the target
 
 # the dataset D_i of every service, a database cylinder with an arrow into its model (figure coordinates)
-cylinder_x, cylinder_w, cylinder_h, cap_h = 0.008, 0.034, 0.075, 0.02
+cylinder_x, cylinder_w, cylinder_h, cap_h = 0.008, 0.034, 0.48 / FIG_H, 0.14 / FIG_H   # heights in inches, as fractions of the figure
 for row, ax in enumerate(model_axes):
     position = ax.get_position()
     y_center = (position.y0 + position.y1) / 2
@@ -189,11 +206,7 @@ for row, ax in enumerate(model_axes):
 # --- Step 2: one service as a queue, and the load of every service ------------------
 ax_queue = fig.add_subplot(grid[0, 1])
 ax_queue.set_axis_off()
-# taller than one row of the grid (the load panel below gives up the same height), so that the two workers and the
-# two lines on the execution time fit below the queue
-QUEUE_EXTRA = 0.08   # figure height
-position = ax_queue.get_position()
-ax_queue.set_position([position.x0, position.y0 - QUEUE_EXTRA, position.width, position.height + QUEUE_EXTRA])
+place(ax_queue, Y_PANELS, Y_PANELS + QUEUE_HEIGHT)
 ax_queue.set_xlim(0, 1)
 ax_queue.set_ylim(-0.75, 1.0)
 ax_queue.text(0.12, 0.84, "arrivals\n" + r"($\lambda$, $C_a^2$)", ha="center", va="center")
@@ -212,11 +225,9 @@ ax_queue.text(0.625, -0.12, rf"$c_i = {workers}$ workers", ha="center", va="cent
 # the pessimistic execution-time model (Eq. belief of the paper) in words; the formula is in the text
 ax_queue.text(0.5, -0.50, "pessimistic execution time:\nmean + epistemic margin", ha="center", va="center")
 
-ax_load = fig.add_subplot(grid[1:3, 1])
-narrow(ax_load, by=0.03)
-position = ax_load.get_position()
-# shifted right, so that the y label keeps clear of the divider to step 1
-ax_load.set_position([position.x0 + 0.03, position.y0, position.width - 0.012, position.height - QUEUE_EXTRA])
+ax_load = fig.add_subplot(grid[0, 1])
+# narrower than its column and shifted right, so that the y label keeps clear of the divider to step 1
+place(ax_load, Y_PANELS + QUEUE_HEIGHT + 0.2, Y_BOTTOM, left=columns[1].x0 + 0.045, right=columns[1].x1 - 0.003)
 ax_load.axhline(0.0, color="black", linewidth=1, label="stability limit")
 for j, (curve, (gray, linestyle)) in enumerate(zip(log_load, SERVICE_STYLES)):
     ax_load.plot(theta_grid, curve, color=gray, linestyle=linestyle, linewidth=2.2)
@@ -226,22 +237,23 @@ for j, (curve, (gray, linestyle)) in enumerate(zip(log_load, SERVICE_STYLES)):
 ax_load.plot(theta_star, np.zeros(K), "o", color=C_BOUND, markeredgecolor="black", markersize=9, linestyle="none",
              label=r"decay rate $\theta_i^*$", zorder=3)
 ax_load.set_xlim(0, theta_grid[-1])
-# room above the highest curve for its name, and below the deepest dip for the legend
+# room above the highest curve for its name; the legend goes to the upper left, which no curve reaches (they all start
+# at load 1 and dip below it)
 lowest, highest = min(curve.min() for curve in log_load), max(curve.max() for curve in log_load)
-ax_load.set_ylim(lowest - 0.55 * (highest - lowest), highest + 0.12 * (highest - lowest))
+ax_load.set_ylim(lowest - 0.08 * (highest - lowest), highest + 0.15 * (highest - lowest))
 # the curves are ln phi_i; the ticks show phi_i itself, so that the axis reads as a load on a log scale
 load_ticks = np.array([0.25, 0.5, 1, 2, 4])
 load_ticks = load_ticks[(np.log(load_ticks) >= ax_load.get_ylim()[0]) & (np.log(load_ticks) <= ax_load.get_ylim()[1])]
 ax_load.set_yticks(np.log(load_ticks), [f"{tick:g}" for tick in load_ticks])
 ax_load.set_xlabel(r"$\theta$ (1/s)")
-ax_load.set_ylabel(r"load $\phi_i(\theta)$ (log scale)", labelpad=4)
+ax_load.set_ylabel(r"load $\phi_i(\theta)$", labelpad=4)   # the tick values show the log scale
 ax_load.grid(True, linestyle=":", alpha=0.6)
-# right of the dip and below the crossings, the corner that no curve reaches
-ax_load.legend(loc="lower right", fontsize=10.5, framealpha=0.95)
+ax_load.legend(loc="upper left", fontsize=10.5, framealpha=0.95, borderaxespad=0.3)
 
 # --- Step 3: the target pipeline and the two compositions ---------------------------
 ax_chain = fig.add_subplot(grid[0, 2])
 ax_chain.set_axis_off()
+place(ax_chain, Y_PANELS, Y_PANELS + CHAIN_HEIGHT)
 ax_chain.set_xlim(0, 1)
 ax_chain.set_ylim(0, 1)
 ax_chain.add_patch(FancyBboxPatch((0.03, 0.22), 0.94, 0.62, boxstyle="round,pad=0.01,rounding_size=0.03", linewidth=1.5, linestyle="--",
@@ -252,7 +264,9 @@ for j, s in enumerate(path):
         arrow(ax_chain, (0.10 + 0.30 * (j - 1) + 0.18, 0.53), (0.10 + 0.30 * j - 0.01, 0.53))
 ax_chain.text(0.5, 0.06, "target pipeline: never executed", ha="center", va="center", style="italic")
 
-compose_grid = grid[1:3, 2].subgridspec(1, 2, width_ratios=[1.1, 1.15], wspace=0.22)
+# below the pipeline, with room for the title of the Node panel
+compose_grid = fig.add_gridspec(1, 2, left=columns[2].x0, right=columns[2].x1, top=from_top(Y_PANELS + CHAIN_HEIGHT + 0.4),
+                                bottom=from_top(Y_BOTTOM), width_ratios=[1.1, 1.15], wspace=0.22)
 # Pegasus Node, per service: Kingman's bound on the tail of the latency of s1 gives its service bound d_1(epsilon / K)
 ax_tail = fig.add_subplot(compose_grid[0, 0])
 # shifted right, so that its tick labels and y label keep clear of the divider to step 2
@@ -298,21 +312,23 @@ fig.add_artist(ConnectionPatch(xyA=(1e3 * node_bounds[0], alpha / K), coordsA=ax
 
 # --- Frame: inputs, step titles, the dividers between the steps
 # the inputs by name and symbol only; x_i (resources and knobs) and the workers c_i are defined in Section III-A of the paper
-inputs = fig.text(0.5, 0.925, r"Inputs:   composition $S$    configurations $x_i$"
+inputs = fig.text(0.5, from_top(Y_INPUTS), r"Inputs:   composition $S$    configurations $x_i$"
                      r"    workers $c_i$    arrivals ($\lambda$, $C_a^2$)    violation probability $\epsilon$    confidence $\gamma$",
          ha="center", va="center", fontsize=12, bbox=dict(boxstyle="round,pad=0.5", facecolor="0.95", edgecolor="black", linewidth=1.2))
 positions = [model_axes[0].get_position(), ax_queue.get_position(), ax_chain.get_position()]
 # one divider between every two steps: between the columns of the grid, so that both stay clear of the panels
 dividers = [(model_column.x1 + positions[1].x0) / 2 - 0.004, (positions[1].x1 + positions[2].x0) / 2]
 for divider in dividers:
-    fig.add_artist(plt.Line2D([divider, divider], [0.12, 0.88], color="black", linewidth=1.5, linestyle=(0, (6, 4))))
+    fig.add_artist(plt.Line2D([divider, divider], [from_top(FIG_H - 0.1), from_top(Y_TITLES - 0.18)], color="black", linewidth=1.5,
+                              linestyle=(0, (6, 4))))
 # every step title is centered in its section, the space between the figure edge and the dividers
 centers = [(0.0 + dividers[0]) / 2, (dividers[0] + dividers[1]) / 2, (dividers[1] + 1.0) / 2]
 titles = ["① Learning service performance", "② Execution time and load", "③ Composition into the PPG"]
 for center, title in zip(centers, titles):
-    fig.text(center, 0.86, title, ha="center", va="center", fontsize=13, fontweight="bold")
-# one column: the labels are words now, two columns would reach into step 2
-fig.legend(handles, labels, loc="upper left", bbox_to_anchor=(0.01, 0.255), ncol=1, fontsize=11, frameon=False, handletextpad=0.5, labelspacing=0.3)
+    fig.text(center, from_top(Y_TITLES), title, ha="center", va="center", fontsize=13, fontweight="bold")
+# one column: the labels are words now, two columns would reach into step 2; below the x label of the service models
+fig.legend(handles, labels, loc="upper left", bbox_to_anchor=(0.01, from_top(Y_MODELS_BOTTOM + 0.48)), ncol=1, fontsize=11, frameon=False,
+           handletextpad=0.5, labelspacing=0.3, borderaxespad=0.0)
 
 # the export is cropped to the drawn content, but matplotlib's tight crop counts only the text of the inputs, not its frame,
 # which reaches 6 pt beyond the text: crop to the union of both, plus half the frame's line width
