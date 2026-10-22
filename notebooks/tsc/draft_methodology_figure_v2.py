@@ -133,14 +133,14 @@ def from_top(inches):
 
 Y_INPUTS, Y_TITLES, Y_PANELS = 0.25, 0.66, 0.92   # centers of the inputs box and the step titles, top of the panels
 Y_BOTTOM = FIG_H - 0.55                           # bottom of the lowest panels; their x labels sit below
-Y_MODELS_BOTTOM = FIG_H - 1.55                    # bottom of the service models; their x label and legend sit below
+Y_MODELS_BOTTOM = FIG_H - 1.2                     # bottom of the service models; their x label and legend sit below
 QUEUE_HEIGHT, CHAIN_HEIGHT = 1.8, 1.0             # the sketches of one service (step 2) and of the pipeline (step 3)
 grid = fig.add_gridspec(1, 3, left=0.055, right=0.985, top=from_top(Y_PANELS), bottom=from_top(Y_BOTTOM), wspace=0.24,
-                        width_ratios=[0.88, 0.8, 1.5])
+                        width_ratios=[0.93, 0.78, 1.47])
 columns = [grid[0, k].get_position(fig) for k in range(3)]
 model_column = columns[0]
 # the service models start further right, so that the dataset D_i of every service can be drawn to their left
-model_grid = fig.add_gridspec(3, 1, left=model_column.x0 + 0.052, right=model_column.x1 - 0.02, top=from_top(Y_PANELS),
+model_grid = fig.add_gridspec(3, 1, left=model_column.x0 + 0.052, right=model_column.x1 - 0.005, top=from_top(Y_PANELS),
                               bottom=from_top(Y_MODELS_BOTTOM), hspace=0.3)
 
 
@@ -175,7 +175,7 @@ for row, s in enumerate(path):
     ax.fill_between(quality_grid, 1e3 * (mu - band_epistemic), 1e3 * (mu + band_epistemic), color="#a6c8e6", linewidth=0,
                     label="epistemic uncertainty")
     ax.plot(quality_grid, 1e3 * mu, color=C_MEAN, linewidth=1.8, label="predicted mean")
-    ax.plot(quality_train, 1e3 * y_train[s], "o", color=C_ALEATORIC, markeredgecolor="black", markersize=6, label="observed execution time")
+    ax.plot(quality_train, 1e3 * y_train[s], "o", color=C_ALEATORIC, markeredgecolor="black", markersize=6, label="observations")
     ax.axvline(quality_target, color="black", linewidth=1, linestyle=":", label="target configuration")
     ax.text(0.02, 0.93, f"s{row + 1} (ms)", transform=ax.transAxes, ha="left", va="top")
     ax.grid(True, linestyle=":", alpha=0.6)
@@ -185,7 +185,9 @@ for row, s in enumerate(path):
 model_axes[-1].set_xlabel("quality knob of the service")
 model_axes[-1].set_xticks([0.5, 1.0, 1.5, 2.0])
 handles, labels = model_axes[0].get_legend_handles_labels()
-handles, labels = [handles[i] for i in (3, 2, 1, 0, 4)], [labels[i] for i in (3, 2, 1, 0, 4)]   # data, model, then the target
+# two columns, filled column by column: data, model and target on the left, the two uncertainties on the right
+order = (3, 2, 4, 1, 0)
+handles, labels = [handles[i] for i in order], [labels[i] for i in order]
 
 # the dataset D_i of every service, a database cylinder with an arrow into its model (figure coordinates)
 cylinder_x, cylinder_w, cylinder_h, cap_h = 0.008, 0.034, 0.48 / FIG_H, 0.14 / FIG_H   # heights in inches, as fractions of the figure
@@ -283,7 +285,7 @@ ax_tail.set_xlim(0, 1e3 * latency_grid[-1])
 ax_tail.set_xlabel(r"latency $d$ at s1 (ms)")
 ax_tail.set_ylabel(r"P(latency $> d$)", labelpad=6)
 ax_tail.grid(True, linestyle=":", alpha=0.6)
-ax_tail.legend(loc="lower left", fontsize=10.5, framealpha=0.95, handlelength=1.1, handletextpad=0.3, borderaxespad=0.2, borderpad=0.3)
+ax_tail.legend(loc="lower left", fontsize=10.5, framealpha=0.95, handlelength=0.9, handletextpad=0.3, borderaxespad=0.2, borderpad=0.25)
 ax_tail.set_title("Node: bound $d_1$ of s1", fontsize=12)
 
 # both compositions as bars against the true end-to-end quantile
@@ -323,17 +325,23 @@ for divider in dividers:
                               linestyle=(0, (6, 4))))
 # every step title is centered in its section, the space between the figure edge and the dividers
 centers = [(0.0 + dividers[0]) / 2, (dividers[0] + dividers[1]) / 2, (dividers[1] + 1.0) / 2]
-titles = ["① Learning service performance", "② Execution time and load", "③ Composition into the PPG"]
+titles = ["① Learn service performance", "② Execution time and load", "③ Composition into the PPG"]
 for center, title in zip(centers, titles):
     fig.text(center, from_top(Y_TITLES), title, ha="center", va="center", fontsize=13, fontweight="bold")
-# one column: the labels are words now, two columns would reach into step 2; below the x label of the service models
-fig.legend(handles, labels, loc="upper left", bbox_to_anchor=(0.01, from_top(Y_MODELS_BOTTOM + 0.48)), ncol=1, fontsize=11, frameon=False,
-           handletextpad=0.5, labelspacing=0.3, borderaxespad=0.0)
+# below the x label of the service models, in two columns so that it takes three rows; the check below the figure
+# reports if it reaches past the divider to step 2
+STEP1_LEGEND_FONT = 10
+step1_legend = fig.legend(handles, labels, loc="upper left", bbox_to_anchor=(0.005, from_top(Y_MODELS_BOTTOM + 0.48)), ncol=2,
+                          fontsize=STEP1_LEGEND_FONT, frameon=False, handlelength=1.5, handletextpad=0.4, columnspacing=0.9,
+                          labelspacing=0.3, borderaxespad=0.0)
 
 # the export is cropped to the drawn content, but matplotlib's tight crop counts only the text of the inputs, not its frame,
 # which reaches 6 pt beyond the text: crop to the union of both, plus half the frame's line width
 fig.canvas.draw()
 renderer = fig.canvas.get_renderer()
+legend_right = step1_legend.get_window_extent(renderer).transformed(fig.transFigure.inverted()).x1
+if legend_right > dividers[0] - 0.005:
+    print(f"the legend of step 1 reaches past the divider ({legend_right:.3f} > {dividers[0]:.3f}); reduce STEP1_LEGEND_FONT")
 to_inches = fig.dpi_scale_trans.inverted()
 frame = inputs.get_bbox_patch().get_window_extent(renderer).transformed(to_inches)
 frame = Bbox.from_extents(frame.x0 - 0.01, frame.y0 - 0.01, frame.x1 + 0.01, frame.y1 + 0.01)
