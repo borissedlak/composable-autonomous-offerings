@@ -24,6 +24,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import ConnectionPatch, Ellipse, FancyArrowPatch, FancyBboxPatch, Rectangle
+from matplotlib.transforms import Bbox
 from scipy.stats import norm
 
 from pegasus.bounds import log_worker_gap_mgf, martingale_closed_form_node_bounds, martingale_theta, network_service_bound
@@ -296,7 +297,7 @@ fig.add_artist(ConnectionPatch(xyA=(1e3 * node_bounds[0], alpha / K), coordsA=ax
 # --- Frame: inputs, step titles, the dividers between the steps
 # x_i as in Section III-A of the paper: resources and knobs; the workers c_i are a separate input. "Never executed" is left
 # to step 3, so that the box fits the width of the figure
-fig.text(0.5, 0.925, r"Inputs:   composition $S$    configurations $\mathbf{x} = (x_1, \ldots, x_K)$, $x_i = \langle r_i, \kappa_i \rangle$"
+inputs = fig.text(0.5, 0.925, r"Inputs:   composition $S$   configurations $\mathbf{x} = (x_1, \ldots, x_K)$, $x_i = \langle r_i, \kappa_i \rangle$"
                      r"    workers $c_i$    arrival process ($\lambda$, $C_a^2$)    violation probability $\epsilon$    confidence $\gamma$",
          ha="center", va="center", fontsize=12, bbox=dict(boxstyle="round,pad=0.5", facecolor="0.95", edgecolor="black", linewidth=1.2))
 positions = [model_axes[0].get_position(), ax_queue.get_position(), ax_chain.get_position()]
@@ -311,7 +312,15 @@ for center, title in zip(centers, titles):
     fig.text(center, 0.86, title, ha="center", va="center", fontsize=14, fontweight="bold")
 fig.legend(handles, labels, loc="upper left", bbox_to_anchor=(0.01, 0.255), ncol=2, fontsize=11, frameon=False, columnspacing=1.0, handletextpad=0.5)
 
+# the export is cropped to the drawn content, but matplotlib's tight crop counts only the text of the inputs, not its frame,
+# which reaches 6 pt beyond the text: crop to the union of both, plus half the frame's line width
+fig.canvas.draw()
+renderer = fig.canvas.get_renderer()
+to_inches = fig.dpi_scale_trans.inverted()
+frame = inputs.get_bbox_patch().get_window_extent(renderer).transformed(to_inches)
+frame = Bbox.from_extents(frame.x0 - 0.01, frame.y0 - 0.01, frame.x1 + 0.01, frame.y1 + 0.01)
+crop = Bbox.union([fig.get_tightbbox(renderer), frame])
 OUTPUT.mkdir(parents=True, exist_ok=True)
-fig.savefig(OUTPUT / "methodology_overview_v2_draft.pdf", bbox_inches="tight", pad_inches=0)
-fig.savefig(OUTPUT / "methodology_overview_v2_draft.jpg", dpi=300, bbox_inches="tight", pad_inches=0, facecolor="white")
+fig.savefig(OUTPUT / "methodology_overview_v2_draft.pdf", bbox_inches=crop, pad_inches=0)
+fig.savefig(OUTPUT / "methodology_overview_v2_draft.jpg", dpi=300, bbox_inches=crop, pad_inches=0, facecolor="white")
 print(f"written to {OUTPUT / 'methodology_overview_v2_draft.pdf'} and .jpg")
