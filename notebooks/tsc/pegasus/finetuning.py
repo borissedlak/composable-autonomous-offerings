@@ -101,7 +101,7 @@ def finetuning_figure(sizes: list, statistics: dict, level_label: str, output: P
     """Tightness of every method of C.1 over the number of end-to-end samples, in the style of the tightness figures of
     B (evaluation.py, figures.py): per method the median over the seeds with the band from the smallest to the largest
     seed (sweep_line), a filled marker where the method holds (statistics[name]["holds"]) and a hollow one where it does
-    not, the measured quantile as a black line at 1x and the red zone below it, where a method is no bound. Unlike the
+    not, the measured quantile as a black line at 1x and the red zone below it, where a method underestimates the quantile (SLO violated). Unlike the
     figures of B, the vertical axis is linear and zoomed to the values of C.1, which lie close above 1x, so that their
     differences are visible. statistics: from sweep_statistics over `sizes`; a method without a value at a size (the
     baselines at n = 0) has no point there. output: path without suffix; its name is the file name in figures/tsc
@@ -109,7 +109,7 @@ def finetuning_figure(sizes: list, statistics: dict, level_label: str, output: P
     from matplotlib.ticker import FuncFormatter
     from .evaluation import sweep_line, sweep_segments
     from .figures import (FAILURE_COLOR, FAILURE_TEXT_COLOR, METHOD_STYLES, holds_handles, legend_inside, paper_figure, paper_style, save_figure,
-                          math_label, tightness_label, tightness_tick)
+                          tightness_label, tightness_tick)
     METHOD_STYLES.update({name: (style[0], style[1:]) for name, style in STYLES.items()})   # sweep_line draws a method by its name
     names = [name for name in STYLES if name in statistics]
     with paper_style():
@@ -123,7 +123,7 @@ def finetuning_figure(sizes: list, statistics: dict, level_label: str, output: P
         ax.set_ylim(1 - 0.1 * (top - 1), top + 0.1 * (top - 1))
         ax.axhspan(ax.get_ylim()[0], 1.0, color=FAILURE_COLOR, linewidth=0)
         ax.axhline(1.0, color="black", linewidth=1)
-        ax.text(0.99, 0.01, f"below the measured {math_label(level_label)}: no bound", transform=ax.transAxes, ha="right", va="bottom", color=FAILURE_TEXT_COLOR)
+        ax.text(0.99, 0.01, "underestimated: SLO violated", transform=ax.transAxes, ha="right", va="bottom", color=FAILURE_TEXT_COLOR)
         ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: tightness_tick(value)))
         ax.set_ylabel(tightness_label(level_label))
         ax.set_xticks(sizes)

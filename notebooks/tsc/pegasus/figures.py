@@ -1,5 +1,5 @@
 """Style of the paper figures of the TSC paper: one color, marker and line style per method, the light-red zone where a
-method is no bound, and the export to figures/tsc. The style follows problem_figure.py; see the paper-figure skill.
+method underestimates the measured quantile (SLO violated), and the export to figures/tsc. The style follows problem_figure.py; see the paper-figure skill.
 """
 from contextlib import contextmanager
 from pathlib import Path
@@ -16,7 +16,7 @@ FIGURES = Path(__file__).resolve().parents[3] / "figures" / "tsc"
 # marker and line style per method, so that the methods can be told apart in grayscale; the color is METHOD_COLORS
 METHOD_STYLES = {PROPOSED: ("o", "-"), PROPOSED_SNC: ("D", "-"), "GP Sum": ("s", "--"), "DNN Sum": ("X", "--"), "GP Queue": ("^", "-."),
                  "Quantile Union": ("v", ":"), "Conformal": ("P", ":"), "Oracle": ("*", "--")}
-FAILURE_COLOR, FAILURE_TEXT_COLOR = "mistyrose", "darkred"   # zone where a method is no bound (below the measured quantile)
+FAILURE_COLOR, FAILURE_TEXT_COLOR = "mistyrose", "darkred"   # zone where a method underestimates the measured quantile (SLO violated)
 WASTE_COLOR = "0.9"                                           # optional zone where a method wastes resources (far above it)
 BAND_ALPHA = 0.2                                              # bands over seeds or quantiles, drawn without an edge
 FIGSIZE = (6.0, 3.3)                                          # (width, height) in inches of every single-panel evaluation figure, so that

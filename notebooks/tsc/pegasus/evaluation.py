@@ -555,7 +555,7 @@ def _sweep_axis(ax, settings: list, xlabel: str, tick_labels: list, log_x: bool)
 
 def _tightness_panel(ax, settings: list, statistics: dict, level_label: str, failure_text: bool = True, wrap_text: bool = False) -> None:
     """Tightness of every method over a sweep on `ax`, with the line at 1x (the measured quantile) and the red zone
-    below it, where a method is no bound. The axis shows TIGHTNESS_RANGE; a line leaves the panel where a method lies
+    below it, where a method underestimates the quantile (SLO violated). The axis shows TIGHTNESS_RANGE; a line leaves the panel where a method lies
     outside."""
     from .figures import FAILURE_COLOR, FAILURE_TEXT_COLOR, tightness_label, tightness_tick
     ax.axhspan(TIGHTNESS_RANGE[0], 1.0, color=FAILURE_COLOR, linewidth=0)
@@ -565,7 +565,7 @@ def _tightness_panel(ax, settings: list, statistics: dict, level_label: str, fai
             sweep_line(ax, settings, statistics[name]["tightness"], name, held=statistics[name]["holds"])
     if failure_text:
         # wrap_text: in two lines, for a panel of half the width
-        ax.text(0.99, 0.03, f"below the measured {level_label}:{chr(10) if wrap_text else ' '}no bound", transform=ax.transAxes, ha="right",
+        ax.text(0.99, 0.03, f"underestimated:{chr(10) if wrap_text else ' '}SLO violated", transform=ax.transAxes, ha="right",
                 va="bottom", color=FAILURE_TEXT_COLOR)
     ax.set_yscale("log")
     ax.set_ylim(*TIGHTNESS_RANGE)
