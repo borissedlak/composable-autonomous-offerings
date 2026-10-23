@@ -35,7 +35,7 @@ script writes a `.pdf` and a `.jpg` to `figures/tsc/`.
 
 | Script | Figure | Data | Output in `figures/tsc/` |
 |---|---|---|---|
-| `problem_figure.py` | The two problems the paper addresses (Section II-A): per-service execution times do not add up to the end-to-end tail latency, and an accurate point prediction is not a guarantee. | Real: chain `04e-chain-qr-cv-face` of the testbed campaign, with emulated queueing as in the evaluation notebooks. | `problem_queueing`, `problem_prediction` |
+| `problem_figure.py` | The two problems the paper addresses (Section II-A): per-service execution times do not add up to the end-to-end tail latency, and an accurate point prediction is not a guarantee. | Real: the chain of B.1 (`b1-vision-1-single`) of the second campaign, trained on the benchmarks as in B.1. (a) emulates queueing at the swept loads from the measured processing times, because the campaign ran every run at one load; (b) uses the measured latencies. | `problem_queueing`, `problem_prediction` |
 | `methodology_figure.py` | The methodology overview, structured like Section IV: learn one model per service; turn it into a pessimistic execution-time model and the load $\phi_i(\theta)$ of every service; compose per service (Pegasus Node: Kingman's bound, the $d_i(\epsilon/K)$ added) or for the whole pipeline (Pegasus SNC). Every service has two workers, as in the earlier draft; the SNC bar is then an illustration only (the paper requires one worker for Pegasus SNC). | Synthetic: the services `s1`, `s2`, `s3` of `pegasus/data.py`, on a setting chosen for readability; an illustration, not a result of the evaluation. | `methodology_overview` |
 | `draft_methodology_figure.py` | Earlier draft of the methodology overview: learn one model per service, bound each service as a queue, compose the service bounds for a pipeline that is never executed. | As `methodology_figure.py`. | `methodology_overview_draft` |
 
@@ -71,7 +71,7 @@ and `service_gp`; `finetuning` on `baselines`, `baselines_chain`, `evaluation` a
 
 | Path | Contents |
 |---|---|
-| `statics/results_milos/` | The testbed campaign that `real_data.py` reads: one folder per experiment (single services, chains, trees, deep chains). The real data source of `1_method_real.ipynb`, the evaluation notebooks (`2a` to `2e`), `explain_5`, `explain_6` and `problem_figure.py` needs this folder. The folder is not part of the repository: it is not committed, so a fresh clone does not contain it. |
+| `statics/results_milos/` | The testbed campaign that `real_data.py` reads: one folder per experiment (single services, chains, trees, deep chains). The real data source of `1_method_real.ipynb`, the evaluation notebooks (`2a` to `2e`), `explain_5` and `explain_6` needs this folder. The folder is not part of the repository: it is not committed, so a fresh clone does not contain it. |
 | `statics/load_independence/results_milos_v2_b1/run_states.csv` | Cache of `run_states` (`load_independence.py`) for `explain_9`: one row per run and service of the second campaign. Recomputed from `statics/results_milos_v2/b1/` when missing. |
 | `figures/tsc/` | Outputs of the figure scripts. |
 
