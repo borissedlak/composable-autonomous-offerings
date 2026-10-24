@@ -2,6 +2,7 @@
 method underestimates the measured quantile (SLO violated), and the export to figures/tsc. The style follows problem_figure.py; see the paper-figure skill.
 """
 from contextlib import contextmanager
+from itertools import permutations
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -78,6 +79,30 @@ def dodge_offsets(n: int, width: float = 0.7) -> np.ndarray:
     """Horizontal offsets of n series side by side within one category of width 1 (a dodged dot plot): a category whose
     instances are independent, such as one chain, gets one column per method instead of a line through the categories."""
     return (np.arange(n) - (n - 1) / 2) * width / max(n - 1, 1)
+
+
+def separated_order(values: dict, column_width: float, doubling_height: float) -> list:
+    """Order of the series of a dodged dot plot that keeps the markers of every two series as far apart as possible, so
+    that series with similar values are not drawn close together, where their markers would overlap. values: name ->
+    value per category on a logarithmic axis (nan or inf where the series has no dot); column_width: the distance of
+    two neighboring columns, doubling_height: the height of a factor of 2 on the axis, both in the same unit (e.g.
+    pixels). Two markers g columns apart lie sqrt((g × column_width)² + (|log2 of the ratio of their values| ×
+    doubling_height)²) apart; a pair of series counts with the median of that distance over the categories. The order
+    maximizes the smallest of these over all pairs, then their sum. Tries every order, so it suits a handful of series."""
+    names = list(values)
+    n = len(names)
+    logs = np.array([np.log2(np.where(np.isfinite(v) & (np.asarray(v) > 0), v, np.nan)) for v in values.values()])   # (series, categories)
+    vertical = np.abs(logs[:, None, :] - logs[None, :, :]) * doubling_height
+    vertical = np.where(np.isnan(vertical), np.inf, vertical)   # a series without a dot in a category overlaps nothing there
+    # distance[i, j, g]: the median over the categories of the distance of the markers of series i and j, g columns apart
+    distance = np.median(np.hypot((np.arange(n) * column_width)[None, None, :, None], vertical[:, :, None, :]), axis=-1)
+    orders = np.array(list(permutations(range(n))))   # (orders, series): the series in the columns from left to right
+    columns = np.argsort(orders, axis=1)               # (orders, series): the column of every series
+    first, second = np.triu_indices(n, k=1)
+    pair_distance = distance[first, second, np.abs(columns[:, first] - columns[:, second])]   # (orders, pairs)
+    # the stable sort keeps the first of equally good orders, so the result does not depend on chance
+    best = np.lexsort((-pair_distance.sum(axis=1), -pair_distance.min(axis=1)))[0]
+    return [names[i] for i in orders[best]]
 
 
 def legend_inside(ax, handles: list, labels: list, segments: list, locations: tuple = ("upper center", "upper left", "upper right"),
