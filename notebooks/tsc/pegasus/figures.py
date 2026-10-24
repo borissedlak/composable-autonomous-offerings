@@ -108,6 +108,36 @@ def legend_inside(ax, handles: list, labels: list, segments: list, locations: tu
     return ax.legend(handles, labels, loc=best, **options)
 
 
+def legend_entry_beside(legend, beside: str, handle: Line2D, label: str, gap: float = 0.8) -> None:
+    """Adds the entry (handle, label) to the legend in the row of the entry labeled `beside`, right of its label, where
+    a label shorter than its column leaves space: the legend keeps one row less than with the entry in a cell of its
+    own. gap: space between the label `beside` and the added marker, in units of the font size. Call it after the
+    legend is placed; prints a note if the added entry reaches into the next column or out of the legend."""
+    fig, ax = legend.figure, legend.axes
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    text = next(t for t in legend.get_texts() if t.get_text() == beside)
+    box = text.get_window_extent(renderer)
+    em = text.get_fontsize() * fig.dpi / 72   # the font size in pixels
+    # a handle of one font size instead of handlelength, which a marker without a line does not need, so that the entry
+    # fits the space; the label handletextpad after the handle, as in every other entry
+    marker_x = box.x1 + (gap + 0.5) * em
+    text_x = marker_x + (0.5 + legend.handletextpad) * em
+    baseline = text.get_transform().transform(text.get_position())[1]
+    to_figure = fig.transFigure.inverted().transform
+    (mx, my), (tx, ty) = to_figure((marker_x, (box.y0 + box.y1) / 2)), to_figure((text_x, baseline))
+    # drawn above the legend (zorder 5), in figure coordinates so that the entry stays beside the label at every dpi
+    ax.add_line(Line2D([mx], [my], transform=fig.transFigure, linestyle="", marker=handle.get_marker(), markersize=handle.get_markersize(),
+                       color=handle.get_color(), markerfacecolor=handle.get_markerfacecolor(), zorder=6, clip_on=False))
+    added = ax.text(tx, ty, label, transform=fig.transFigure, va="baseline", ha="left", fontsize=text.get_fontsize(), color=text.get_color(),
+                    zorder=6, clip_on=False)
+    right = added.get_window_extent(renderer).x1
+    following = [t.get_window_extent(renderer).x0 for t in legend.get_texts() if t.get_window_extent(renderer).x0 > box.x1]
+    limit = min(min(following, default=np.inf) - legend.handlelength * em, legend.get_window_extent(renderer).x1)
+    if right > limit:
+        print(f"legend_entry_beside: {label} reaches {(right - limit) / em:.1f} font sizes beyond the space right of {beside}")
+
+
 def _figure(width: float, left: float):
     """Figure of the height of FIGSIZE and the given width, with the plot area at the fixed margins (left: its left margin)."""
     height = FIGSIZE[1]
