@@ -29,6 +29,10 @@ Second campaign: only unthrottled runs (unthrottled_runs), for training and as h
 are no configuration (NOT_CONFIGURATION): a run either had enough cores for its load (no throttling) or is not used,
 and with enough cores the execution time does not depend on them.
 
+Fork-join trees (TREES_V2, the folder `b3/` of the second campaign, experiment B3 of `new_experiments.md`): a camera
+(`frame-source`) sends every frame to all leaves (detectors), and every aggregator (the image transformer) processes a
+frame once the results of all its children for that frame are there (real_tree_data).
+
 Benchmarks (BENCHMARKS_V2): every service measured alone, one experiment `bench-<service>-<version>-u<utilization in %>`
 per service and utilization (0.1 to 1.0), each with the same 10 configurations; the cores of a run are the CPU need of
 the configuration from a probe times a slack (`cpu_slack`), so the service has enough cores at every load.
@@ -44,12 +48,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .data import ChainData
+from .data import ChainData, TreeData
 from .simulation import fifo_chain_latencies, quantile_with_lower_bound, sample_interarrival_times
 
 CAMPAIGN = Path(__file__).resolve().parents[3] / "statics" / "results_milos"
 CAMPAIGN_V2 = CAMPAIGN.parent / "results_milos_v2" / "b1"
 BENCHMARKS_V2 = CAMPAIGN_V2.parent / "benchmark"
+TREES_V2 = CAMPAIGN_V2.parent / "b3"
+TREE_SOURCE = "camera"   # the node of a tree experiment that sends every frame to the leaves; it is not a service of the tree
 NOT_CONFIGURATION = ("cores",)   # knobs that no model of real_chain_data / real_replay_data receives (module docstring)
 POOL_COLUMNS = ("run_id", "experiment", "node", "alone", "mean_s", "spread_s", "overhead_s")   # columns of training_pool that are not knobs
 NORMAL_P95 = 1.6449                                                              # 95th percentile of the standard normal distribution
@@ -59,9 +65,9 @@ NORMAL_P95 = 1.6449                                                             
 # Reading the campaign
 # ------------------------------------------------------------------------------
 def campaign_of(experiment: str) -> Path:
-    """The campaign folder that holds `experiment`: CAMPAIGN_V2 or BENCHMARKS_V2 if it has a folder of that name,
-    else CAMPAIGN."""
-    return next((campaign for campaign in (CAMPAIGN_V2, BENCHMARKS_V2) if (campaign / experiment).is_dir()), CAMPAIGN)
+    """The campaign folder that holds `experiment`: CAMPAIGN_V2, BENCHMARKS_V2 or TREES_V2 if it has a folder of that
+    name, else CAMPAIGN."""
+    return next((campaign for campaign in (CAMPAIGN_V2, BENCHMARKS_V2, TREES_V2) if (campaign / experiment).is_dir()), CAMPAIGN)
 
 
 def experiment_folder(experiment: str) -> Path:
@@ -693,3 +699,108 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
         x_test_load[node] = np.column_stack([x_test[node], np.log10(rates)])
     return ChainData(path, workload, x_train, y_train, x_test, measured, measured_low, node_latencies, monitored_latencies=monitored_latencies,
                      y_train_spread=y_train_spread, x_train_load=x_train_load, x_test_load=x_test_load, workers_column=workers_column)
+
+
+# ------------------------------------------------------------------------------
+# Fork-join trees (second campaign, TREES_V2): measured latencies of trees of FIFO services
+# ------------------------------------------------------------------------------
+def tree_structure(experiment: str) -> tuple:
+    """Topology of the tree experiment `experiment` (TREES_V2, e.g. "b3-balanced-3") in the form of trees.py: children
+    (the positions of the children of every position; position 0 is the root, the others follow level by level, the
+    children of a node in the order of their names), the node name and the service of every position. The camera
+    (TREE_SOURCE) is not a position: it only sends every frame to the leaves."""
+    chain = run_table(experiment)
+    first_run = chain[chain["run_id"] == chain["run_id"].iloc[0]]
+    service_of = dict(zip(first_run["node"], first_run["service"]))
+    edges = [edge.split("->") for edge in chain["pipeline"].iloc[0].split()]   # (sender, receiver): a result goes from a child to its parent
+    children_of = {node: sorted(child for child, parent in edges if parent == node and child != TREE_SOURCE) for node in service_of if node != TREE_SOURCE}
+    root = next(node for node in children_of if all(child != node for child, _ in edges))   # the node that sends to no other node
+    nodes = [root]
+    for node in nodes:   # level by level: the list grows while it is traversed
+        nodes += children_of[node]
+    children = [[nodes.index(child) for child in children_of[node]] for node in nodes]
+    return children, nodes, [service_of[node] for node in nodes]
+
+
+def measured_tree_latencies(experiment: str, run_id: str, nodes: list) -> tuple:
+    """Measured latencies (s) of one run of a tree experiment, one row per frame that completed at the camera and at
+    every node of `nodes` (position 0 the root), in the order in which the camera released the frames: the end-to-end
+    latency of every frame, from its release by the camera (the moment it is sent to all leaves) until the root
+    released its result; and its latency at every node, (frames, nodes): waiting plus processing from the moment the
+    frame was complete at the node (at an aggregator: the result of its last child had arrived), from trace_steps.csv.
+    The time a frame spent in the camera is left out, because the camera is not a service of the tree. Cached like
+    measured_latencies."""
+    return _measured_tree_latencies(experiment, run_id, tuple(nodes))
+
+
+@lru_cache(maxsize=None)
+def _measured_tree_latencies(experiment: str, run_id: str, nodes: tuple) -> tuple:
+    steps = pipeline_steps(experiment, run_id)
+    released = steps.pivot(index="request_id", columns="node", values="finished_at_ns")[[TREE_SOURCE, *nodes]].dropna()
+    node = steps.assign(latency_s=(steps["waiting_ms"] + steps["processing_ms"]) / 1e3).pivot(index="request_id", columns="node", values="latency_s")
+    order = released[TREE_SOURCE].sort_values().index
+    result = ((released.loc[order, nodes[0]] - released.loc[order, TREE_SOURCE]).to_numpy() / 1e9, node.loc[order, list(nodes)].to_numpy())
+    for array in result:
+        array.setflags(write=False)
+    return result
+
+
+def real_tree_data(experiment: str, level: float, node_level: float, coverage_check: dict, seed, n_train: int = 25,
+                   n_trace_items: int = 2000) -> TreeData:
+    """Data of one fork-join tree of the second campaign (`experiment` in TREES_V2) for B.3 of the evaluation, in the
+    form of synthetic_tree_data (data.py): every service has one worker, and an aggregator processes a frame once all
+    its children have released it.
+
+    Ground truth (per unthrottled run of the tree, unthrottled_runs): the `level` quantile of the measured end-to-end
+    latencies of the run (measured_tree_latencies) and the lower edge of its confidence interval (coverage_check), at the
+    Poisson arrival rate that the campaign set for the run (arrival_rates). node_quantiles: the node_level quantile of the
+    measured latency of every position in every run, for the Oracle.
+
+    Training (per service type): every service is trained on its benchmark (BENCHMARKS_V2), as the chains of B.1 with
+    training_campaign = BENCHMARKS_V2; no run of a tree is used. n_train unthrottled benchmark runs are drawn at random
+    per service type (with `seed`), and all positions of that type share its models. Targets as in real_chain_data: the
+    mean execution time of a run, with the handling overhead of the run replaced by the handover overhead of
+    hop_overheads (measured on the chains of B.1), because every service of a tree receives its frames from another
+    service (the camera or a child); and the spread of the run. The monitored latencies of the baselines are those the
+    benchmark run measured (its first n_trace_items requests, or as many as the shortest drawn run has), at the rate of
+    that run, which x_train_load holds as log10(rate) next to the configuration.
+
+    The training data (x_train, y_train, y_train_spread, monitored_latencies, x_train_load) is keyed by the service
+    type, the held-out configurations (x_test, x_test_load) by the node, because the positions of one service type have
+    different configurations (e.g. the model size of every detector); TreeData.path holds the node of every position and
+    TreeData.services its service type. workers_column has both kinds of keys. No model receives the knobs of
+    NOT_CONFIGURATION (the cores)."""
+    rng_train = np.random.default_rng(np.random.SeedSequence(seed).spawn(3)[0])   # the first generator, as in real_chain_data
+    chain = run_table(experiment)
+    children, nodes, services = tree_structure(experiment)
+    runs = unthrottled_runs(experiment)
+    rates = arrival_rates(experiment).loc[runs].to_numpy()
+    run_latencies = [measured_tree_latencies(experiment, run_id, nodes) for run_id in runs]
+    measured, measured_low = measured_quantiles([latency for latency, _ in run_latencies], level, coverage_check)
+    node_quantiles = np.array([np.quantile(node, node_level, axis=0) for _, node in run_latencies])   # (runs, positions)
+    workload = dict(process="poisson", rate=rates, jitter=0.1)
+
+    x_train, y_train, y_train_spread, x_test, x_train_load, x_test_load, monitored_latencies, workers_column = ({} for _ in range(8))
+    handover = hop_overheads()[1]   # s; no chain of B.1 is a tree, so none is left out
+    for service in sorted(set(services)):
+        pool = unthrottled_pool(training_pool(service, **training_exclusion(experiment, BENCHMARKS_V2)))
+        assert len(pool) >= n_train, f"{service}: {len(pool)} training runs available, {n_train} needed"
+        chosen = pool.iloc[np.sort(rng_train.choice(len(pool), size=n_train, replace=False))]
+        knobs = [column for column in pool.columns if column not in POOL_COLUMNS and column not in NOT_CONFIGURATION]
+        positions = [node for node, of in zip(nodes, services) if of == service]
+        in_tree = pd.concat([node_configurations(chain, node).loc[runs, knobs] for node in positions])   # the positions one after the other
+        x_train[service], x_positions = encode_configurations(chosen[knobs], in_tree)
+        x_test.update(zip(positions, np.split(x_positions, len(positions))))
+        names = encoded_names(chosen[knobs], in_tree)
+        for key in [service] + positions:
+            workers_column[key] = names.index("parallelism") if "parallelism" in names else None
+        hop_shift = handover - chosen["overhead_s"].to_numpy()   # per training run: its own handling overhead replaced by the handover overhead
+        y_train[service], y_train_spread[service] = chosen["mean_s"].to_numpy() + hop_shift, chosen["spread_s"].to_numpy()
+        monitored_rates = np.array([arrival_rates(run.experiment)[run.run_id] for run in chosen.itertuples()])
+        monitored = [measured_latencies(run.experiment, run.run_id, [run.node])[1][:, 0] + shift for run, shift in zip(chosen.itertuples(), hop_shift)]
+        monitored_latencies[service] = np.stack([series[:min(n_trace_items, *map(len, monitored))] for series in monitored])
+        x_train_load[service] = np.column_stack([x_train[service], np.log10(monitored_rates)])
+        x_test_load.update({node: np.column_stack([x_test[node], np.log10(rates)]) for node in positions})
+    return TreeData(nodes, workload, x_train, y_train, x_test, measured, measured_low, monitored_latencies=monitored_latencies,
+                    y_train_spread=y_train_spread, x_train_load=x_train_load, x_test_load=x_test_load, workers_column=workers_column,
+                    children=children, node_quantiles=node_quantiles, services=services)

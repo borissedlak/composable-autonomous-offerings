@@ -41,8 +41,11 @@ def fit_services(data, x_train, y_train: dict, model_seed: int, confidence: floa
     per service predicts the standard deviation of single items from the spreads, and the beliefs come from both
     (RunStatisticsModel in service_gp.py). The time to train the spread GPs is part of "gp". The DNN is trained on the
     run means and uses the same spread GP.
-    No model receives the number of workers of a configuration (model_inputs in data.py)."""
-    services = sorted(set(data.path))
+    No model receives the number of workers of a configuration (model_inputs in data.py).
+    A real tree (TreeData with services) trains one model per service type and computes the beliefs at the
+    configurations of every node (model_of)."""
+    model = model_of(data)
+    services = sorted(set(model.values()))
     x_train, x_test = model_inputs(x_train, data.workers_column), model_inputs(data.x_test, data.workers_column)
     from_runs = data.y_train_spread is not None
     belief_of = run_statistics_belief if from_runs else execution_time_belief
@@ -59,11 +62,17 @@ def fit_services(data, x_train, y_train: dict, model_seed: int, confidence: floa
         dnn = {s: RunStatisticsModel(dnn[s], spread[s], log_center=False) for s in services}
     dnn_seconds = time.perf_counter() - started
     started = time.perf_counter()
-    belief = {s: belief_of(gp[s], configurations_of(x_test, s), confidence) for s in services}
-    lower_mean = {s: belief_of(gp[s], configurations_of(x_test, s), 1 - confidence)[0] for s in services}
+    belief = {key: belief_of(gp[model[key]], configurations_of(x_test, key), confidence) for key in sorted(model)}
+    lower_mean = {key: belief_of(gp[model[key]], configurations_of(x_test, key), 1 - confidence)[0] for key in sorted(model)}
     belief_seconds = time.perf_counter() - started
     return dict(gp=gp, dnn=dnn, seconds=dict(gp=gp_seconds, dnn=dnn_seconds, beliefs=belief_seconds),
-                beliefs=[belief[s] for s in data.path], lower_means=[lower_mean[s] for s in data.path])
+                beliefs=[belief[key] for key in data.path], lower_means=[lower_mean[key] for key in data.path])
+
+
+def model_of(data) -> dict:
+    """Key of the held-out configurations of every position of `data` (an entry of data.path) -> the service type
+    whose models it uses: the key itself, except for a real tree, whose path holds nodes (TreeData.services)."""
+    return dict(zip(data.path, getattr(data, "services", None) or data.path))
 
 
 def pegasus_bound(data, models: dict, alpha: float) -> np.ndarray:
@@ -160,23 +169,36 @@ def compare_tree_methods(data, models: dict, alpha: float, confidence: float, n_
       the services), added along every path, maximum over the paths.
     - Oracle: the measured node quantiles of data.node_quantiles, added along every path, maximum over the paths.
     Every node bound and every path is computed on its own, also where two have the same service types, so that the
-    evaluation time is that of a tree of different services. Returns the two dictionaries of compare_methods."""
+    evaluation time is that of a tree of different services. Returns the two dictionaries of compare_methods.
+    A real tree (TreeData with services, real_tree_data in real_data.py) has its held-out configurations per node: every
+    model is trained once per service type and predicts at the configurations of every node of that type (model_of),
+    and, as in compare_methods with real data, the GPs of Quantile Union and Conformal are fitted on the logarithm of
+    the latency quantile."""
     paths, n_services, workload = leaf_to_root_paths(data.children), len(data.path), data.workload
-    services = sorted(set(data.path))
+    model = model_of(data)
+    services, keys = sorted(set(model.values())), sorted(model)
+    log_target = data.y_train_spread is not None
     x_test = model_inputs(data.x_test, data.workers_column)
     x_load, x_test_load = model_inputs(data.x_train_load, data.workers_column), model_inputs(data.x_test_load, data.workers_column)   # the rate stays the last column
     beliefs, gp_seconds = models["beliefs"], models["seconds"]["gp"]
-    predictions = lambda: {s: models["gp"][s].predict(configurations_of(x_test, s), return_std=True) for s in services}
+    predictions = lambda: {key: models["gp"][model[key]].predict(configurations_of(x_test, key), return_std=True) for key in keys}
     epsilon_node = alpha / sum(len(path) for path in paths)
 
     def per_service(latency_of):
-        # a baseline that trains its own models per service: latency_of(s) gives (latency per configuration, training time)
-        outputs = {s: latency_of(s) for s in services}
-        return max_path_sum(paths, lambda k, previous: outputs[data.path[k]][0]), sum(seconds for _, seconds in outputs.values())
+        # a baseline that trains its own models per service: latency_of(s, x) gives (latency per configuration of x, training
+        # time), where x holds the held-out inputs of every key of the service type s one after the other
+        outputs, training_seconds = {}, 0.0
+        for s in services:
+            of_type = [key for key in keys if model[key] == s]
+            inputs = [configurations_of(x_test_load, key) for key in of_type]
+            latency, seconds = latency_of(s, {s: np.vstack(inputs)})
+            outputs.update(zip(of_type, np.split(latency, np.cumsum([len(x) for x in inputs])[:-1])))
+            training_seconds += seconds
+        return max_path_sum(paths, lambda k, previous: outputs[data.path[k]]), training_seconds
 
     def gp_queue():
         predicted = predictions()
-        quantiles = {s: queueing_formula_latency(predicted[s][0], predicted[s][1] ** 2, epsilon=alpha, **workload) for s in services}
+        quantiles = {key: queueing_formula_latency(predicted[key][0], predicted[key][1] ** 2, epsilon=alpha, **workload) for key in keys}
         return max_path_sum(paths, lambda k, previous: quantiles[data.path[k]])
 
     def gp_sum():
@@ -191,11 +213,11 @@ def compare_tree_methods(data, models: dict, alpha: float, confidence: float, n_
             [beliefs[k] for k in path], epsilon=alpha / len(paths), holder_exponents=[1] * len(path), **workload))),
         ("GP Sum", "baseline", gp_seconds, gp_sum),
         ("GP Queue", "baseline", gp_seconds, gp_queue),
-        ("Quantile Union", "baseline", None, lambda: per_service(lambda s: summed_service_quantiles(
-            x_load, data.monitored_latencies, [s], alpha / n_services, x_test_load, return_seconds=True))),
-        ("Conformal", "baseline", None, lambda: per_service(lambda s: conformal_service_bounds(
-            x_load, data.monitored_latencies, [s], alpha / n_services, x_test_load, miscoverage=1 - confidence, n_calibration=n_calibration,
-            seed=model_seed, return_seconds=True))),
+        ("Quantile Union", "baseline", None, lambda: per_service(lambda s, x: summed_service_quantiles(
+            x_load, data.monitored_latencies, [s], alpha / n_services, x, return_seconds=True, log_target=log_target))),
+        ("Conformal", "baseline", None, lambda: per_service(lambda s, x: conformal_service_bounds(
+            x_load, data.monitored_latencies, [s], alpha / n_services, x, miscoverage=1 - confidence, n_calibration=n_calibration,
+            seed=model_seed, return_seconds=True, log_target=log_target))),
     ]
     earlier_seconds = {PROPOSED: models["seconds"]["beliefs"], PROPOSED_SNC: models["seconds"]["beliefs"]}
     methods, seconds = {}, {}
@@ -330,6 +352,8 @@ def sweep_conclusion(settings: list, statistics: dict, names: list, label) -> st
         if len(finite) == 0:
             return f"{name} gives no finite bound for most seeds in any setting"
         text = f"{name} from {typical[finite[0]]:.2f}× at {label(computed[name][finite[0]])} to {typical[finite[-1]]:.2f}× at {label(computed[name][finite[-1]])}"
+        if len(finite) == 1:   # one setting, e.g. the one narrow tree of the real data of B.3
+            text = f"{name} {typical[finite[0]]:.2f}× at {label(computed[name][finite[0]])}"
         without = [label(value) for value, value_tightness in zip(computed[name], typical) if not np.isfinite(value_tightness)]
         return text + (f", and no finite bound for most seeds at {', '.join(without)}" if without else "")
 

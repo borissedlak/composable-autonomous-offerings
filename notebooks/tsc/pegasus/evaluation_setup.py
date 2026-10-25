@@ -32,8 +32,8 @@ from .evaluation import (METHOD_COLORS, PROPOSED, PROPOSED_SNC, TIGHTNESS_RANGE,
                          compare_tree_methods, coverage,
                          finite_share, fit_services, ground_truth_conclusion, sweep_conclusion, sweep_seconds, sweep_statistics,
                          tightness_and_time_figure, tightness_figure, tightness_sweep_figure, time_conclusion)
-from .real_data import (BENCHMARKS_V2, CAMPAIGN_V2, campaign_nodes, chain_path, chain_tail_ratios, training_pool, unthrottled_pool,
-                        unthrottled_runs)
+from .real_data import (BENCHMARKS_V2, CAMPAIGN_V2, campaign_nodes, chain_path, chain_tail_ratios, real_tree_data, training_pool, tree_structure,
+                        unthrottled_pool, unthrottled_runs)
 from .service_gp import configurations_of
 from .trees import balanced_tree, narrow_tree
 
@@ -81,10 +81,15 @@ def configure(data_source: str) -> dict:
             # the most benchmark runs that every service of the chain has (unthrottled, with a measurable handling overhead): the largest size of B.2
             n_pool=min(len(unthrottled_pool(training_pool(service, campaign=BENCHMARKS_V2))) for service in chain_path(base_experiment)[1].values()),
             training_options=lambda s: dict(level=1 - alpha, coverage_check=coverage_check, **chain_options(s)),
+            # B.3: the fork-join trees of the campaign (statics/results_milos_v2/b3/), (shape, levels h) -> experiment; the campaign set the
+            # arrival rate of every run so that its slowest service is busy about half of the time
+            tree_experiments={**{("balanced", h): f"b3-balanced-{h}" for h in (1, 2, 3)}, ("narrow", 4): "b3-narrow-4"},
+            tree_levels=[1, 2, 3],                                                               # B.3: levels h of the balanced trees (2^h - 1 services)
+            narrow_levels=[4],                                                                   # B.3: levels h of the narrow trees (2h - 1 services)
         )
     # Experiments that the data source does not support; their cells do nothing (the section of each says why). The real part
     # of B.2b uses the first campaign, so it is skipped with either source.
-    options["skipped"] = {"B.2b real"} if data_source == "synthetic" else {"B.2b real", "B.3", "B.4a", "B.4b", "C.2"}
+    options["skipped"] = {"B.2b real"} if data_source == "synthetic" else {"B.2b real", "B.4a", "B.4b", "C.2"}
 
     def chain_data(s, **changes):
         # Data of the chain of B.1 under the seed s; `changes` replace options of the loader of the data source

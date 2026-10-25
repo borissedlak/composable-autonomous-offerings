@@ -8,7 +8,7 @@
   services, replayed through the same FIFO queues.
 
 Both sources return a `ChainData`, so that the experiments do not depend on where the data comes from. The fork-join
-trees of B.3 (synthetic only) are a `TreeData`, a `ChainData` with the tree's structure.
+trees of B.3 are a `TreeData`, a `ChainData` with the tree's structure (real trees: real_tree_data in `real_data.py`).
 Units: execution times and latencies in seconds.
 """
 from dataclasses import dataclass, replace
@@ -74,9 +74,13 @@ class TreeData(ChainData):
     """ChainData of a fork-join tree (trees.py): `path` holds the service at every position of the tree (position 0 is
     the root, so a service type occurs at several positions), children the children of every position, and
     node_quantiles the measured latency quantile of every position in the tree (release minus the time at which the
-    frame was complete there), (held-out configurations, positions), for the Oracle."""
+    frame was complete there), (held-out configurations, positions), for the Oracle.
+    services (real data, real_tree_data in real_data.py): the service type of every position, whose models the position
+    uses; `path` then holds the node of every position, the key of its held-out configurations in x_test, because the
+    positions of one service type have different configurations. None: `path` holds the service types (synthetic data)."""
     children: list = None
     node_quantiles: np.ndarray = None
+    services: list = None
 
 
 def true_demand(x: np.ndarray, service: dict) -> np.ndarray:
