@@ -56,6 +56,10 @@ CAMPAIGN_V2 = CAMPAIGN.parent / "results_milos_v2" / "b1"
 BENCHMARKS_V2 = CAMPAIGN_V2.parent / "benchmark"
 TREES_V2 = CAMPAIGN_V2.parent / "b3"
 TREE_SOURCE = "camera"   # the node of a tree experiment that sends every frame to the leaves; it is not a service of the tree
+# Held-out runs of a tree: throttled_fraction below this share at every node. In the tree campaign a throttled detector
+# lost only about one CPU period of its run, a single stall, and leaving out every throttled run would drop a sizable
+# share of the runs of a tree. The chains of B.1 and every training run keep the strict rule (no throttling).
+TREE_THROTTLE_LIMIT = 0.005
 NOT_CONFIGURATION = ("cores",)   # knobs that no model of real_chain_data / real_replay_data receives (module docstring)
 POOL_COLUMNS = ("run_id", "experiment", "node", "alone", "mean_s", "spread_s", "overhead_s")   # columns of training_pool that are not knobs
 NORMAL_P95 = 1.6449                                                              # 95th percentile of the standard normal distribution
@@ -424,12 +428,13 @@ def chain_run_latencies(experiment: str, runs: list = None) -> list:
     return [measured_latencies(experiment, run_id, path) for run_id in chain_runs(experiment, runs)]
 
 
-def unthrottled_runs(experiment: str) -> list:
+def unthrottled_runs(experiment: str, below: float = None) -> list:
     """The runs of chain_runs in which no service was throttled: throttled_fraction (the share of the CPU scheduling
     periods of the run in which the container had used up its CPU quota) is 0 at every node. In such a run the
-    execution times do not contain waits for the next period of the quota, which the bounds do not model."""
+    execution times do not contain waits for the next period of the quota, which the bounds do not model.
+    below: keep instead the runs whose throttled_fraction is below this share at every node (TREE_THROTTLE_LIMIT)."""
     throttled = run_table(experiment).groupby("run_id")["throttled_fraction"].max()
-    return [run_id for run_id in chain_runs(experiment) if throttled[run_id] == 0]
+    return [run_id for run_id in chain_runs(experiment) if (throttled[run_id] == 0 if below is None else throttled[run_id] < below)]
 
 
 def unthrottled_pool(pool: pd.DataFrame) -> pd.DataFrame:
@@ -751,7 +756,8 @@ def real_tree_data(experiment: str, level: float, node_level: float, coverage_ch
     form of synthetic_tree_data (data.py): every service has one worker, and an aggregator processes a frame once all
     its children have released it.
 
-    Ground truth (per unthrottled run of the tree, unthrottled_runs): the `level` quantile of the measured end-to-end
+    Ground truth (per run of the tree that is throttled for less than TREE_THROTTLE_LIMIT of its CPU periods at every
+    node, unthrottled_runs): the `level` quantile of the measured end-to-end
     latencies of the run (measured_tree_latencies) and the lower edge of its confidence interval (coverage_check), at the
     Poisson arrival rate that the campaign set for the run (arrival_rates). node_quantiles: the node_level quantile of the
     measured latency of every position in every run, for the Oracle.
@@ -773,7 +779,7 @@ def real_tree_data(experiment: str, level: float, node_level: float, coverage_ch
     rng_train = np.random.default_rng(np.random.SeedSequence(seed).spawn(3)[0])   # the first generator, as in real_chain_data
     chain = run_table(experiment)
     children, nodes, services = tree_structure(experiment)
-    runs = unthrottled_runs(experiment)
+    runs = unthrottled_runs(experiment, below=TREE_THROTTLE_LIMIT)
     rates = arrival_rates(experiment).loc[runs].to_numpy()
     run_latencies = [measured_tree_latencies(experiment, run_id, nodes) for run_id in runs]
     measured, measured_low = measured_quantiles([latency for latency, _ in run_latencies], level, coverage_check)
