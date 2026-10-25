@@ -6,5 +6,6 @@ statics/dgp/
 __pycache__/
 .idea
 .venv
+.claude
 statics/results_milos_v2
 statics/results_milos
