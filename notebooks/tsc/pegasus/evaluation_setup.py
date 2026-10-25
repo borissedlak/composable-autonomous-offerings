@@ -65,6 +65,7 @@ def configure(data_source: str) -> dict:
             training_options=lambda s: dict(service_seed=s),                                     # B.2: what with_training_data needs besides the data
             tree_levels=list(range(1, 9)),                                                       # B.3: levels h of the balanced trees (2^h - 1 services)
             narrow_levels=list(range(5, 9)),                                                     # B.3: levels h of the narrow trees (2h - 1 services)
+            tree_seeds=seeds,                                                                    # B.3: the seeds of every experiment
             tree_utilization=0.5,                                                                # B.3: utilization of the slowest service of a tree
             load_option="arrival_rate", loads=[1, 2, 3, 4, 5],                                   # B.4a: arrival rate (items/s) of all configurations
             load_label=lambda load: f"{load:g}/s",
@@ -86,6 +87,9 @@ def configure(data_source: str) -> dict:
             tree_experiments={**{("balanced", h): f"b3-balanced-{h}" for h in (1, 2, 3)}, ("narrow", 4): "b3-narrow-4"},
             tree_levels=[1, 2, 3],                                                               # B.3: levels h of the balanced trees (2^h - 1 services)
             narrow_levels=[4],                                                                   # B.3: levels h of the narrow trees (2h - 1 services)
+            # B.3: more seeds than the other experiments (the first ones are `seeds`): a seed only changes which benchmark runs train
+            # the models, and with about a hundred runs per tree whether a method holds can hinge on a single run
+            tree_seeds=list(range(5)),
         )
     # Experiments that the data source does not support; their cells do nothing (the section of each says why). The real part
     # of B.2b uses the first campaign, so it is skipped with either source.
