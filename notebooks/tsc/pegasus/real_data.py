@@ -31,7 +31,9 @@ and with enough cores the execution time does not depend on them.
 
 Fork-join trees (TREES_V2, the folder `b3/` of the second campaign, experiment B3 of `new_experiments.md`): a camera
 (`frame-source`) sends every frame to all leaves (detectors), and every aggregator (the image transformer) processes a
-frame once the results of all its children for that frame are there (real_tree_data).
+frame once the results of all its children for that frame are there (real_tree_data). TREE_HEIGHTS_V2 (the folder
+`b3-heights/`) measured the balanced trees again (`b3h-height-<h>`, h = 1 to 5) with 8 configurations, each repeated 6
+times, one model size for all detectors of a run, and fixed cores per service.
 
 Benchmarks (BENCHMARKS_V2): every service measured alone, one experiment `bench-<service>-<version>-u<utilization in %>`
 per service and utilization (0.1 to 1.0), each with the same 10 configurations; the cores of a run are the CPU need of
@@ -55,6 +57,7 @@ CAMPAIGN = Path(__file__).resolve().parents[3] / "statics" / "results_milos"
 CAMPAIGN_V2 = CAMPAIGN.parent / "results_milos_v2" / "b1"
 BENCHMARKS_V2 = CAMPAIGN_V2.parent / "benchmark"
 TREES_V2 = CAMPAIGN_V2.parent / "b3"
+TREE_HEIGHTS_V2 = CAMPAIGN_V2.parent / "b3-heights"
 TREE_SOURCE = "camera"   # the node of a tree experiment that sends every frame to the leaves; it is not a service of the tree
 # Held-out runs of a tree: throttled_fraction below this share at every node. In the tree campaign a throttled detector
 # lost only about one CPU period of its run, a single stall, and leaving out every throttled run would drop a sizable
@@ -69,9 +72,9 @@ NORMAL_P95 = 1.6449                                                             
 # Reading the campaign
 # ------------------------------------------------------------------------------
 def campaign_of(experiment: str) -> Path:
-    """The campaign folder that holds `experiment`: CAMPAIGN_V2, BENCHMARKS_V2 or TREES_V2 if it has a folder of that
-    name, else CAMPAIGN."""
-    return next((campaign for campaign in (CAMPAIGN_V2, BENCHMARKS_V2, TREES_V2) if (campaign / experiment).is_dir()), CAMPAIGN)
+    """The campaign folder that holds `experiment`: CAMPAIGN_V2, BENCHMARKS_V2, TREES_V2 or TREE_HEIGHTS_V2 if it has a
+    folder of that name, else CAMPAIGN."""
+    return next((campaign for campaign in (CAMPAIGN_V2, BENCHMARKS_V2, TREES_V2, TREE_HEIGHTS_V2) if (campaign / experiment).is_dir()), CAMPAIGN)
 
 
 def experiment_folder(experiment: str) -> Path:

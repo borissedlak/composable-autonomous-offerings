@@ -83,13 +83,12 @@ def configure(data_source: str) -> dict:
             n_pool=min(len(unthrottled_pool(training_pool(service, campaign=BENCHMARKS_V2))) for service in chain_path(base_experiment)[1].values()),
             training_options=lambda s: dict(level=1 - alpha, coverage_check=coverage_check, **chain_options(s)),
             # B.3: the fork-join trees of the campaign (statics/results_milos_v2/b3/), (shape, levels h) -> experiment; the campaign set the
-            # arrival rate of every run so that its slowest service is busy about half of the time
-            tree_experiments={**{("balanced", h): f"b3-balanced-{h}" for h in (1, 2, 3)}, ("narrow", 4): "b3-narrow-4"},
-            tree_levels=[1, 2, 3],                                                               # B.3: levels h of the balanced trees (2^h - 1 services)
+            # arrival rate of every run so that its slowest service is busy about half of the time. The tree with h = 4 draws the image
+            # resolution from 160 to 256 px, the others from 160 to 640 px (experiment.yaml of every tree)
+            tree_experiments={**{("balanced", h): f"b3-balanced-{h}" for h in (1, 2, 3, 4)}, ("narrow", 4): "b3-narrow-4"},
+            tree_levels=[1, 2, 3, 4],                                                            # B.3: levels h of the balanced trees (2^h - 1 services)
             narrow_levels=[4],                                                                   # B.3: levels h of the narrow trees (2h - 1 services)
-            # B.3: more seeds than the other experiments (the first ones are `seeds`): a seed only changes which benchmark runs train
-            # the models, and with about a hundred runs per tree whether a method holds can hinge on a single run
-            tree_seeds=list(range(5)),
+            tree_seeds=seeds,                                                                    # B.3: the seeds of every experiment
         )
     # Experiments that the data source does not support; their cells do nothing (the section of each says why). The real part
     # of B.2b uses the first campaign, so it is skipped with either source.
