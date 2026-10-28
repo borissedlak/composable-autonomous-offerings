@@ -10,7 +10,8 @@ Every notebook starts with
     from pegasus.evaluation_setup import *
     globals().update(configure(data_source))
     globals().update(b1_base(data_source))   # where the notebook needs the base case of B.1
-so that a parameter is defined once for all notebooks. b1_base computes the base case once and keeps it in
+so that a parameter is defined once for all notebooks. configure, b1_base and cached take `chains` (CHAIN_FOLDERS) to
+run the real data on other chains; its default is the option of the paper, DEFAULT_CHAINS. b1_base computes the base case once and keeps it in
 statics/evaluation_cache/ (never committed); see b1_base for when it is computed anew.
 """
 import ast
@@ -32,7 +33,7 @@ from .evaluation import (METHOD_COLORS, PROPOSED, PROPOSED_SNC, TIGHTNESS_RANGE,
                          compare_tree_methods, coverage,
                          finite_share, fit_services, ground_truth_conclusion, sweep_conclusion, sweep_seconds, sweep_statistics,
                          tightness_and_time_figure, tightness_figure, tightness_sweep_figure, time_conclusion)
-from .real_data import (BENCHMARKS_V2, CAMPAIGN_V2, campaign_nodes, chain_path, chain_tail_ratios, real_tree_data, training_pool, tree_structure,
+from .real_data import (BENCHMARK_AND_CHAINS, BENCHMARKS_V2, CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, campaign_nodes, chain_experiments, chain_path, chain_tail_ratios, real_tree_data, training_pool, tree_structure,
                         unthrottled_pool, unthrottled_runs)
 from .service_gp import configurations_of
 from .trees import balanced_tree, narrow_tree
@@ -53,12 +54,28 @@ only_base_case = ("DNN Sum",)
 sweep_competitors = [name for name in competitors if name not in only_base_case]  # the methods of B.2 to B.6 without the Oracle
 
 CACHE = Path(__file__).resolve().parents[3] / "statics" / "evaluation_cache"
+# The chains of the real data (`chains`): "b1", the chains of B1 with one worker per service, where a third of the
+# runs was throttled and is left out; "b1-unthrottled", the same chains measured again with 1 to 4 workers per service
+# and no throttled run; "b1+b1u-max3", every chain of b1 with the runs of its twin in b1-unthrottled in which no service
+# has more than 3 workers (combined_chain in real_data.py). Per option: the folder whose chains are listed, and the suffix
+# of their names
+CHAIN_FOLDERS = {"b1": (CAMPAIGN_V2, ""), "b1-unthrottled": (CHAINS_UNTHROTTLED_V2, ""), "b1+b1u-max3": (CAMPAIGN_V2, "+b1u-max3")}
+BASE_CHAIN = {CAMPAIGN_V2: "b1-vision-1-single", CHAINS_UNTHROTTLED_V2: "b1u-vision-1"}   # the chain of B.1 in each folder
+# The chain of B.2 in each folder: denoiser -> object detector -> face detector -> compressor, the chain whose services the
+# models know least evenly (the face detector far worse than the others), see B.2
+EVIDENCE_CHAIN = {CAMPAIGN_V2: "b1-vision-3-single", CHAINS_UNTHROTTLED_V2: "b1u-vision-3"}
+# The chains of the paper: the one-worker runs of b1 and the runs of b1-unthrottled with at most 3 workers per service, the
+# range in which the execution time of a service barely grows with its workers (2a, Services and Chains)
+DEFAULT_CHAINS = "b1+b1u-max3"
 
 
-def configure(data_source: str) -> dict:
+def configure(data_source: str, chains: str = DEFAULT_CHAINS) -> dict:
     """What differs between the two data sources ("synthetic" or "real"): which chain an experiment uses, which loads
-    and trees exist, and which experiments are skipped. A dictionary name -> value for globals().update."""
-    options = dict(data_source=data_source)
+    and trees exist, and which experiments are skipped. A dictionary name -> value for globals().update.
+    chains (real data only): the option of CHAIN_FOLDERS for the chains of B.1 (chain_names, from the folder
+    chain_campaign) and the chain of B.1 (base_experiment); the trees of B.3 are the same with every option."""
+    assert chains in CHAIN_FOLDERS, f"unknown chain folder {chains!r}"
+    options = dict(data_source=data_source, chains=chains if data_source == "real" else "b1")   # synthetic data has no chain folder
     if data_source == "synthetic":
         options.update(
             chain_options=lambda s: dict(path=synthetic_chain(3), service_seed=s),               # the chain of B.1 under the seed s
@@ -70,18 +87,24 @@ def configure(data_source: str) -> dict:
             load_option="arrival_rate", loads=[1, 2, 3, 4, 5],                                   # B.4a: arrival rate (items/s) of all configurations
             load_label=lambda load: f"{load:g}/s",
             base_options={},                                                                     # B.1: the default number of training configurations
+            evidence_options=lambda s: dict(path=synthetic_chain(3), service_seed=s, n_train=200),   # B.2: the chain of B.1, 200 configurations per service
         )
     else:
-        base_experiment = "b1-vision-1-single"                                                   # the chain of B.1: detector -> transformer -> compressor, 1 worker each
+        chain_campaign, suffix = CHAIN_FOLDERS[chains]
+        base_experiment = BASE_CHAIN[chain_campaign] + suffix                                    # the chain of B.1: detector -> transformer -> compressor
         chain_options = lambda s: dict(experiment=base_experiment, training_campaign=BENCHMARKS_V2)   # every service trained on its benchmark
         options.update(
             base_experiment=base_experiment,
+            chain_campaign=chain_campaign,                                                       # B.1 on all chains: the folder of the chains,
+            chain_names=[name + suffix for name in chain_experiments(chain_campaign)],           # and the chains
             base_options=dict(n_train=25),                                                       # B.1: benchmark runs per service and seed (all chains: the smallest
                                                                                                  # benchmark of a service has barely more, see B.1 on all chains)
             chain_options=chain_options,
             # the most benchmark runs that every service of the chain has (unthrottled, with a measurable handling overhead): the largest size of B.2
             n_pool=min(len(unthrottled_pool(training_pool(service, campaign=BENCHMARKS_V2))) for service in chain_path(base_experiment)[1].values()),
             training_options=lambda s: dict(level=1 - alpha, coverage_check=coverage_check, **chain_options(s)),
+            # B.2: its chain with every training run of every service in a random order, from the benchmark and the other chains
+            evidence_options=lambda s: dict(experiment=EVIDENCE_CHAIN[chain_campaign] + suffix, n_train=None, training_campaign=BENCHMARK_AND_CHAINS),
             # B.3: the fork-join trees of the campaign (statics/results_milos_v2/b3/), (shape, levels h) -> experiment; the campaign set the
             # arrival rate of every run so that its slowest service is busy about half of the time. The tree with h = 4 draws the image
             # resolution from 160 to 256 px, the others from 160 to 640 px (experiment.yaml of every tree)
@@ -99,7 +122,11 @@ def configure(data_source: str) -> dict:
         return load_chain_data(data_source, **{**dict(level=1 - alpha, coverage_check=coverage_check, seed=[seed, s]), **options["chain_options"](s),
                                                **options["base_options"], **changes})
 
-    options["chain_data"] = chain_data
+    def evidence_data(s):
+        # Data of the chain of B.2 under the seed s, with every training run of every service (incremental_training in evidence.py)
+        return load_chain_data(data_source, **{**dict(level=1 - alpha, coverage_check=coverage_check, seed=[seed, s]), **options["evidence_options"](s)})
+
+    options["chain_data"], options["evidence_data"] = chain_data, evidence_data
     return options
 
 
@@ -141,21 +168,29 @@ def _cache_key(data_source: str, options: dict) -> str:
         if name == "evaluation.py":
             text = text.split("\n# Figures\n")[0]
         code += text.encode()
-    parameters = repr((data_source, alpha, confidence, coverage_check, seed, seeds, n_calibration, options["base_options"])).encode()
+    parameters = repr((data_source, options["chains"], alpha, confidence, coverage_check, seed, seeds, n_calibration, options["base_options"])).encode()
     code += b"".join(_function_code(function) for function in (configure, base_case, b1_base))
     return hashlib.sha256(parameters + code).hexdigest()[:16]
 
 
-def b1_base(data_source: str, refresh: bool = False) -> dict:
+def _cache_tag(data_source: str, chains: str) -> str:
+    """The part of a cache file name that names the data: the data source, with real data and other chains than "b1"
+    also the chain folder, e.g. "real+b1-unthrottled". The files of one tag never match the stale-file pattern of
+    another ("real_*" does not match "real+...")."""
+    return f"{data_source}+{chains}" if data_source == "real" and chains != "b1" else data_source
+
+
+def b1_base(data_source: str, refresh: bool = False, chains: str = DEFAULT_CHAINS) -> dict:
     """The base case of B.1 for every seed, as a dictionary name -> value for globals().update:
     bases (seed -> data of the chain, no model sees a run of it), base_models (seed -> per-service models, with DNN),
     per_seed (one (methods, compositions) per seed, base_case), base (the data of the first seed, for what is the same
     under every seed), K (services in the chain), workload, n_train (training configurations per service) and arrivals
     (the arrival process in words).
-    Computed once and kept in statics/evaluation_cache/b1_<data source>_<key>.joblib; the key (_cache_key) changes with
-    the parameters and the code of the package, so a stale file is never read. refresh=True computes it anew anyway."""
-    options = configure(data_source)
-    path = CACHE / f"b1_{data_source}_{_cache_key(data_source, options)}.joblib"
+    Computed once and kept in statics/evaluation_cache/b1_<tag>_<key>.joblib (tag: _cache_tag); the key (_cache_key)
+    changes with the parameters and the code of the package, so a stale file is never read. refresh=True computes it
+    anew anyway. chains: as in configure."""
+    options = configure(data_source, chains)
+    path = CACHE / f"b1_{_cache_tag(data_source, chains)}_{_cache_key(data_source, options)}.joblib"
     if path.exists() and not refresh:
         bases, base_models, per_seed = joblib.load(path)
         print(f"base case of B.1 loaded from {path.relative_to(CACHE.parents[1])}")
@@ -170,7 +205,7 @@ def b1_base(data_source: str, refresh: bool = False) -> dict:
                 base_models[s] = fit_services(bases[s], bases[s].x_train, bases[s].y_train, model_seed=seed + s, confidence=confidence)
             per_seed = [base_case(bases, base_models, s) for s in seeds]
         CACHE.mkdir(parents=True, exist_ok=True)
-        for stale in CACHE.glob(f"b1_{data_source}_*.joblib"):   # files of older parameters or code
+        for stale in CACHE.glob(f"b1_{_cache_tag(data_source, chains)}_*.joblib"):   # files of older parameters or code
             stale.unlink()
         joblib.dump((bases, base_models, per_seed), path)
         print(f"base case of B.1 computed and saved to {path.relative_to(CACHE.parents[1])}")
@@ -218,24 +253,24 @@ def _function_code(function) -> bytes:
     return describe(function.__code__)
 
 
-def cached(name: str, data_source: str, compute, inputs: dict = None, refresh: bool = False) -> dict:
+def cached(name: str, data_source: str, compute, inputs: dict = None, refresh: bool = False, chains: str = DEFAULT_CHAINS) -> dict:
     """The results of the experiment `name`: compute() returns them as a dictionary name -> value (for
-    globals().update). They are kept in statics/evaluation_cache/<name>_<data source>_<key>.joblib, where the key
+    globals().update). They are kept in statics/evaluation_cache/<name>_<tag>_<key>.joblib (tag: _cache_tag), where the key
     covers the shared parameters above, `inputs` (the settings of the experiment that compute reads from outside, e.g.
     the swept sizes), what compute itself computes (_function_code) and the code of the package (_computation_code). A
     change of any of them computes the results anew; refresh=True does so anyway. The base case of B.1 that compute
-    builds on has its own key (b1_base) that follows from the same parameters and code."""
-    options = configure(data_source)
-    key_source = repr((data_source, alpha, confidence, coverage_check, seed, seeds, n_calibration, options["base_options"],
+    builds on has its own key (b1_base) that follows from the same parameters and code. chains: as in configure."""
+    options = configure(data_source, chains)
+    key_source = repr((data_source, options["chains"], alpha, confidence, coverage_check, seed, seeds, n_calibration, options["base_options"],
                        sorted((inputs or {}).items()))).encode()
     key = hashlib.sha256(key_source + _function_code(compute) + _computation_code()).hexdigest()[:16]
-    path = CACHE / f"{name}_{data_source}_{key}.joblib"
+    path = CACHE / f"{name}_{_cache_tag(data_source, chains)}_{key}.joblib"
     if path.exists() and not refresh:
         print(f"{name}: results loaded from {path.relative_to(CACHE.parents[1])}")
         return joblib.load(path)
     results = compute()
     CACHE.mkdir(parents=True, exist_ok=True)
-    for stale in CACHE.glob(f"{name}_{data_source}_*.joblib"):   # results of older parameters or code
+    for stale in CACHE.glob(f"{name}_{_cache_tag(data_source, chains)}_*.joblib"):   # results of older parameters or code
         stale.unlink()
     joblib.dump(results, path)
     print(f"{name}: results computed and saved to {path.relative_to(CACHE.parents[1])}")
