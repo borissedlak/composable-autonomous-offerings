@@ -688,7 +688,8 @@ def uncertainty_figure(uncertainty: dict, chain_bound: dict, chain_pegasus: dict
                     linewidth=method_linewidth("Oracle"))
             segments.extend((x, value, value) for x in chain_runs)
         values = [value for segment in segments for value in segment[1:] if np.isfinite(value) and value > 0]
-        ax.set_ylim(min(values) / 2, max(values) * 60)   # room above the data for the legend
+        # half a decade above the power of ten over the data: the top tick is labeled, and the legend clears the data below it
+        ax.set_ylim(min(values) / 2, 10 ** (np.ceil(np.log10(max(values))) + 0.5))
         # the legend entries of the methods as in every figure (method_handle); short labels, so that the narrow legend leaves the
         # start of the lines free
         right_handles, right_labels = [method_handle(PROPOSED)], ["Pegasus Node"]
