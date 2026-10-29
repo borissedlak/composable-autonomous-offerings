@@ -96,14 +96,13 @@ def incremental_training(data, schedule: str, levels: list, alpha: float, confid
         level[chosen] += 1
 
 
-def schedule_figure(totals: dict, statistics: dict, runs: np.ndarray, services: list, title: str, level_label: str, name: str = None) -> None:
-    """Two separate figures over the total number of training runs of the chain (all services together, logarithmic).
-    First: the tightness of Pegasus Node under every schedule (statistics: from sweep_statistics over the steps of the
-    schedule, with the schedules in place of the methods; totals: schedule -> total runs at every step, the median over
-    the seeds; per step the median over the seeds, the band from the smallest to the largest seed, a filled marker
-    where the bound holds, the red zone below 1x). Second: the training runs of every service under MOST_UNCERTAIN, the
-    median over the seeds (runs: (steps, seeds, services)). The title is printed above the figures; name: file name in
-    figures/tsc, saved as <name>_tightness and <name>_runs, or None."""
+def schedule_figure(totals: dict, statistics: dict, title: str, level_label: str, name: str = None) -> None:
+    """The tightness of Pegasus Node under every schedule over the total number of training runs of the chain (all
+    services together, logarithmic). statistics: from sweep_statistics over the steps of the schedule, with the
+    schedules in place of the methods; totals: schedule -> total runs at every step, the median over the seeds; per
+    step the median over the seeds, the band from the smallest to the largest seed, a filled marker where the bound
+    holds, the red zone below 1x. The title is printed above the figure; name: file name in figures/tsc, saved as
+    <name>_tightness, or None."""
     from .figures import tightness_label, tightness_tick
     print(title)
     xlabel = "training runs of the chain, all services (log scale)"
@@ -130,18 +129,4 @@ def schedule_figure(totals: dict, statistics: dict, runs: np.ndarray, services: 
                       columnspacing=1.0, handletextpad=0.4)
         if name is not None:
             save_figure(fig, f"{name}_tightness")
-        plt.show()
-
-        fig, ax = paper_figure()
-        typical = np.median(runs, axis=1)   # (steps, services)
-        for k, service in enumerate(services):
-            ax.plot(totals[MOST_UNCERTAIN], typical[:, k], drawstyle="steps-post", linewidth=1.5, label=service)
-        ax.set_xscale("log")
-        ax.set_yscale("log")
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel(f"training runs per service ({MOST_UNCERTAIN})")
-        ax.grid(True, linestyle=":", alpha=0.6)
-        ax.legend(loc="upper left", fontsize=10, framealpha=0.95)
-        if name is not None:
-            save_figure(fig, f"{name}_runs")
         plt.show()

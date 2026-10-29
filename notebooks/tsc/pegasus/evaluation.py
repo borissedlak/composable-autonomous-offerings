@@ -613,3 +613,96 @@ def _tightness_legend(ax, settings: list, statistics: dict, ncol: int = 3, half:
     segments = [segment for name in statistics if name in METHOD_COLORS for segment in sweep_segments(settings, statistics[name]["tightness"])]
     legend_inside(ax, handles + marker_handles, labels + marker_labels, segments, max_doublings=0, ncol=ncol, fontsize=10, framealpha=0.95,
                   columnspacing=1.0, handletextpad=0.4)
+
+
+def uncertainty_figure(uncertainty: dict, chain_bound: dict, services: list, title: str, name: str = None) -> None:
+    """How uncertain every service model is, and how much that uncertainty costs the chain, against the training runs
+    of the service: two figures side by side in the width of one (half_figure, each with its own vertical axis), each
+    with the training runs of the service on the horizontal axis (logarithmic) and one line per service.
+    Left (relative uncertainty, s, logarithmic): the line is the predicted mean execution time m, the band reaches up to
+    m * (1 + margin), the pessimistic mean of the bound, so that the height of the band on the logarithmic axis is the
+    margin; every value the median over the seeds. The margin with all runs is also written as a percentage at the end
+    of every line (_margin_labels). Right (effect on the chain, logarithmic): the uncertainty cost of
+    uncertainty_cost in evidence.py over the end-to-end bound of the chain with the predicted means and all runs of
+    every service (chain_bound), per seed; the line is the median over the seeds, the band reaches from the smallest
+    to the largest seed, a level has no point where the median is infinite. A thin black line marks a cost as large as
+    the whole chain bound. uncertainty: seed -> service -> array (levels, 5) of (training runs, margin, cost, mean,
+    bound with the mean), each value the median over the held-out configurations; the runs of every level are the
+    same under every seed. chain_bound: seed -> the median over the held-out configurations of the sum of the node
+    bounds with the predicted means (s). The title is printed above the figures; name: file name in figures/tsc, saved
+    as <name>_execution and <name>_share, or None."""
+    from .figures import BAND_ALPHA, fit_half_pair, half_figure, legend_inside, paper_style, plain_log_ticks, save_figure
+    print(title)
+    seeds = list(uncertainty)
+    median = lambda service, column: np.median([uncertainty[s][service][:, column] for s in seeds], axis=0)
+    runs = {service: uncertainty[seeds[0]][service][:, 0] for service in services}
+    # services are no methods: their own colors and markers, so that every line also reads in grayscale
+    colors = ("tab:blue", "tab:orange", "tab:green", "tab:purple", "tab:brown", "tab:pink")
+    styles = (("o", "-"), ("s", "--"), ("^", "-."), ("D", ":"), ("v", "-"), ("P", "--"))
+    with paper_style():
+        fig, ax = half_figure("left", shared_y=False)
+        segments = []
+        for k, service in enumerate(services):
+            mean = median(service, 3)
+            pessimistic = mean * (1 + median(service, 1))
+            marker, linestyle = styles[k % len(styles)]
+            color = colors[k % len(colors)]
+            ax.fill_between(runs[service], mean, pessimistic, color=color, alpha=0.3, linewidth=0)
+            ax.plot(runs[service], pessimistic, linestyle=linestyle, color=color, linewidth=0.8)
+            ax.plot(runs[service], mean, linestyle=linestyle, marker=marker, color=color, linewidth=1.5, markersize=6, label=service)
+            segments += list(zip(runs[service], mean, pessimistic))
+        values = [value for segment in segments for value in segment[1:]]
+        ax.set_ylim(min(values) / 2, max(values) * 10)   # room above the data for the legend
+        handles, labels = ax.get_legend_handles_labels()
+        left, left_segments, figures = ax, segments, [(fig, "execution")]
+
+        fig, ax = half_figure("right", shared_y=False)
+        segments = []
+        ax.axhline(1.0, color="black", linewidth=1)
+        for k, service in enumerate(services):
+            share = np.stack([uncertainty[s][service][:, 2] / chain_bound[s] for s in seeds], axis=1)   # (levels, seeds)
+            typical = np.median(share, axis=1)
+            shown = np.isfinite(typical) & (typical > 0)
+            low, high = np.min(share, axis=1), np.max(np.where(np.isfinite(share), share, np.nan), axis=1)
+            marker, linestyle = styles[k % len(styles)]
+            color = colors[k % len(colors)]
+            ax.fill_between(runs[service][shown], low[shown], high[shown], color=color, alpha=BAND_ALPHA, linewidth=0)
+            ax.plot(runs[service][shown], typical[shown], linestyle=linestyle, marker=marker, color=color, linewidth=1.5, markersize=6)
+            segments += list(zip(runs[service][shown], low[shown], high[shown]))
+        values = [value for segment in segments for value in segment[1:] if np.isfinite(value) and value > 0]
+        ax.set_ylim(min(values) / 2, max(max(values), 1.0) * 3)
+        # the reference line labeled where it is drawn, at the right end, where the costs have fallen far below it
+        ax.text(0.97, 1.0, "cost = chain bound", transform=ax.get_yaxis_transform(), ha="right", va="bottom", fontsize=10)
+        figures.append((fig, "share"))
+
+        for (fig, suffix), axis in zip(figures, (left, ax)):
+            axis.set_xscale("log")
+            axis.set_yscale("log")
+            plain_log_ticks(axis.xaxis)
+            plain_log_ticks(axis.yaxis)
+            axis.set_xlabel("training runs of the service")
+            axis.set_ylabel("predicted execution time (s)" if suffix == "execution" else "cost of uncertainty")
+            axis.grid(True, linestyle=":", alpha=0.6)
+        legend_inside(left, handles, labels, left_segments, locations=("upper right", "upper center"),
+                      max_doublings=0, ncol=2, fontsize=10, framealpha=0.95, columnspacing=1.0, handletextpad=0.4)
+        fit_half_pair([left, ax])
+        _margin_labels(left, {service: (runs[service], median(service, 3), median(service, 1)) for service in services},
+                       {service: colors[k % len(colors)] for k, service in enumerate(services)})
+        for fig, suffix, *_ in figures:
+            if name is not None:
+                save_figure(fig, f"{name}_{suffix}")
+            plt.show()
+
+
+def _margin_labels(ax, lines: dict, colors: dict, fontsize: float = 9) -> None:
+    """The uncertainty margin delta with all runs as a percentage ("delta = +3%": the pessimistic mean lies 3% above the
+    predicted one; one-sided, because the bound uses only the pessimistic mean)
+    at the end of every line of uncertainty_figure, ending at its last point: above the band, or below the line where
+    the next slower service lies less than a factor 3 higher, so that the label does not run into that service's line.
+    lines: service -> (training runs, mean, margin)."""
+    ends = {service: mean[-1] for service, (_, mean, _) in lines.items()}
+    for service, (runs, mean, margin) in lines.items():
+        above = min((value for value in ends.values() if value > ends[service]), default=np.inf) >= 3 * ends[service]
+        anchor = mean[-1] * (1 + margin[-1]) if above else mean[-1]   # the top of the band, or the line
+        ax.annotate(rf"$\delta$ = +{margin[-1]:.0%}", (runs[-1], anchor), xytext=(4, 3 if above else -5), textcoords="offset points", ha="right",
+                    va="bottom" if above else "top", color=colors[service], fontsize=fontsize, fontweight="bold")
