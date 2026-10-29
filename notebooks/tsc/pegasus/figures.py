@@ -7,11 +7,12 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from matplotlib.lines import Line2D
 from matplotlib.transforms import Bbox
 from matplotlib.ticker import LogFormatterSciNotation
 
-from .evaluation import METHOD_COLORS, PROPOSED, PROPOSED_SNC
+from .evaluation import METHOD_COLORS, PROPOSED, PROPOSED_SNC, same_models
 
 FIGURES = Path(__file__).resolve().parents[3] / "figures" / "tsc"
 # marker and line style per method, so that the methods can be told apart in grayscale; the color is METHOD_COLORS
@@ -254,3 +255,34 @@ def save_figure(fig, name: str) -> None:
         print(f"save_figure: {name} reaches beyond the figure by {beyond} inches")
     fig.savefig(FIGURES / f"{name}.pdf")
     fig.savefig(FIGURES / f"{name}.jpg", dpi=300, facecolor="white")
+
+
+# ------------------------------------------------------------------------------
+# Result tables (here and not in evaluation.py, so that they do not change the cache key of the results)
+# ------------------------------------------------------------------------------
+def sweep_table(settings: list, statistics: dict, names: list, label, truth: dict = None, seeds: list = None) -> pd.DataFrame:
+    """Result table of a sweep: one row per method of `names`, one column per setting. A cell is the tightness, the
+    median over the seeds (a seed without a finite tightness counts as infinitely loose), marked ● where the method
+    holds and ○ where it does not; "–" where the method is not computed. statistics: from sweep_statistics;
+    label(setting): the column name. With truth and seeds (as in sweep_statistics), a last row gives the measured
+    quantile in s, the median over the held-out configurations and then over the seeds."""
+    rows = {}
+    for name in [name for name in names if name in statistics]:
+        tightness = statistics[name]["tightness"]
+        typical = np.median(np.where(np.isnan(tightness), np.inf, tightness), axis=1)
+        rows[name] = [("–" if not computed else f"{value:.2f}×" if np.isfinite(value) else "∞") + ("" if not computed else " ●" if ok else " ○")
+                      for value, ok, computed in zip(typical, statistics[name]["holds"], statistics[name]["computed"])]
+    if truth is not None:
+        rows["measured (s)"] = [f"{np.median([np.median(truth[(value, s)][0]) for s in seeds]):.3g}" for value in settings]
+    return pd.DataFrame(rows, index=[label(value) for value in settings]).T
+
+
+def time_table(settings: list, times: dict, names: list, label) -> pd.DataFrame:
+    """Training and evaluation time of the methods `names` per setting (s, median over the seeds; "–" where a method is
+    not computed). Methods that use the same trained models (same_models) share one training row. times: from
+    sweep_seconds; label(setting): the column name."""
+    names = [name for name in names if name in times]
+    seconds = lambda values: [f"{np.median(row[~np.isnan(row)]):.2g}" if (~np.isnan(row)).any() else "–" for row in values]
+    rows = {f"training: {', '.join(group)}": seconds(times[group[0]]["training"]) for group in same_models(times, names)}
+    rows.update({f"evaluation: {name}": seconds(times[name]["evaluation"]) for name in names})
+    return pd.DataFrame(rows, index=[label(value) for value in settings]).T
