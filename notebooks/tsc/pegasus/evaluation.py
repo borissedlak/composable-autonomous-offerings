@@ -404,7 +404,6 @@ def ground_truth_conclusion(settings: list, truth: dict, statistics: dict, seeds
 # ------------------------------------------------------------------------------
 TIGHTNESS_RANGE = (0.2, 64)   # range of the tightness axis of every figure; a value outside lies beyond the edge of the axis
 TIGHTNESS_TICKS = [0.25, 0.5, 1, 2, 4, 8, 16, 32]
-COST_DECADES = 2.5   # the cost axis of uncertainty_figure ends this many decades below the lowest bound of the chain
 
 
 def arrival_text(workload: dict) -> str:
@@ -616,138 +615,89 @@ def _tightness_legend(ax, settings: list, statistics: dict, ncol: int = 3, half:
                   columnspacing=1.0, handletextpad=0.4)
 
 
-def uncertainty_figure(uncertainty: dict, chain_bound: dict, chain_pegasus: dict, services: list, title: str, name: str = None,
-                       oracle: dict = None, level_label: str = None) -> None:
-    """How uncertain every service model is, and how much that uncertainty costs the chain, against the training runs
-    of the service: two figures side by side in the width of one (half_figure, each with its own vertical axis), each
-    with the training runs of the service on the horizontal axis (logarithmic) and one line per service.
-    Left (relative uncertainty, s, logarithmic): the line is the predicted mean execution time m, the band reaches up to
-    m * (1 + margin), the pessimistic mean of the bound, so that the height of the band on the logarithmic axis is the
-    margin; every value the median over the seeds. The margin with all runs is also written as a percentage at the end
-    of every line (_margin_labels). Right (effect on the chain, s, logarithmic): the uncertainty cost of every service
-    (uncertainty_cost in evidence.py) against the end-to-end bound of Pegasus Node when every service has that many runs
-    (chain_pegasus), the same bound with the predicted means in place of the pessimistic ones (dotted, in the color of
-    Pegasus Node, without markers, which would read as hollow "does not hold" markers), and the Oracle, both methods in
-    their color and style of every figure. The gap between the two Pegasus lines is the cost of the uncertainty of all
-    services together; the gap between the dotted line and the Oracle remains with known means. Every line is the median over the
-    seeds, every band reaches from the smallest to the largest seed, and a level has no point where the median is
-    infinite. uncertainty: seed -> service -> array (levels, 5) of (training runs, margin, cost, mean,
-    bound with the mean), each value the median over the held-out configurations; the runs of every level are the
-    same under every seed. chain_bound: seed -> the median over the held-out configurations of the sum of the node
-    bounds with the predicted means (s), not drawn. chain_pegasus: seed -> array (levels, 3) of (training runs per
-    service, the bound of Pegasus Node, the bound with the predicted means), both bounds in s and the median over the
-    held-out configurations; a service with fewer runs holds all of them. oracle: seed -> the median over the held-out
-    configurations of the Oracle (s), which uses no training data, or None for no Oracle. The title is printed above the figures; name: file name in figures/tsc, saved
-    as <name>_execution and <name>_cost, or None."""
-    from matplotlib.lines import Line2D
-    from .figures import (BAND_ALPHA, METHOD_STYLES, fit_half_pair, half_figure, legend_inside, method_handle, method_linewidth, paper_style,
-                          plain_log_ticks, save_figure)
+def uncertainty_figure(uncertainty: dict, chain_pegasus: dict, services: list, title: str, confidence: float, name: str = None,
+                       oracle: dict = None, level_label: str = None, execution_times: dict = None) -> None:
+    """What more training runs per service do to the service models and to the bound of Pegasus Node: two figures side
+    by side in the width of one (half_figure, each with its own vertical axis), with the training runs per service on
+    the horizontal axis (logarithmic). All services grow together; a service with fewer runs holds all of them.
+    Left (accuracy of every service model, %, logarithmic): per service, in its color and marker, the error of the
+    predicted mean execution time m against the measured mean of the held-out run, |m - measured| / measured, the
+    median over the held-out configurations and then over the seeds. The margin of the pessimistic mean m-bar is not
+    drawn: four margin lines next to four error lines made the figure unreadable; its effect on the chain is the gap
+    between Pegasus Node and the line with known means on the right, and its values are in the tables of the notebook. Right (Pegasus Node, as every tightness figure of B): its
+    tightness, the end-to-end bound / the measured quantile, the median over the held-out configurations per seed, as a
+    line over the seeds with the band from the smallest to the largest seed, a filled marker where it holds (coverage of
+    at least `confidence` under every seed) and a hollow one where it does not; the same bound with the predicted means
+    m in place of m-bar (dotted, in the color of Pegasus Node, without markers), whose distance to Pegasus Node is the
+    price of the uncertainty of the models; and the Oracle, which uses no training data. Where the median over the
+    seeds is infinite (the pessimistic mean overloads a service at half of the configurations or more), "∞" stands at
+    the top edge. uncertainty: seed -> service -> array (levels, 6) of (training runs, median margin, uncertainty cost,
+    median predicted mean, median node bound with it, median error of the predicted mean); chain_pegasus: seed ->
+    array (levels, 7) of (training runs per service, median bound of Pegasus Node (s), median bound with the predicted
+    means (s), median tightness of both, coverage of both); oracle: seed -> (median tightness, coverage) of the Oracle,
+    or None. execution_times: service -> its measured mean execution time (s), written next to its name in the legend, so
+    that the figure keeps how slow every service is; or None. The title is printed above the figures; name: file name in
+    figures/tsc, saved as <name>_execution (left)
+    and <name>_cost (right), the names they had before, so that references to the files stay valid, or None."""
+    from .figures import fit_half_pair, half_figure, legend_inside, paper_style, plain_log_ticks, save_figure
     print(title)
     seeds = list(uncertainty)
     median = lambda service, column: np.median([uncertainty[s][service][:, column] for s in seeds], axis=0)
     runs = {service: uncertainty[seeds[0]][service][:, 0] for service in services}
     # services are no methods: their own colors and markers, so that every line also reads in grayscale
-    # neither the colors nor the markers of Pegasus Node (green, circle) and the Oracle (purple, star) in the right figure
     colors = ("tab:blue", "tab:orange", "tab:brown", "tab:pink", "tab:cyan", "tab:olive")
-    styles = (("s", "-"), ("^", "--"), ("D", "-."), ("v", ":"), ("P", "-"), ("X", "--"))
+    markers = ("s", "^", "D", "v", "P", "X")
     with paper_style():
-        fig, ax = half_figure("left", shared_y=False)
+        fig, left = half_figure("left", shared_y=False)
         segments = []
         for k, service in enumerate(services):
-            mean = median(service, 3)
-            pessimistic = mean * (1 + median(service, 1))
-            marker, linestyle = styles[k % len(styles)]
-            color = colors[k % len(colors)]
-            ax.fill_between(runs[service], mean, pessimistic, color=color, alpha=0.3, linewidth=0)
-            ax.plot(runs[service], pessimistic, linestyle=linestyle, color=color, linewidth=0.8)
-            ax.plot(runs[service], mean, linestyle=linestyle, marker=marker, color=color, linewidth=1.5, markersize=6, label=service)
-            segments += list(zip(runs[service], mean, pessimistic))
-        values = [value for segment in segments for value in segment[1:]]
-        ax.set_ylim(min(values) / 2, max(values) * 10)   # room above the data for the legend
-        handles, labels = ax.get_legend_handles_labels()
-        left, left_segments, figures = ax, segments, [(fig, "execution")]
+            color, marker = colors[k % len(colors)], markers[k % len(markers)]
+            error = 100 * median(service, 5)
+            time = "" if execution_times is None else (f" ({execution_times[service]:.2g} s)" if execution_times[service] >= 1
+                                                       else f" ({execution_times[service] * 1e3:.2g} ms)")
+            left.plot(runs[service], error, linestyle="-", marker=marker, color=color, linewidth=1.5, markersize=6, label=service + time)
+            segments += [(x, e, e) for x, e in zip(runs[service], error)]
+        values = [value for segment in segments for value in segment[1:] if value > 0]
+        # little room above the data: the errors are largest with few runs, at the left, and the legend fits upper right
+        left.set_ylim(min(values) / 1.5, max(values) * 1.5)
+        handles, labels = left.get_legend_handles_labels()
+        left.set_ylabel("error of predicted mean (%)")
+        figures = [(fig, "execution")]
 
         fig, ax = half_figure("right", shared_y=False)
-        segments = []
-
-        def seeds_line(x, values, color, marker, linestyle, linewidth=1.5, label=None):
-            # values: (levels, seeds); the median over the seeds with the band from the smallest to the largest seed
-            typical = np.median(values, axis=1)
-            shown = np.isfinite(typical) & (typical > 0)   # a log axis has no room for 0, an infinite median has no point
-            low, high = np.min(values, axis=1), np.max(np.where(np.isfinite(values), values, np.nan), axis=1)
-            ax.fill_between(x[shown], low[shown], high[shown], color=color, alpha=BAND_ALPHA, linewidth=0)
-            ax.plot(x[shown], typical[shown], linestyle=linestyle, marker=marker, color=color, linewidth=linewidth, markersize=6, label=label)
-            segments.extend(zip(x[shown], low[shown], high[shown]))
-
-        for k, service in enumerate(services):
-            marker, linestyle = styles[k % len(styles)]
-            seeds_line(runs[service], np.stack([uncertainty[s][service][:, 2] for s in seeds], axis=1), colors[k % len(colors)], marker, linestyle)
         chain_runs = chain_pegasus[seeds[0]][:, 0]
-        marker, linestyle = METHOD_STYLES[PROPOSED]
-        seeds_line(chain_runs, np.stack([chain_pegasus[s][:, 1] for s in seeds], axis=1), METHOD_COLORS[PROPOSED], marker, linestyle,
-                   linewidth=method_linewidth(PROPOSED))
-        seeds_line(chain_runs, np.stack([chain_pegasus[s][:, 2] for s in seeds], axis=1), METHOD_COLORS[PROPOSED], None, ":")
-        if oracle is not None:   # the same at every number of runs: a horizontal line across the runs of the chain
-            value = float(np.median(list(oracle.values())))
-            marker, linestyle = METHOD_STYLES["Oracle"]
-            ax.plot(chain_runs, np.full(len(chain_runs), value), color=METHOD_COLORS["Oracle"], linestyle=linestyle, marker=marker, markersize=8,
-                    linewidth=method_linewidth("Oracle"))
-            segments.extend((x, value, value) for x in chain_runs)
-        values = [value for segment in segments for value in segment[1:] if np.isfinite(value) and value > 0]
-        # the axis ends COST_DECADES below the lowest bound of the chain: a smaller cost is invisible next to the bound, and the
-        # bounds would otherwise share a thin strip of the axis. The services whose cost lies below it at every number of runs
-        # are named with that limit inside the axes, so that the figure still says where they are
-        chain_values = [value for segment in segments[sum(len(runs[service]) for service in services):] for value in segment[1:]
-                        if np.isfinite(value) and value > 0]
-        floor = min(chain_values) / 10 ** COST_DECADES
-        below = [k for k, service in enumerate(services) if np.nanmax(median(service, 2)) < floor]
-        # half a decade above the power of ten over the data: the top tick is labeled, and the legend clears the data below it
-        ax.set_ylim(floor, 10 ** (np.ceil(np.log10(max(values))) + 0.5))
-        segments = [(x, max(low, floor), max(high, floor)) for x, low, high in segments]   # what lies below the axis hides no legend
-        for row, k in enumerate(below):   # in the color of the service, in the empty strip above the end of the axis
-            ax.text(0.97, 0.02 + 0.06 * row, f"{services[k]} < {floor * 1e3:.2g} ms", transform=ax.transAxes, ha="right", va="bottom",
-                    fontsize=9, color=colors[k % len(colors)])
-        # the legend entries of the methods as in every figure (method_handle); short labels, so that the narrow legend leaves the
-        # start of the lines free
-        right_handles = [method_handle(PROPOSED), Line2D([], [], linestyle=":", color=METHOD_COLORS[PROPOSED], linewidth=1.5)]
-        right_labels = ["Pegasus Node", "known means"]
-        if oracle is not None:
-            right_handles.append(method_handle("Oracle"))
-            right_labels.append("Oracle")
-        right_segments = segments
+        per_seed = lambda column: np.column_stack([chain_pegasus[s][:, column] for s in seeds])   # (levels, seeds)
+        finite = lambda values: np.where(np.isfinite(values), values, np.nan)   # sweep_line: no value where the median is infinite
+        holds_of = lambda coverages: np.all(coverages >= confidence, axis=1)
+        statistics = {PROPOSED: dict(tightness=finite(per_seed(3)), holds=holds_of(per_seed(5)))}
+        if oracle is not None:   # the same at every number of runs: it uses no training data
+            statistics["Oracle"] = dict(tightness=np.tile([oracle[s][0] for s in seeds], (len(chain_runs), 1)),
+                                        holds=np.full(len(chain_runs), all(oracle[s][1] >= confidence for s in seeds)))
+        # the last level: every service holds all its runs; a level close to it gets no label, which would run into "all"
+        ticks = [f"{value:g}" if value * 1.5 < chain_runs[-1] else "" for value in chain_runs[:-1]] + ["all"]
+        _sweep_axis(ax, chain_runs, "runs per service", ticks, log_x=True)
+        _tightness_panel(ax, chain_runs, statistics, level_label or "p95", wrap_text=True)
+        known = np.median(np.where(np.isnan(finite(per_seed(4))), np.inf, per_seed(4)), axis=1)
+        ax.plot(chain_runs[np.isfinite(known)], known[np.isfinite(known)], linestyle=":", color=METHOD_COLORS[PROPOSED], linewidth=1.5,
+                label="known means")
+        typical = np.median(np.where(np.isnan(statistics[PROPOSED]["tightness"]), np.inf, statistics[PROPOSED]["tightness"]), axis=1)
+        for x in chain_runs[~np.isfinite(typical)]:   # no finite bound under half of the seeds or more
+            ax.annotate("∞", (x, TIGHTNESS_RANGE[1]), xytext=(0, -3), textcoords="offset points", ha="center", va="top",
+                        color=METHOD_COLORS[PROPOSED], fontsize=14, fontweight="bold")
+        _tightness_legend(ax, chain_runs, statistics, ncol=1)
         figures.append((fig, "cost"))
 
-        for (fig, suffix), axis in zip(figures, (left, ax)):
-            axis.set_xscale("log")
-            axis.set_yscale("log")
-            plain_log_ticks(axis.xaxis)
-            plain_log_ticks(axis.yaxis)
-            axis.set_xlabel("runs of the service")   # short: the tick labels of the right figure leave narrow plot areas
-            # right: the bounds and the costs, which are seconds of a bound; no longer than the tightness label of every figure
-            axis.set_ylabel("predicted execution time (s)" if suffix == "execution" else f"{level_label or 'latency'} bound and cost (s)")
-            axis.grid(True, linestyle=":", alpha=0.6)
-        legend_inside(left, handles, labels, left_segments, locations=("upper right", "upper center"),
-                      max_doublings=0, ncol=2, fontsize=10, framealpha=0.95, columnspacing=1.0, handletextpad=0.4)
-        legend_inside(ax, right_handles, right_labels, right_segments, locations=("upper right", "upper center"),
-                      max_doublings=0, fontsize=10, framealpha=0.95, handletextpad=0.4)
+        left.set_xscale("log")
+        left.set_yscale("log")
+        plain_log_ticks(left.xaxis)
+        plain_log_ticks(left.yaxis)
+        left.set_xlabel("runs of the service")
+        left.grid(True, linestyle=":", alpha=0.6)
+        # one column: the names with their execution times are too wide for two columns in a half figure
+        legend_inside(left, handles, labels, segments, locations=("upper right", "upper center"),
+                      max_doublings=0, ncol=1, fontsize=9, framealpha=0.95, handletextpad=0.4, labelspacing=0.3)
         fit_half_pair([left, ax])
-        _margin_labels(left, {service: (runs[service], median(service, 3), median(service, 1)) for service in services},
-                       {service: colors[k % len(colors)] for k, service in enumerate(services)})
-        for fig, suffix, *_ in figures:
+        for fig, suffix in figures:
             if name is not None:
                 save_figure(fig, f"{name}_{suffix}")
             plt.show()
-
-
-def _margin_labels(ax, lines: dict, colors: dict, fontsize: float = 9) -> None:
-    """The uncertainty margin delta with all runs as a percentage ("delta = +3%": the pessimistic mean lies 3% above the
-    predicted one; one-sided, because the bound uses only the pessimistic mean)
-    at the end of every line of uncertainty_figure, ending at its last point: above the band, or below the line where
-    the next slower service lies less than a factor 3 higher, so that the label does not run into that service's line.
-    lines: service -> (training runs, mean, margin)."""
-    ends = {service: mean[-1] for service, (_, mean, _) in lines.items()}
-    for service, (runs, mean, margin) in lines.items():
-        above = min((value for value in ends.values() if value > ends[service]), default=np.inf) >= 3 * ends[service]
-        anchor = mean[-1] * (1 + margin[-1]) if above else mean[-1]   # the top of the band, or the line
-        ax.annotate(rf"$\delta$ = +{margin[-1]:.0%}", (runs[-1], anchor), xytext=(4, 3 if above else -5), textcoords="offset points", ha="right",
-                    va="bottom" if above else "top", color=colors[service], fontsize=fontsize, fontweight="bold")
