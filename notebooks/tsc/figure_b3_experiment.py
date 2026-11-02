@@ -63,21 +63,6 @@ def draw_balanced(ax, levels: int, left: float, width: float) -> None:
     draw_small(ax, nodes, edges, position)
 
 
-def draw_narrow(ax, levels: int, left: float, step: float) -> None:
-    """Small narrow tree: at every level the aggregator joins the result of the level below with one new leaf."""
-    nodes, edges, position = {}, [], {}
-    for level in range(1, levels):
-        spine, leaf = ("spine", level), ("leaf", level)
-        nodes[spine], nodes[leaf] = "aggregator", leaf_kind(level - 1)
-        position[spine] = (left + level * step, 1 - level)
-        position[leaf] = (left + (level - 0.5) * step, -level)
-        edges.append((leaf, spine))
-        edges.append((("spine", level + 1), spine))
-    last = ("spine", levels)                         # the lowest level has no aggregator below it: its node is a leaf
-    nodes[last], position[last] = leaf_kind(levels - 1), (left + (levels - 0.5) * step + step / 2, 1 - levels)
-    draw_small(ax, nodes, edges, position)
-
-
 def draw_small(ax, nodes: dict, edges: list, position: dict) -> None:
     for child, parent in edges:
         ax.plot(*zip(position[child], position[parent]), color="0.4", lw=1.0, zorder=1)
@@ -167,7 +152,7 @@ ax_merge.legend(handles=[Patch(ec="black", **style) for _, _, _, style in phases
 ax_merge.set_title("(b) Merge rule: an aggregator waits for both children,\nthen processes the frame as one item", pad=10)
 
 # --- (c) the hierarchies ---------------------------------------------------------
-gap, narrow_step = 0.9, 0.42
+gap = 0.9
 tree_width = {1: 1.8, 2: 1.8, 3: 2.2, 4: 3.2, 5: 4.8, 6: 7.6}
 label_y, group_y = -max(levels_optional) + 0.3, 1.5
 left, spans = 0.0, {}
@@ -176,21 +161,14 @@ for levels in levels_required + levels_optional:
     ax_sizes.text(left + tree_width[levels] / 2, label_y, f"{levels} level{'s' if levels > 1 else ''}\n{2 ** levels - 1} service{'s' if levels > 1 else ''}", ha="center", va="top")
     spans[levels] = (left, left + tree_width[levels])
     left += tree_width[levels] + gap
-narrow_left = left
-for levels in levels_optional:
-    width = (levels + 0.5) * narrow_step
-    draw_narrow(ax_sizes, levels, left, narrow_step)
-    ax_sizes.text(left + width / 2 + narrow_step / 2, label_y, f"{levels} levels\n{2 * levels - 1} services", ha="center", va="top")
-    left += width + gap
 groups = [("required", spans[levels_required[0]][0], spans[levels_required[-1]][1]),
-          ("only if the testbed has the cores", spans[levels_optional[0]][0], spans[levels_optional[-1]][1]),
-          ("otherwise: narrow trees\nof the same depth", narrow_left, left - gap + narrow_step)]
+          ("only if the testbed has the cores", spans[levels_optional[0]][0], spans[levels_optional[-1]][1])]
 for label, begin, finish in groups:
     ax_sizes.plot([begin, finish], [group_y, group_y], color="black", lw=1.0, marker="|", ms=8)
     ax_sizes.text((begin + finish) / 2, group_y + 0.15, label, ha="center", va="bottom")
 ax_sizes.legend(handles=[Line2D([], [], ls="none", marker=style["marker"], ms=8, color=style["color"], mec="black", mew=0.5) for style in KINDS.values()],
                 labels=[style["label"] for style in KINDS.values()], loc="lower left", bbox_to_anchor=(0.0, 0.2), frameon=False)
-ax_sizes.set_xlim(-0.4, left - gap + narrow_step + 0.4)
+ax_sizes.set_xlim(-0.4, left - gap + 0.4)
 ax_sizes.set_ylim(label_y - 1.6, group_y + 1.6)
 ax_sizes.axis("off")
 ax_sizes.set_title("(c) Hierarchies: every tree is run separately, because every tree needs its own ground truth", pad=4)

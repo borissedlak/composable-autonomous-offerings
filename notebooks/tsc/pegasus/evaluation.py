@@ -352,7 +352,7 @@ def sweep_conclusion(settings: list, statistics: dict, names: list, label) -> st
         if len(finite) == 0:
             return f"{name} gives no finite bound for most seeds in any setting"
         text = f"{name} from {typical[finite[0]]:.2f}× at {label(computed[name][finite[0]])} to {typical[finite[-1]]:.2f}× at {label(computed[name][finite[-1]])}"
-        if len(finite) == 1:   # one setting, e.g. the one narrow tree of the real data of B.3
+        if len(finite) == 1:   # a finite bound in one setting only: no range to give
             text = f"{name} {typical[finite[0]]:.2f}× at {label(computed[name][finite[0]])}"
         without = [label(value) for value, value_tightness in zip(computed[name], typical) if not np.isfinite(value_tightness)]
         return text + (f", and no finite bound for most seeds at {', '.join(without)}" if without else "")

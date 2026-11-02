@@ -21,19 +21,6 @@ def balanced_tree(levels: int, leaf_services=("s1", "s2"), aggregator_service="s
     return children, services
 
 
-def narrow_tree(levels: int, leaf_services=("s1", "s2"), aggregator_service="s3") -> tuple:
-    """Narrow tree with `levels` levels and 2 levels - 1 services: aggregators 0 to levels - 2 form a chain from the
-    root down, and every aggregator joins the one below it (two leaves at the bottom) with one new leaf. It has a
-    path of `levels` services and `levels` paths in all."""
-    if levels == 1:
-        return [[]], [leaf_services[0]]
-    n_aggregators = levels - 1
-    leaves = list(range(n_aggregators, 2 * levels - 1))
-    children = [[j + 1 if j < n_aggregators - 1 else leaves[-1], leaves[j]] for j in range(n_aggregators)] + [[] for _ in leaves]
-    services = [aggregator_service] * n_aggregators + [leaf_services[k % len(leaf_services)] for k in range(len(leaves))]
-    return children, services
-
-
 def leaf_to_root_paths(children: list) -> list:
     """Every path from a leaf to the root, as a list of service positions starting at the leaf."""
     paths, stack = [], [(0, [0])]

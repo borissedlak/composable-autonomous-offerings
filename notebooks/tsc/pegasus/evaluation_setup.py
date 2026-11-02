@@ -36,7 +36,7 @@ from .evaluation import (METHOD_COLORS, PROPOSED, PROPOSED_SNC, TIGHTNESS_RANGE,
 from .real_data import (BENCHMARK_AND_CHAINS, BENCHMARKS_V2, CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, campaign_nodes, chain_experiments, chain_path, chain_tail_ratios, real_tree_data, training_pool, tree_structure,
                         unthrottled_pool, unthrottled_runs)
 from .service_gp import configurations_of
-from .trees import balanced_tree, narrow_tree
+from .trees import balanced_tree
 
 alpha = 0.05                                           # violation probability epsilon: a bound at alpha bounds the (1 - alpha) latency quantile
 confidence = 0.95                                      # the pessimistic mean of a bound lies above the true mean with this probability
@@ -81,7 +81,6 @@ def configure(data_source: str, chains: str = DEFAULT_CHAINS) -> dict:
             chain_options=lambda s: dict(path=synthetic_chain(3), service_seed=s),               # the chain of B.1 under the seed s
             training_options=lambda s: dict(service_seed=s),                                     # B.2: what with_training_data needs besides the data
             tree_levels=list(range(1, 9)),                                                       # B.3: levels h of the balanced trees (2^h - 1 services)
-            narrow_levels=list(range(5, 9)),                                                     # B.3: levels h of the narrow trees (2h - 1 services)
             tree_seeds=seeds,                                                                    # B.3: the seeds of every experiment
             tree_utilization=0.5,                                                                # B.3: utilization of the slowest service of a tree
             load_option="arrival_rate", loads=[1, 2, 3, 4, 5],                                   # B.4a: arrival rate (items/s) of all configurations
@@ -108,9 +107,8 @@ def configure(data_source: str, chains: str = DEFAULT_CHAINS) -> dict:
             # B.3: the fork-join trees of the campaign (statics/results_milos_v2/b3/), (shape, levels h) -> experiment; the campaign set the
             # arrival rate of every run so that its slowest service is busy about half of the time. The tree with h = 4 draws the image
             # resolution from 160 to 256 px, the others from 160 to 640 px (experiment.yaml of every tree)
-            tree_experiments={**{("balanced", h): f"b3-balanced-{h}" for h in (1, 2, 3, 4)}, ("narrow", 4): "b3-narrow-4"},
+            tree_experiments={("balanced", h): f"b3-balanced-{h}" for h in (1, 2, 3, 4)},
             tree_levels=[1, 2, 3, 4],                                                            # B.3: levels h of the balanced trees (2^h - 1 services)
-            narrow_levels=[4],                                                                   # B.3: levels h of the narrow trees (2h - 1 services)
             tree_seeds=seeds,                                                                    # B.3: the seeds of every experiment
         )
     # Experiments that the data source does not support; their cells do nothing (the section of each says why). The real part
