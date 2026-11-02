@@ -79,18 +79,21 @@ def pegasus_bound(data, models: dict, alpha: float) -> np.ndarray:
     """Pegasus Node: the union bound over the closed-form martingale node bounds, per held-out configuration (s). The
     waiting time at a service is bounded by Kingman's martingale bound exp(-theta w); with a Gaussian execution time,
     the latency bound of the service follows from one formula. Every service is bounded with the external arrivals
-    (the paper's assumption on internal arrivals). A service with several workers is bounded by cyclic assignment (bounds.py)."""
+    (the paper's assumption on internal arrivals). A service with several workers is bounded by cyclic assignment (bounds.py).
+    Plus data.handover, the time between the services that the measured end-to-end latency contains."""
     K = len(data.path)
-    return martingale_closed_form_node_bounds(models["beliefs"], epsilon=alpha / K, path_workers=path_workers(data), **data.workload).sum(axis=0)
+    return (martingale_closed_form_node_bounds(models["beliefs"], epsilon=alpha / K, path_workers=path_workers(data), **data.workload).sum(axis=0)
+            + data.handover)
 
 
 def pegasus_snc_bound(data, models: dict, alpha: float) -> np.ndarray:
     """Pegasus SNC: one bound for the whole chain from its network service curve, per held-out configuration (s). One
     Chernoff step on the product of the services' latency moments bounds the end-to-end latency at the full violation
     probability alpha, instead of alpha / K per service. Multiplying the moments requires that the execution times of
-    an item are independent between the services, so no Hoelder step is applied (all exponents 1)."""
+    an item are independent between the services, so no Hoelder step is applied (all exponents 1). Plus data.handover,
+    as in pegasus_bound."""
     return network_service_bound(models["beliefs"], epsilon=alpha, holder_exponents=[1] * len(data.path), path_workers=path_workers(data),
-                                 **data.workload)
+                                 **data.workload) + data.handover
 
 
 def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alpha: float, confidence: float,
@@ -109,7 +112,9 @@ def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alph
     With real data (data.y_train_spread is given), the GPs of Quantile Union and Conformal are fitted on the logarithm
     of the latency quantile, like the GP of the mean execution time (fit_services): the latency of a real service
     differs by orders of magnitude between its configurations. No model receives the number of workers of a
-    configuration (model_inputs in data.py); GP Queue and both versions of Pegasus get it from path_workers."""
+    configuration (model_inputs in data.py); GP Queue and both versions of Pegasus get it from path_workers.
+    Every method and the Oracle add data.handover, the time between the services that the measured end-to-end latency
+    contains and no service latency does (both versions of Pegasus inside pegasus_bound and pegasus_snc_bound)."""
     K, workload = len(data.path), data.workload
     workers_by_position = path_workers(data) or [1] * K
     log_target = data.y_train_spread is not None
@@ -146,10 +151,11 @@ def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alph
         if training_seconds is None:
             latency, training_seconds = latency
             elapsed -= training_seconds
-        methods[name] = (group, latency)
+        # the two versions of Pegasus add the handover time themselves (pegasus_bound), because other code calls them directly
+        methods[name] = (group, latency if name in (PROPOSED, PROPOSED_SNC) else latency + data.handover)
         seconds[name] = (training_seconds, elapsed + earlier_seconds.get(name, 0.0))
     if data.node_latencies is not None:         # reference: what a union bound reaches with measured instead of predicted nodes
-        methods["Oracle"] = ("reference", union_bound_oracle(data.node_latencies, alpha))
+        methods["Oracle"] = ("reference", union_bound_oracle(data.node_latencies, alpha) + data.handover)
     return methods, seconds
 
 
@@ -251,8 +257,9 @@ def queueing_formula_inputs(data, models: dict, true_mean: np.ndarray, true_var:
     predicted_var = np.column_stack([std ** 2 for _, std in predictions])
     pessimistic_mean = np.column_stack([mean for mean, _ in models["beliefs"]])
     workers = path_workers(data) or [1] * len(data.path)
+    # plus the time between the services, as every method of compare_methods
     formula = lambda mean, var: sum(queueing_formula_latency(mean[:, k], var[:, k], epsilon=alpha, workers=workers[k], **data.workload)
-                                    for k in range(len(data.path)))
+                                    for k in range(len(data.path))) + data.handover
     variants = {"predicted mean, predicted variance (the baseline)": formula(predicted_mean, predicted_var),
                 "predicted mean, true variance": formula(predicted_mean, true_var),
                 "true mean, predicted variance": formula(true_mean, predicted_var),

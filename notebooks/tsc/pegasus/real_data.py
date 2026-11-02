@@ -25,6 +25,11 @@ Hop overhead (second campaign): the handling overhead of a request (handling_ove
 the load generator (first service of a chain, benchmarks) or the service before it (every later service); the models
 use one constant per kind of hop, measured on the other chains (path_hop_overheads).
 
+Handover (second campaign): the end-to-end latency of a chain (traces.csv) also contains the time between leaving one
+service and arriving at the next, which no node latency contains: about 1.5 ms per handover, about the same at every
+handover of every chain and at every load, and nothing at the entry of the first service or after the last one. The
+methods add it as one constant per handover, measured on the other chains (path_handover, ChainData.handover).
+
 Second campaign: only unthrottled runs (unthrottled_runs) as held-out runs, and as training runs those throttled for
 less than TRAINING_THROTTLE_LIMIT of their CPU periods (unthrottled_pool). The cores of a service are no configuration
 (NOT_CONFIGURATION): a run either had enough cores for its load (no or almost no throttling) or is not used, and with
@@ -49,13 +54,21 @@ the cores of its runs are capped at 1.5. BENCHMARK_GRID15_V2 measured only the f
 On the configurations that both grids measured, the processing times of the two grids agree; those of BENCHMARKS_V2
 are a few percent longer. TREE_BENCHMARKS says which benchmark trains which service type of the trees.
 
+Load and arrival pattern (B4_V2, the folder `b4/`, experiment B4 of `new_experiments.md`): the chain of
+`b1u-vision-1` (detector -> transformer -> compressor, 1 to 4 workers per service) measured again, with the same 50
+configurations, under other arrivals. `b4a-utilization-<u>` sets the Poisson arrival rate of every run so that its
+busiest service is busy for the share u of the time; `b4b-variability-<C²>` keeps u = 0.5 and draws the gaps between
+arrivals from a gamma distribution with squared coefficient of variation C² (C² = 0: strictly periodic). The setting
+u = 0.5 with Poisson arrivals is `b1u-vision-1` itself. The folders `b4a2-*` and `b4b2-*` repeat both sweeps with the 50
+configurations of `b1u2-vision-1` (B4_CAMPAIGNS). b4_chain_data holds out the runs of a sweep.
+
 Folder layout: `<experiment>/<start time>/dataset.csv` has one row per run and node with the configuration and summary
 statistics; `runs/<run>/trace_steps.csv` (pipelines) has one row per request and node; `runs/<run>/<node>/records.csv`
 has one row per item of that node. Runs that the campaign marked as invalid (overloaded, drain timeout) are left out.
 Units: the campaign stores milliseconds and nanoseconds; every function here returns seconds.
 """
 from dataclasses import replace
-from functools import lru_cache
+from functools import lru_cache, reduce
 from pathlib import Path
 
 import numpy as np
@@ -77,7 +90,13 @@ TREE_HEIGHTS_V2 = CAMPAIGN_V2.parent / "b3-heights"
 # The chains of CAMPAIGN_V2 measured again (`b1u-<chain>`): every service with 1 to 4 workers and 0.5 cores more than its
 # workers, so that no run is throttled. Its `check-*` experiments are short checks of the setup, not chains of B1.
 CHAINS_UNTHROTTLED_V2 = CAMPAIGN_V2.parent / "b1-unthrottled"
-MEASURED_CHAINS = (CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2)   # chain folders whose latencies are measured (no emulation)
+# B4 (module docstring): the chain of B4_TWIN measured again under other loads and arrival patterns
+B4_V2 = CAMPAIGN_V2.parent / "b4"
+B4_TWIN = "b1-vision-1-single"   # the chain of CAMPAIGN_V2 with the topology of B4, left out of its hop overheads like a twin
+# The two measurements of B4: suffix of the folders (`b4a<suffix>-...`, `b4b<suffix>-...`) -> the chain of
+# CHAINS_UNTHROTTLED_V2 with the same configurations, which is the setting u = 0.5 with Poisson arrivals of both sweeps
+B4_CAMPAIGNS = {"": "b1u-vision-1", "2": "b1u2-vision-1"}
+MEASURED_CHAINS = (CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, B4_V2)   # chain folders whose latencies are measured (no emulation)
 COMBINED = "+b1u-max"   # a combined chain "<chain of CAMPAIGN_V2>+b1u-max<k>" (combined_chain)
 # Training source (training_campaign of real_chain_data): the benchmark of a service and its runs in the other chains of
 # CAMPAIGN_V2 (one worker, like the benchmark), without the evaluated chain (training_exclusion)
@@ -101,17 +120,17 @@ NORMAL_P95 = 1.6449                                                             
 # ------------------------------------------------------------------------------
 def campaign_of(experiment: str) -> Path:
     """The campaign folder that holds `experiment`: CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, BENCHMARKS_V2, BENCHMARK_GRID_V2,
-    BENCHMARK_GRID15_V2, TREES_V2 or TREE_HEIGHTS_V2 if it has a folder of that name, else CAMPAIGN."""
+    BENCHMARK_GRID15_V2, TREES_V2, TREE_HEIGHTS_V2 or B4_V2 if it has a folder of that name, else CAMPAIGN."""
     return next((campaign for campaign in (CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, BENCHMARKS_V2, BENCHMARK_GRID_V2, BENCHMARK_GRID15_V2, TREES_V2,
-                                           TREE_HEIGHTS_V2) if (campaign / experiment).is_dir()),
+                                           TREE_HEIGHTS_V2, B4_V2) if (campaign / experiment).is_dir()),
                 CAMPAIGN)
 
 
 def twin_of(experiment: str) -> str:
     """The same chain in the other chain folder of the second campaign: b1-<application>-<i>-single (CAMPAIGN_V2) and
-    b1u-<application>-<i> (CHAINS_UNTHROTTLED_V2)."""
-    if experiment.startswith("b1u-"):
-        return "b1-" + experiment[len("b1u-"):] + "-single"
+    b1u-<application>-<i> (CHAINS_UNTHROTTLED_V2); the repetition b1u2-<application>-<i> has the same twin in CAMPAIGN_V2."""
+    if experiment.startswith(("b1u-", "b1u2-")):
+        return "b1-" + experiment.split("-", 1)[1] + "-single"
     return "b1u-" + experiment[len("b1-"):].removesuffix("-single")
 
 
@@ -240,9 +259,45 @@ def path_hop_overheads(experiment: str) -> np.ndarray:
     path = chain_path(experiment)[0]
     if campaign_of(experiment) == CAMPAIGN:
         return np.zeros(len(path))
-    # a chain of CHAINS_UNTHROTTLED_V2 leaves out its twin in CAMPAIGN_V2, the same topology, so that both get the same constants
-    entry, handover = hop_overheads(exclude_experiment=twin_of(experiment) if campaign_of(experiment) == CHAINS_UNTHROTTLED_V2 else experiment)
+    entry, handover = hop_overheads(exclude_experiment=own_chain(experiment))
     return np.array([entry] + [handover] * (len(path) - 1))
+
+
+def own_chain(experiment: str) -> str:
+    """The chain of CAMPAIGN_V2 with the topology of `experiment`, which the constants measured on the other chains
+    (hop_overheads, handover_time) leave out: the experiment itself, or for a chain of CHAINS_UNTHROTTLED_V2 or B4_V2 its
+    twin in CAMPAIGN_V2, so that all of them get the same constants."""
+    return {CHAINS_UNTHROTTLED_V2: twin_of(experiment), B4_V2: B4_TWIN}.get(campaign_of(experiment), experiment)
+
+
+@lru_cache(maxsize=None)
+def chain_handovers(experiment: str) -> np.ndarray:
+    """Handover time (s) between consecutive services of the chain `experiment` (second campaign) in every one of its
+    unthrottled_runs: per request the time from leaving one service (arrival plus node latency) until arriving at the
+    next, median over the requests of the run; (runs, services - 1)."""
+    path = chain_path(experiment)[0]
+    rows = []
+    for run_id in unthrottled_runs(experiment):
+        _, node, arrived = measured_latencies(experiment, run_id, path)
+        rows.append(np.median(arrived[:, 1:] - arrived[:, :-1] - node[:, :-1], axis=0))
+    return np.array(rows)
+
+
+def handover_time(exclude_experiment: str = None) -> float:
+    """Handover time (s) of one handover between two services, as a constant: the median over the unthrottled runs and
+    the handovers of every chain of CAMPAIGN_V2 except exclude_experiment (the evaluated chain, which must not inform its
+    own prediction), like hop_overheads. The median of a run, because the handover time hardly varies within a run."""
+    return float(np.median(np.concatenate([chain_handovers(path.name).ravel() for path in sorted(CAMPAIGN_V2.iterdir())
+                                           if path.is_dir() and path.name != exclude_experiment])))
+
+
+def path_handover(experiment: str) -> float:
+    """Time (s) that the end-to-end latency of the chain `experiment` contains beyond the latencies of its services:
+    one handover_time per handover, measured on the other chains (own_chain). Zero for the first campaign, whose
+    latencies are emulated without handovers."""
+    if campaign_of(experiment) not in MEASURED_CHAINS:
+        return 0.0
+    return (len(chain_path(experiment)[0]) - 1) * handover_time(exclude_experiment=own_chain(experiment))
 
 
 def training_busy_worker_shares(experiment: str, training_runs: list = None) -> dict:
@@ -550,8 +605,24 @@ def split_training_pool(service: str, experiment: str, training_runs: list, sour
 def arrival_rates(experiment: str) -> pd.Series:
     """The arrival rate (items/s) of the Poisson arrivals that the campaign set for every valid run of `experiment`
     (rps_on_first_service), indexed by run_id. In the second campaign it was chosen from a short probe so that the
-    slowest service of the run is busy about half of the time."""
+    slowest service of the run is busy about half of the time (in B4_V2: the share of the experiment, module docstring)."""
     return run_table(experiment).drop_duplicates("run_id").set_index("run_id")["rps_on_first_service"]
+
+
+def measured_arrivals(experiment: str) -> dict:
+    """The arrival process that the campaign generated for `experiment` (second campaign), as the entries of a
+    workload besides the rate (bounds.py): {"process": "poisson"}; for renewal arrivals with gamma-distributed gaps
+    (B4_V2) {"process": "gamma", "cv2": C²}, with C² = variance / mean² of a gap as the campaign set it
+    (arrival_variability); for C² = 0, whose gamma gap is degenerate, the equivalent strictly periodic process,
+    {"process": "periodic", "jitter": 0.0}. One process for all runs of the experiment (checked)."""
+    table = run_table(experiment).drop_duplicates("run_id")
+    process, cv2 = table["arrival_process"].unique(), table["arrival_variability"].unique()
+    assert len(process) == 1 and len(cv2) == 1, f"{experiment}: more than one arrival process"
+    if process[0] == "poisson":
+        assert cv2[0] == 1, f"{experiment}: Poisson arrivals with C² = {cv2[0]}"
+        return {"process": "poisson"}
+    assert process[0] == "renewal", f"{experiment}: unknown arrival process {process[0]!r}"
+    return {"process": "periodic", "jitter": 0.0} if cv2[0] == 0 else {"process": "gamma", "cv2": float(cv2[0])}
 
 
 def measured_quantiles(samples: list, level: float, coverage_check: dict) -> tuple:
@@ -669,15 +740,16 @@ def chain_tail_ratios(experiment: str, runs: list = None) -> np.ndarray:
 def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, utilization: float = 0.5, arrival_process: str = "poisson",
                     arrival_cv2: float = 1.0, n_train: int = 50, n_items: int = 5000, n_trace_items: int = 2000,
                     sources: tuple = ("alone", "pipeline"), train_seed=None, arrival_rate: float = None, split: tuple = None,
-                    training_campaign: Path = None, max_workers: int = None) -> ChainData:
+                    training_campaign: Path = None, max_workers: int = None, held_out: list = None) -> ChainData:
     """Data of one chain of the campaign (`experiment`, e.g. "04e-chain-qr-cv-face") for the experiments of
     the evaluation (`2a_base_case.ipynb` to `2e_iterative.ipynb`). No run of the chain is used for training (training_exclusion): in the first campaign the chain is
     an unseen composition (no run with its topology is used), in the second campaign an unseen experiment.
 
     Ground truth, second campaign (per valid run of the chain): the services queue FIFO, so the ground truth is the
-    quantile of the measured end-to-end latencies of the run (chain_run_latencies), at the Poisson arrival rate that the
-    campaign set for the run (arrival_rates); `utilization`, n_items, arrival_process and arrival_rate are not used
-    for it. The runs measured different numbers of requests, so node_latencies holds the measured latencies of the
+    quantile of the measured end-to-end latencies of the run (chain_run_latencies), at the arrival rate that the
+    campaign set for the run (arrival_rates) and the arrival process of the experiment (measured_arrivals: Poisson, or
+    in B4_V2 gamma-distributed gaps), which is also the workload that the methods get; `utilization`, n_items,
+    arrival_process, arrival_cv2 and arrival_rate are not used for it. The runs measured different numbers of requests, so node_latencies holds the measured latencies of the
     first requests of every run at every service, as many as the shortest run has.
 
     Ground truth, first campaign (per valid run of the chain): the processing times that the run measured for every request at every
@@ -736,7 +808,10 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
 
     max_workers: hold out only the runs in which no service has more than this many workers. A combined chain
     (combined_chain, e.g. "b1-vision-1-single+b1u-max3") holds out the runs of both its parts with the same options and
-    training data (join_chain_data)."""
+    training data (join_chain_data).
+
+    held_out (second campaign): hold out only these runs (run_ids) among the unthrottled runs, e.g. the runs of a sweep
+    of B4_V2 that are valid at every setting (b4_chain_data)."""
     if combined_chain(experiment) is not None:   # the two parts with the same options, joined (join_chain_data)
         options = {name: value for name, value in locals().items() if name not in ("experiment", "max_workers")}
         chain, twin, k = combined_chain(experiment)
@@ -753,9 +828,15 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
     runs = chain_runs(experiment, split[1] if split is not None else unthrottled_runs(experiment) if measured_campaign else None)
     if max_workers is not None:   # only the runs in which no service has more than max_workers workers
         runs = [run for run, workers in zip(runs, chain_run_workers(experiment, runs)) if workers.max() <= max_workers]
+    if held_out is not None:
+        assert measured_campaign and set(held_out) <= set(runs), f"{experiment}: a run of held_out is not an unthrottled valid run"
+        runs = [run for run in runs if run in set(held_out)]
     assert split is None or measured_campaign, "split_runs is for experiments of the second campaign"
     if measured_campaign:   # the services queue FIFO: the measured latencies are the ground truth
-        assert arrival_rate is None and arrival_process == "poisson", "the second campaign measured Poisson arrivals at the rate of every run"
+        assert arrival_rate is None and arrival_process == "poisson" and arrival_cv2 == 1.0, \
+            "a measured chain has the arrival rate of every run and the arrival process of its experiment (measured_arrivals)"
+        arrival_options = measured_arrivals(experiment)
+        arrival_process = arrival_options.pop("process")
         rates = arrival_rates(experiment).loc[runs].to_numpy()
         run_latencies = chain_run_latencies(experiment, runs)
         measured, measured_low = measured_quantiles([run[0] for run in run_latencies], level, coverage_check)
@@ -770,7 +851,8 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
         measured, measured_low = quantile_with_lower_bound(latencies, level, **coverage_check)
         overloaded = rates * busiest_mean >= 1
         measured, measured_low = np.where(overloaded, np.inf, measured), np.where(overloaded, np.inf, measured_low)
-    workload = dict(process=arrival_process, rate=rates if arrival_rate is None else float(arrival_rate), jitter=0.1, **arrival_options)
+    # arrival_options: cv2 of gamma arrivals; for measured periodic arrivals (measured_arrivals) the jitter, which replaces the default
+    workload = {**dict(process=arrival_process, rate=rates if arrival_rate is None else float(arrival_rate), jitter=0.1), **arrival_options}
 
     # training data: every service from the runs that training_exclusion allows
     x_train, y_train, y_train_spread, x_test, x_train_load, x_test_load, monitored_latencies = {}, {}, {}, {}, {}, {}, {}
@@ -810,7 +892,8 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
         x_train_load[node] = np.column_stack([x_train[node], np.log10(monitored_rates)])
         x_test_load[node] = np.column_stack([x_test[node], np.log10(rates)])
     return ChainData(path, workload, x_train, y_train, x_test, measured, measured_low, node_latencies, monitored_latencies=monitored_latencies,
-                     y_train_spread=y_train_spread, x_train_load=x_train_load, x_test_load=x_test_load, workers_column=workers_column)
+                     y_train_spread=y_train_spread, x_train_load=x_train_load, x_test_load=x_test_load, workers_column=workers_column,
+                     handover=path_handover(experiment))
 
 
 def join_chain_data(first: ChainData, second: ChainData) -> ChainData:
@@ -818,6 +901,7 @@ def join_chain_data(first: ChainData, second: ChainData) -> ChainData:
     (combined_chain): the same chain, the same training data (checked) and one arrival rate per run. node_latencies
     keeps as many requests per run as the shortest run of both parts has."""
     assert first.path == second.path and first.workers_column == second.workers_column, "the parts are not the same chain"
+    assert first.handover == second.handover, "the parts have different handover times"
     for name in ("x_train", "y_train", "y_train_spread", "x_train_load", "monitored_latencies"):
         a, b = getattr(first, name), getattr(second, name)
         assert all(np.array_equal(a[node], b[node], equal_nan=True) for node in first.path), f"the parts have different {name}"
@@ -827,6 +911,75 @@ def join_chain_data(first: ChainData, second: ChainData) -> ChainData:
                    x_test=join(first.x_test, second.x_test), x_test_load=join(first.x_test_load, second.x_test_load),
                    measured=np.concatenate([first.measured, second.measured]), measured_low=np.concatenate([first.measured_low, second.measured_low]),
                    node_latencies=np.concatenate([first.node_latencies[:, :shortest], second.node_latencies[:, :shortest]]))
+
+
+# ------------------------------------------------------------------------------
+# Load and arrival pattern (second campaign, B4_V2): the chain of B4_CAMPAIGNS measured under other arrivals
+# ------------------------------------------------------------------------------
+def b4_experiment(sweep: str, setting: float, campaign: str) -> str:
+    """The experiment of one setting of a sweep of B4 (module docstring) in one measurement (`campaign`, a key of
+    B4_CAMPAIGNS): sweep "load" with the utilization u of the busiest service as the setting (`b4a<campaign>-utilization-<u>`),
+    or "arrivals" with C² of the gaps between arrivals (`b4b<campaign>-variability-<C²>`). The setting of both sweeps
+    with u = 0.5 and Poisson arrivals (C² = 1) is the chain of B4_CAMPAIGNS, which has the same configurations."""
+    assert sweep in ("load", "arrivals"), f"unknown sweep {sweep!r}"
+    if setting == (0.5 if sweep == "load" else 1):
+        return B4_CAMPAIGNS[campaign]
+    return f"b4a{campaign}-utilization-{setting:g}" if sweep == "load" else f"b4b{campaign}-variability-{setting:g}"
+
+
+def b4_complete(experiment: str) -> bool:
+    """Whether the campaign measured `experiment` to the end: its folder exists and holds the summary.json that the
+    campaign writes after the last run. An experiment that was cut off has a dataset.csv with only its first runs."""
+    return (campaign_of(experiment) / experiment).is_dir() and (experiment_folder(experiment) / "summary.json").exists()
+
+
+def b4_campaigns(sweep: str, setting: float) -> list:
+    """The measurements (keys of B4_CAMPAIGNS) that measured this setting of the sweep completely (b4_complete)."""
+    return [campaign for campaign in B4_CAMPAIGNS if b4_complete(b4_experiment(sweep, setting, campaign))]
+
+
+def b4_held_out(sweep: str, settings: tuple, campaign: str, max_workers: int) -> list:
+    """The runs (run_ids, sorted) of one measurement of B4 that a sweep holds out at every one of its `settings`: the
+    runs that are unthrottled and valid in every complete experiment of the sweep (b4_complete) and in which no service has
+    more than max_workers workers. A run is invalid where the campaign marked its busiest service as overloaded (its
+    queue kept growing); leaving such a run out at every setting keeps the held-out configurations the same along the
+    sweep. Every experiment of a measurement runs the same configurations under the same run_id (checked)."""
+    held_out, reference = None, None
+    for experiment in [b4_experiment(sweep, setting, campaign) for setting in settings]:
+        if not b4_complete(experiment):
+            continue
+        table = run_table(experiment)
+        configurations = pd.concat([node_configurations(table, node).add_prefix(node + ".") for node in chain_path(experiment)[0]], axis=1)
+        configurations = configurations.drop(columns=[column for column in configurations if column.endswith(".cores")])
+        if reference is not None:
+            common = configurations.index.intersection(reference.index)
+            assert configurations.loc[common].equals(reference.loc[common]), f"{experiment}: the configurations differ from those of the other settings"
+        reference = configurations if reference is None else reference
+        runs = unthrottled_runs(experiment)
+        runs = {run for run, workers in zip(runs, chain_run_workers(experiment, runs)) if workers.max() <= max_workers}
+        held_out = runs if held_out is None else held_out & runs
+    return sorted(held_out)
+
+
+def b4_chain_data(sweep: str, setting: float, settings: tuple, max_workers: int, **options) -> ChainData:
+    """Data of the chain of B4 at one setting of a sweep (b4_experiment), for the experiments of the evaluation: the
+    held-out runs of every measurement that measured the setting completely (b4_campaigns), each restricted to
+    b4_held_out of the sweep, one after the other (join_chain_data). The ground truth is the measured latency quantile of
+    every run, the workload the arrival rate of every run and the arrival process of the experiment (real_chain_data,
+    measured_arrivals). A setting that one measurement did not measure completely holds out the runs of the others only.
+    options: those of real_chain_data (the same training data for every measurement, checked by join_chain_data)."""
+    campaigns = b4_campaigns(sweep, setting)
+    assert campaigns, f"no measurement measured the setting {setting:g} of the sweep {sweep!r} completely"
+    return reduce(join_chain_data, [real_chain_data(b4_experiment(sweep, setting, campaign), held_out=b4_held_out(sweep, tuple(settings), campaign, max_workers),
+                                                    **options) for campaign in campaigns])
+
+
+def b4_utilization(sweep: str, setting: float, settings: tuple, max_workers: int) -> np.ndarray:
+    """Measured utilization of the busiest service (the largest utilization_measured of the nodes: the share of time
+    that its workers were busy) in every held-out run of b4_chain_data, in the same order."""
+    return np.concatenate([run_table(experiment).groupby("run_id")["utilization_measured"].max()
+                           .loc[b4_held_out(sweep, tuple(settings), campaign, max_workers)].to_numpy()
+                           for campaign in b4_campaigns(sweep, setting) for experiment in [b4_experiment(sweep, setting, campaign)]])
 
 
 # ------------------------------------------------------------------------------

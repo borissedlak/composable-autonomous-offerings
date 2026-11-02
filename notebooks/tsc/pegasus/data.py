@@ -67,6 +67,8 @@ class ChainData:
     x_test_load: dict = None                  # the configuration and the arrival rate, if the rate differs between configurations
     workers_column: object = None             # column of x_test that holds the number of workers of a service (an int, or a
                                               # dictionary service -> int or None like x_test); None: one worker
+    handover: float = 0.0                     # time (s) that the measured end-to-end latency contains beyond the latencies of
+                                              # the services (between them); every method adds it (real chains: path_handover)
 
 
 @dataclass

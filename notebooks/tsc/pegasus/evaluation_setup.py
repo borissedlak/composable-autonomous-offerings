@@ -33,8 +33,8 @@ from .evaluation import (METHOD_COLORS, PROPOSED, PROPOSED_SNC, TIGHTNESS_RANGE,
                          compare_tree_methods, coverage,
                          finite_share, fit_services, ground_truth_conclusion, sweep_conclusion, sweep_seconds, sweep_statistics,
                          tightness_and_time_figure, tightness_figure, tightness_sweep_figure, time_conclusion)
-from .real_data import (BENCHMARK_AND_CHAINS, BENCHMARKS_V2, CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, campaign_nodes, chain_experiments, chain_path, chain_tail_ratios, real_tree_data, training_pool, tree_structure,
-                        unthrottled_pool, unthrottled_runs)
+from .real_data import (BENCHMARK_AND_CHAINS, BENCHMARKS_V2, CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, b4_chain_data, b4_utilization, campaign_nodes, chain_experiments,
+                        chain_path, chain_tail_ratios, real_tree_data, training_pool, tree_structure, unthrottled_pool, unthrottled_runs)
 from .service_gp import configurations_of
 from .trees import balanced_tree
 
@@ -85,6 +85,7 @@ def configure(data_source: str, chains: str = DEFAULT_CHAINS) -> dict:
             tree_utilization=0.5,                                                                # B.3: utilization of the slowest service of a tree
             load_option="arrival_rate", loads=[1, 2, 3, 4, 5],                                   # B.4a: arrival rate (items/s) of all configurations
             load_label=lambda load: f"{load:g}/s",
+            arrival_cv2s=[0.25, 0.5, 1, 2, 4],                                                   # B.4b: C² of the gamma gaps between arrivals; 1 is the Poisson process of B.1
             base_options={},                                                                     # B.1: the default number of training configurations
             evidence_options=lambda s: dict(path=synthetic_chain(3), service_seed=s, n_train=200),   # B.2: the chain of B.1, 200 configurations per service
         )
@@ -110,10 +111,20 @@ def configure(data_source: str, chains: str = DEFAULT_CHAINS) -> dict:
             tree_experiments={("balanced", h): f"b3-balanced-{h}" for h in (1, 2, 3, 4)},
             tree_levels=[1, 2, 3, 4],                                                            # B.3: levels h of the balanced trees (2^h - 1 services)
             tree_seeds=seeds,                                                                    # B.3: the seeds of every experiment
+            # B.4: the chain of B.1 (detector -> transformer -> compressor) measured again under other arrivals, with the 50
+            # configurations of b1u-vision-1 and, in a second measurement, of b1u2-vision-1 (statics/results_milos_v2/b4/,
+            # b4_chain_data). Utilization 1.0 was measured too but is left out: at it the busiest service of about half of the
+            # runs was overloaded, and those runs have no latency quantile.
+            load_option="utilization", loads=[0.1, 0.25, 0.4, 0.5, 0.7, 0.9],                    # B.4a: utilization of the busiest service of every run
+            load_label=lambda load: f"u = {load:g}",
+            base_utilization=0.5,                                                                # B.4a: the load of the chains of B.1
+            arrival_cv2s=[0, 0.1, 0.3, 0.6, 1, 1.5, 2, 3, 4],                                    # B.4b: C² of the gaps between arrivals at u = 0.5; 0 is periodic
+            # B.4: held-out runs in which no service has more than this many workers, as in the chains of B.1 (DEFAULT_CHAINS)
+            b4_max_workers=3,
         )
     # Experiments that the data source does not support; their cells do nothing (the section of each says why). The real part
     # of B.2b uses the first campaign, so it is skipped with either source.
-    options["skipped"] = {"B.2b real"} if data_source == "synthetic" else {"B.2b real", "B.4a", "B.4b", "C.2"}
+    options["skipped"] = {"B.2b real"} if data_source == "synthetic" else {"B.2b real", "C.2"}
 
     def chain_data(s, **changes):
         # Data of the chain of B.1 under the seed s; `changes` replace options of the loader of the data source
@@ -124,7 +135,19 @@ def configure(data_source: str, chains: str = DEFAULT_CHAINS) -> dict:
         # Data of the chain of B.2 under the seed s, with every training run of every service (incremental_training in evidence.py)
         return load_chain_data(data_source, **{**dict(level=1 - alpha, coverage_check=coverage_check, seed=[seed, s]), **options["evidence_options"](s)})
 
-    options["chain_data"], options["evidence_data"] = chain_data, evidence_data
+    def b4_data(s, sweep, setting, **changes):
+        # B.4: data of the chain of B.1 under the seed s at one setting of a sweep, "load" (a value of `loads`) or "arrivals"
+        # (a value of `arrival_cv2s`); `changes` replace options of the loader. Synthetic: the chain of B.1 with simulated
+        # arrivals. Real: the measured runs of B.4 that are held out at every setting of the sweep (b4_chain_data), with
+        # the training data of B.1 (the benchmark of every service, base_options).
+        if data_source == "synthetic":
+            arrivals = dict(arrival_rate=setting) if sweep == "load" else dict(arrival_process="gamma", arrival_cv2=setting)
+            return chain_data(s, **arrivals, **changes)
+        settings = options["loads"] if sweep == "load" else options["arrival_cv2s"]
+        return b4_chain_data(sweep, setting, settings, options["b4_max_workers"], **{**dict(level=1 - alpha, coverage_check=coverage_check, seed=[seed, s],
+                             training_campaign=BENCHMARKS_V2), **options["base_options"], **changes})
+
+    options["chain_data"], options["evidence_data"], options["b4_data"] = chain_data, evidence_data, b4_data
     return options
 
 
@@ -135,16 +158,18 @@ def base_case(bases: dict, base_models: dict, s: int) -> tuple:
     K = len(data.path)
     methods, _ = compare_methods(data, models, data.x_train, data.monitored_latencies, alpha, confidence, n_calibration, model_seed=seed + s,
                                  x_train_load=data.x_train_load)
-    workload = data.workload
+    workload, handover = data.workload, data.handover   # handover: the time between the services, which every method adds (compare_methods)
     beliefs, lower_means, workers = models["beliefs"], models["lower_means"], path_workers(data)   # workers of every service per configuration
     # Ablation: the other ways to bound the nodes and to compose them, all on the same GP beliefs
     compositions = {
-        "union bound, Chernoff (SNC) nodes": ("proposed", sum(snc_latency_bound(*b, epsilon=alpha / K, workers=w, **workload) for b, w in zip(beliefs, workers))),
+        "union bound, Chernoff (SNC) nodes": ("proposed", sum(snc_latency_bound(*b, epsilon=alpha / K, workers=w, **workload) for b, w in zip(beliefs, workers))
+                                              + handover),
         "union bound, propagated Chernoff (SNC) nodes": ("proposed", propagated_node_bounds(beliefs, epsilon=alpha / K, path_lower_means=lower_means,
-                                                                                            path_workers=workers, **workload).sum(axis=0)),
+                                                                                            path_workers=workers, **workload).sum(axis=0) + handover),
         "union bound, martingale nodes = Pegasus Node": ("proposed", methods[PROPOSED][1]),
         "network service curve, independent services = Pegasus SNC": ("proposed", methods[PROPOSED_SNC][1]),
-        "network service curve, Hölder (any dependence)": ("proposed", network_service_bound(beliefs, epsilon=alpha, path_workers=workers, **workload)),
+        "network service curve, Hölder (any dependence)": ("proposed", network_service_bound(beliefs, epsilon=alpha, path_workers=workers, **workload)
+                                                           + handover),
     }
     return methods, compositions
 
