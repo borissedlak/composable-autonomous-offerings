@@ -40,6 +40,15 @@ Benchmarks (BENCHMARKS_V2): every service measured alone, one experiment `bench-
 per service and utilization (0.1 to 1.0), each with the same 10 configurations; the cores of a run are the CPU need of
 the configuration from a probe times a slack (`cpu_slack`), so the service has enough cores at every load.
 
+Grid benchmarks (BENCHMARK_GRID_V2, the folder `benchmark-grid/`, and BENCHMARK_GRID15_V2, `benchmark-grid15/`): the
+services of the trees measured alone, one experiment `grid-<service>-<version>-u<utilization in %>` (or `grid15-...`) per
+service and utilization (0.1 to 1.0), each with every configuration of the service once (all image resolutions and,
+for the detectors, both model sizes), with a newer image and harness than BENCHMARKS_V2. The cores of a run come from a
+probe as in BENCHMARKS_V2; the probe of BENCHMARK_GRID_V2 has 8 cores, the probe of BENCHMARK_GRID15_V2 has 1.5 cores, and
+the cores of its runs are capped at 1.5. BENCHMARK_GRID15_V2 measured only the face detector and the image transformer.
+On the configurations that both grids measured, the processing times of the two grids agree; those of BENCHMARKS_V2
+are a few percent longer. TREE_BENCHMARKS says which benchmark trains which service type of the trees.
+
 Folder layout: `<experiment>/<start time>/dataset.csv` has one row per run and node with the configuration and summary
 statistics; `runs/<run>/trace_steps.csv` (pipelines) has one row per request and node; `runs/<run>/<node>/records.csv`
 has one row per item of that node. Runs that the campaign marked as invalid (overloaded, drain timeout) are left out.
@@ -58,6 +67,11 @@ from .simulation import fifo_chain_latencies, quantile_with_lower_bound, sample_
 CAMPAIGN = Path(__file__).resolve().parents[3] / "statics" / "results_milos"
 CAMPAIGN_V2 = CAMPAIGN.parent / "results_milos_v2" / "b1"
 BENCHMARKS_V2 = CAMPAIGN_V2.parent / "benchmark"
+BENCHMARK_GRID_V2 = CAMPAIGN_V2.parent / "benchmark-grid"       # every configuration, probe with 8 cores (module docstring)
+BENCHMARK_GRID15_V2 = CAMPAIGN_V2.parent / "benchmark-grid15"   # every configuration, probe and cores capped at 1.5
+# The benchmark that trains every service type of the trees of B.3 (real_tree_data): the 1.5-core grid where it measured
+# the service, else the 8-core grid (the object detector cv-analyzer, which the 1.5-core grid did not measure)
+TREE_BENCHMARKS = {"cv-analyzer:v2": BENCHMARK_GRID_V2, "face-detector:v2": BENCHMARK_GRID15_V2, "image-transformer:v1": BENCHMARK_GRID15_V2}
 TREES_V2 = CAMPAIGN_V2.parent / "b3"
 TREE_HEIGHTS_V2 = CAMPAIGN_V2.parent / "b3-heights"
 # The chains of CAMPAIGN_V2 measured again (`b1u-<chain>`): every service with 1 to 4 workers and 0.5 cores more than its
@@ -86,9 +100,10 @@ NORMAL_P95 = 1.6449                                                             
 # Reading the campaign
 # ------------------------------------------------------------------------------
 def campaign_of(experiment: str) -> Path:
-    """The campaign folder that holds `experiment`: CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, BENCHMARKS_V2, TREES_V2 or
-    TREE_HEIGHTS_V2 if it has a folder of that name, else CAMPAIGN."""
-    return next((campaign for campaign in (CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, BENCHMARKS_V2, TREES_V2, TREE_HEIGHTS_V2) if (campaign / experiment).is_dir()),
+    """The campaign folder that holds `experiment`: CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, BENCHMARKS_V2, BENCHMARK_GRID_V2,
+    BENCHMARK_GRID15_V2, TREES_V2 or TREE_HEIGHTS_V2 if it has a folder of that name, else CAMPAIGN."""
+    return next((campaign for campaign in (CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, BENCHMARKS_V2, BENCHMARK_GRID_V2, BENCHMARK_GRID15_V2, TREES_V2,
+                                           TREE_HEIGHTS_V2) if (campaign / experiment).is_dir()),
                 CAMPAIGN)
 
 
@@ -859,7 +874,7 @@ def _measured_tree_latencies(experiment: str, run_id: str, nodes: tuple) -> tupl
 
 
 def real_tree_data(experiment: str, level: float, node_level: float, coverage_check: dict, seed, n_train: int = 25,
-                   n_trace_items: int = 2000) -> TreeData:
+                   n_trace_items: int = 2000, benchmarks: dict = None) -> TreeData:
     """Data of one fork-join tree of the second campaign (`experiment` in TREES_V2) for B.3 of the evaluation, in the
     form of synthetic_tree_data (data.py): every service has one worker, and an aggregator processes a frame once all
     its children have released it.
@@ -870,8 +885,9 @@ def real_tree_data(experiment: str, level: float, node_level: float, coverage_ch
     Poisson arrival rate that the campaign set for the run (arrival_rates). node_quantiles: the node_level quantile of the
     measured latency of every position in every run, for the Oracle.
 
-    Training (per service type): every service is trained on its benchmark (BENCHMARKS_V2), as the chains of B.1 with
-    training_campaign = BENCHMARKS_V2; no run of a tree is used. n_train unthrottled benchmark runs are drawn at random
+    Training (per service type): every service is trained on its benchmark in `benchmarks` (service type -> benchmark
+    folder; default TREE_BENCHMARKS, the grid benchmarks; {service: BENCHMARKS_V2 ...} trains on the benchmarks of B.1);
+    no run of a tree is used. n_train unthrottled benchmark runs are drawn at random
     per service type (with `seed`), and all positions of that type share its models. Targets as in real_chain_data: the
     mean execution time of a run, with the handling overhead of the run replaced by the handover overhead of
     hop_overheads (measured on the chains of B.1), because every service of a tree receives its frames from another
@@ -897,7 +913,7 @@ def real_tree_data(experiment: str, level: float, node_level: float, coverage_ch
     x_train, y_train, y_train_spread, x_test, x_train_load, x_test_load, monitored_latencies, workers_column = ({} for _ in range(8))
     handover = hop_overheads()[1]   # s; no chain of B.1 is a tree, so none is left out
     for service in sorted(set(services)):
-        pool = unthrottled_pool(training_pool(service, **training_exclusion(experiment, BENCHMARKS_V2)))
+        pool = unthrottled_pool(training_pool(service, campaign=(benchmarks or TREE_BENCHMARKS)[service]))
         assert len(pool) >= n_train, f"{service}: {len(pool)} training runs available, {n_train} needed"
         chosen = pool.iloc[np.sort(rng_train.choice(len(pool), size=n_train, replace=False))]
         knobs = [column for column in pool.columns if column not in POOL_COLUMNS and column not in NOT_CONFIGURATION]
