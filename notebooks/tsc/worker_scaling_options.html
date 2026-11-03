@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Does Pegasus Need Linear Scaling?</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: a single reading column for the argument; wide figures and the option grid break out to the full width. */
+:root {
+  color-scheme: light;
+  --bg: #f4f5f7;
+  --paper: #ffffff;
+  --ink: #14171c;
+  --ink-2: #4a505b;
+  --ink-3: #747b87;
+  --rule: #dfe2e7;
+  --accent: #1f5fae;
+  --effect-a: #2a78d6;   /* slower even alone (configuration effect) */
+  --effect-b: #eb6834;   /* interference between busy workers (load effect) */
+  --good: #0f7b3f; --good-bg: #e3f3e9;
+  --warn: #8a5a00; --warn-bg: #fbefd2;
+  --bad: #b02e2e;  --bad-bg: #f8e1e0;
+  --tint: #eef2f8;
+  --display: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --body: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #111317; --paper: #1a1d22; --ink: #eceef2; --ink-2: #b8bdc7; --ink-3: #8a909b; --rule: #2d3139;
+    --accent: #6ea4ea; --effect-a: #3987e5; --effect-b: #d95926;
+    --good: #5fcf8c; --good-bg: #183324; --warn: #e8b64c; --warn-bg: #3a2e12; --bad: #f08a86; --bad-bg: #3d1d1c;
+    --tint: #1e242e;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111317; --paper: #1a1d22; --ink: #eceef2; --ink-2: #b8bdc7; --ink-3: #8a909b; --rule: #2d3139;
+  --accent: #6ea4ea; --effect-a: #3987e5; --effect-b: #d95926;
+  --good: #5fcf8c; --good-bg: #183324; --warn: #e8b64c; --warn-bg: #3a2e12; --bad: #f08a86; --bad-bg: #3d1d1c;
+  --tint: #1e242e;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 var(--body); }
+main { max-width: 1060px; margin: 0 auto; padding: 40px 16px 72px; display: grid; gap: 0; }
+.col { max-width: 68ch; }
+h1, h2 { font-family: var(--display); text-wrap: balance; letter-spacing: -0.01em; }
+h1 { font-size: clamp(30px, 4.4vw, 42px); line-height: 1.12; margin: 0 0 14px; }
+h2 { font-size: 25px; line-height: 1.25; margin: 52px 0 10px; }
+h3 { font-size: 16px; margin: 22px 0 4px; }
+p { margin: 10px 0; color: var(--ink-2); }
+p strong, li strong, td strong { color: var(--ink); }
+ul, ol { color: var(--ink-2); padding-left: 22px; margin: 8px 0; }
+li { margin: 6px 0; }
+a { color: var(--accent); }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code { font: 13.5px var(--mono); background: var(--tint); border-radius: 4px; padding: 1px 5px; }
+.kicker { font: 500 13px var(--mono); color: var(--accent); letter-spacing: .04em; text-transform: uppercase; margin: 0 0 8px; }
+.lede { font-size: 18px; color: var(--ink-2); }
+.verdict { background: var(--paper); border: 1px solid var(--rule); border-left: 4px solid var(--accent); border-radius: 8px; padding: 16px 20px; margin: 22px 0 0; }
+.verdict p { margin: 6px 0; }
+figure { margin: 22px 0 6px; background: var(--paper); border: 1px solid var(--rule); border-radius: 10px; padding: 18px; overflow-x: auto; }
+figure svg { display: block; width: 100%; min-width: 640px; height: auto; color: var(--ink); }
+figcaption { font-size: 14px; color: var(--ink-3); margin-top: 10px; max-width: 80ch; }
+.svg-label { font: 13px var(--body); fill: currentColor; }
+.svg-small { font: 11.5px var(--body); fill: var(--ink-3); }
+.svg-mono { font: 11.5px var(--mono); fill: var(--ink-3); }
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin: 18px 0; }
+.box { background: var(--paper); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 18px; }
+.box h3 { margin-top: 0; display: flex; align-items: center; gap: 8px; }
+.tag { font: 500 12px var(--mono); padding: 2px 8px; border-radius: 999px; background: var(--tint); color: var(--ink-2); white-space: nowrap; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+.chart-wrap { margin: 22px 0 6px; background: var(--paper); border: 1px solid var(--rule); border-radius: 10px; padding: 18px; }
+.panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+.panel svg { width: 100%; height: auto; display: block; }
+.legend { display: flex; flex-wrap: wrap; gap: 18px; font-size: 13.5px; color: var(--ink-2); margin-bottom: 8px; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.table-wrap { overflow-x: auto; background: var(--paper); border: 1px solid var(--rule); border-radius: 10px; margin: 18px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+th { font-weight: 600; font-size: 13px; color: var(--ink-3); background: var(--tint); }
+tr:last-child td { border-bottom: 0; }
+.chip { display: inline-block; font: 500 12px var(--body); padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.chip.good { color: var(--good); background: var(--good-bg); }
+.chip.warn { color: var(--warn); background: var(--warn-bg); }
+.chip.bad { color: var(--bad); background: var(--bad-bg); }
+.options { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 14px; margin: 18px 0; }
+.opt { background: var(--paper); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 18px; display: grid; gap: 6px; align-content: start; }
+.opt.rec { border: 2px solid var(--accent); }
+.opt .head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.opt h3 { margin: 0; font-size: 17px; }
+.opt .id { font: 500 13px var(--mono); color: var(--ink-3); }
+.opt p { margin: 2px 0; font-size: 15px; }
+.opt dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 6px 0 0; font-size: 14px; }
+.opt dt { color: var(--ink-3); }
+.opt dd { margin: 0; color: var(--ink-2); }
+.rec-badge { font: 600 12px var(--body); color: var(--accent); }
+.proof { background: var(--tint); border-radius: 10px; padding: 16px 20px; margin: 18px 0; }
+.proof p, .proof li { color: var(--ink-2); }
+.formula { font: 14.5px var(--mono); color: var(--ink); background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; padding: 10px 14px; margin: 10px 0; overflow-x: auto; white-space: nowrap; }
+.foot { font-size: 13.5px; color: var(--ink-3); margin-top: 44px; border-top: 1px solid var(--rule); padding-top: 14px; }
+@media (max-width: 480px) { h2 { font-size: 22px; } .lede { font-size: 16.5px; } }
+</style>
+</head>
+<body>
+<main>
+
+<header class="col">
+  <p class="kicker">Pegasus · TSC · modeling assumptions</p>
+  <h1>Does Pegasus need services to scale linearly with workers?</h1>
+  <p class="lede">The measurements show that many services do not scale linearly: an item takes longer when its service
+  has more workers. This page separates what the method actually assumes, shows which part the data break, and lays
+  out the options for the paper.</p>
+</header>
+
+<div class="verdict col">
+  <p><strong>Short answer.</strong> The bound itself does not need linear scaling. It takes, per node, an execution-time
+  distribution and a number of workers <em>c</em>, and it is correct for whatever distribution it receives. Linear
+  scaling enters only through the training data: the models never see <em>c</em>, so a benchmark with one worker stands
+  in for every <em>c</em>.</p>
+  <p>The assumption the bound does rest on is that execution times do not depend on the state of the queue
+  (Assumption 3). One of the two measured effects breaks it. That effect can still be handled with a conservative
+  bound, at the price of tightness at low load.</p>
+</div>
+
+<h2 class="col">Two assumptions that look like one</h2>
+<p class="col">“The service scales linearly” bundles two different statements, and they live in different parts of
+the pipeline.</p>
+
+<figure>
+<svg viewBox="0 0 960 250" role="img" aria-label="Pipeline from one-worker benchmark to GP model to execution-time distribution to node bound with c workers to chain composition. Assumption A1, no dependence on c, sits at the model inputs. Assumption A2, no dependence on queue state, sits in the node bound.">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <!-- boxes -->
+  <g fill="none" stroke="currentColor" stroke-width="1.4">
+    <rect x="10"  y="40" width="160" height="70" rx="8"/>
+    <rect x="210" y="40" width="170" height="70" rx="8"/>
+    <rect x="420" y="40" width="170" height="70" rx="8"/>
+    <rect x="630" y="40" width="170" height="70" rx="8"/>
+    <rect x="840" y="40" width="110" height="70" rx="8"/>
+  </g>
+  <text class="svg-label" x="90"  y="68" text-anchor="middle" font-weight="600">Benchmark</text>
+  <text class="svg-small" x="90"  y="88" text-anchor="middle">each service alone,</text>
+  <text class="svg-small" x="90"  y="102" text-anchor="middle">1 worker</text>
+  <text class="svg-label" x="295" y="68" text-anchor="middle" font-weight="600">GP per service</text>
+  <text class="svg-small" x="295" y="88" text-anchor="middle">inputs: quality knobs</text>
+  <text class="svg-small" x="295" y="102" text-anchor="middle">(worker count dropped)</text>
+  <text class="svg-label" x="505" y="68" text-anchor="middle" font-weight="600">Execution time F</text>
+  <text class="svg-small" x="505" y="88" text-anchor="middle">mean, variance</text>
+  <text class="svg-small" x="505" y="102" text-anchor="middle">→ MGF of one item</text>
+  <text class="svg-label" x="715" y="68" text-anchor="middle" font-weight="600">Node bound</text>
+  <text class="svg-small" x="715" y="88" text-anchor="middle">c workers, each gets</text>
+  <text class="svg-small" x="715" y="102" text-anchor="middle">every c-th arrival</text>
+  <text class="svg-label" x="895" y="68" text-anchor="middle" font-weight="600">Chain</text>
+  <text class="svg-small" x="895" y="88" text-anchor="middle">compose</text>
+  <text class="svg-small" x="895" y="102" text-anchor="middle">per node</text>
+  <!-- arrows -->
+  <g stroke="currentColor" stroke-width="1.4" marker-end="url(#arr)">
+    <line x1="170" y1="75" x2="206" y2="75"/>
+    <line x1="380" y1="75" x2="416" y2="75"/>
+    <line x1="590" y1="75" x2="626" y2="75"/>
+    <line x1="800" y1="75" x2="836" y2="75"/>
+  </g>
+  <text class="svg-small" x="188" y="30" text-anchor="middle">trains</text>
+  <text class="svg-small" x="398" y="30" text-anchor="middle">predicts</text>
+  <text class="svg-small" x="608" y="30" text-anchor="middle">feeds</text>
+  <text class="svg-small" x="818" y="30" text-anchor="middle">feeds</text>
+  <!-- assumption markers -->
+  <g stroke="var(--effect-a)" stroke-width="2"><line x1="295" y1="112" x2="295" y2="150"/></g>
+  <rect x="190" y="150" width="210" height="62" rx="8" fill="none" stroke="var(--effect-a)" stroke-width="2"/>
+  <text class="svg-label" x="295" y="174" text-anchor="middle" font-weight="600" fill="var(--effect-a)">A1 · independent of c</text>
+  <text class="svg-small" x="295" y="194" text-anchor="middle">F is the same for 1 and c workers</text>
+  <g stroke="var(--effect-b)" stroke-width="2"><line x1="715" y1="112" x2="715" y2="150"/></g>
+  <rect x="590" y="150" width="250" height="62" rx="8" fill="none" stroke="var(--effect-b)" stroke-width="2"/>
+  <text class="svg-label" x="715" y="174" text-anchor="middle" font-weight="600" fill="var(--effect-b)">A2 · independent of the queue</text>
+  <text class="svg-small" x="715" y="194" text-anchor="middle">item times i.i.d., unaffected by busy workers</text>
+  <text class="svg-mono" x="295" y="236" text-anchor="middle">model_inputs() in pegasus/data.py</text>
+  <text class="svg-mono" x="715" y="236" text-anchor="middle">Assumption 3 · pegasus/bounds.py</text>
+</svg>
+<figcaption>Where each assumption enters. A1 is a shortcut in the training data: the worker count is removed from the
+model inputs, so one-worker benchmarks predict every configuration. A2 is a premise of the bound: the moment-generating
+function of the execution time is the same for every item, whatever the queue looks like.</figcaption>
+</figure>
+
+<div class="pair">
+  <div class="box">
+    <h3><span class="dot" style="background:var(--effect-a)"></span>A1: no dependence on the worker count</h3>
+    <p>The distribution of one item's execution time is the same whether the service has 1 or <em>c</em> workers.</p>
+    <p><strong>Needed by:</strong> the data budget only. The bound already takes <em>c</em> as a parameter and accepts a
+    different distribution per configuration.</p>
+  </div>
+  <div class="box">
+    <h3><span class="dot" style="background:var(--effect-b)"></span>A2: no dependence on the queue state</h3>
+    <p>Execution times are independent draws from one distribution, whatever the queue looks like, in particular however
+    many workers are busy.</p>
+    <p><strong>Needed by:</strong> the bound. Its derivation multiplies moment-generating functions of independent items.
+    A per-item time that depends on the queue is not covered.</p>
+  </div>
+</div>
+
+<h2 class="col">What the measurements show</h2>
+<p class="col">The unthrottled chains of the second campaign ran every quality configuration at several worker counts
+(1 to 4, single-threaded workers, <em>c</em> + 0.5 cores, no throttling). Two effects appear, and each service shows
+mostly one of them. The two example services below are the clearest cases.</p>
+
+<div class="chart-wrap">
+  <div class="legend" id="legend"></div>
+  <div class="panels" id="panels"></div>
+  <figcaption>Ratio of execution time to the one-worker baseline (1.0 = linear scaling holds); whiskers are 95%
+  bootstrap intervals. Blue: items that started with no other item of their service in process, at <em>n</em> workers
+  versus 1 worker, same quality configuration. Orange: within one run, items that started while <em>n</em> − 1 other items
+  of the same service were in process, versus items that started alone. Source: the per-service report from
+  <code>worker_scaling_analysis.py</code>.</figcaption>
+</div>
+
+<div class="pair">
+  <div class="box">
+    <h3><span class="dot" style="background:var(--effect-a)"></span>Effect 1: slower even alone</h3>
+    <p>With more than one worker, items are slower even when no other item of the service runs. For the point-cloud
+    encoder the step appears at two workers already, and the per-item ratio next to others stays at 1.</p>
+    <p><strong>Depends on:</strong> the configuration (the worker count), not on the load.<br>
+    <strong>Breaks:</strong> A1 only.<br>
+    <strong>Also seen in:</strong> image-transformer, voice-detector, pc-clusterer, pc-downsampler, image-denoiser.<br>
+    <strong>Cause:</strong> unknown. Candidates are a different harness code path for one versus several workers, or two
+    workers sharing one physical core (hyperthreading).</p>
+  </div>
+  <div class="box">
+    <h3><span class="dot" style="background:var(--effect-b)"></span>Effect 2: slower next to busy workers</h3>
+    <p>Within one run, items are slower the more items of their own service are being processed at the same time. For the
+    pitch tracker the penalty grows with every additional busy worker.</p>
+    <p><strong>Depends on:</strong> how many workers are busy, which depends on the arrivals: a load effect.<br>
+    <strong>Breaks:</strong> A2, and A1 with it.<br>
+    <strong>Also seen in:</strong> face-detector, audio-denoiser, cv-analyzer.<br>
+    <strong>Cause:</strong> contention for shared hardware (caches, memory bandwidth, hyperthreads, lower boost clock
+    with more active cores).</p>
+  </div>
+</div>
+<p class="col">Two explanations were checked and ruled out within runs: activity at other services of the chain, and
+the idle time of a worker before an item. About a third of the services show neither effect.</p>
+
+<h2 class="col">Is this known from queueing theory?</h2>
+<div class="col">
+  <p><strong>The classical models assume what Pegasus assumes.</strong> M/M/<em>c</em>, M/G/<em>c</em>, Kingman's bound and
+  the Allen–Cunneen approximation all model <em>c</em> identical, independent servers whose service time does not depend
+  on <em>c</em> or on how many servers are busy. Capacity is exactly <em>c</em>·μ in those models. The diminishing returns
+  they describe are in the waiting time (the pooling effect), not in the service time. Pegasus is on standard ground,
+  and the effect measured here lies outside what those models describe.</p>
+  <p><strong>Systems performance modeling does know the effect.</strong></p>
+  <ul>
+    <li><strong>Load-dependent service centers</strong> in mean-value analysis have a service rate that is a function of the
+    number of jobs present (Lazowska et al., <em>Quantitative System Performance</em>, 1984).</li>
+    <li><strong>The Universal Scalability Law</strong> (Gunther) writes the throughput of <em>N</em> parallel workers as
+    X(N) = λN / (1 + σ(N − 1) + κN(N − 1)), with σ for contention and κ for coherency costs. Amdahl's law is the special
+    case with κ = 0.</li>
+    <li>On multicore hosts the usual causes are shared last-level cache, memory bandwidth, hyperthread siblings and
+    frequency scaling, which matches the pattern of Effect 2.</li>
+  </ul>
+  <p>So the reviewer-proof framing is: Pegasus uses the classical service model as a simplification, and the
+  correction is a known one from capacity planning.</p>
+</div>
+
+<h2 class="col">Why Effect 2 can still be bounded</h2>
+<div class="proof col">
+  <p>A FIFO queue with <em>c</em> workers follows the Kiefer–Wolfowitz recursion. W<sub>n</sub> is the sorted vector of
+  remaining work at the <em>c</em> workers when item <em>n</em> arrives, S<sub>n</sub> the execution time of item <em>n</em>
+  (seconds), T<sub>n</sub> the gap to the next arrival (seconds), and e<sub>1</sub> = (1, 0, …, 0):</p>
+  <div class="formula">W<sub>n+1</sub> = sort( ( W<sub>n</sub> + S<sub>n</sub>·e<sub>1</sub> − T<sub>n</sub>·1 )<sup>+</sup> )</div>
+  <p>Every step is nondecreasing in S<sub>n</sub>, so every item's waiting time and latency can only grow when any
+  execution time grows. This gives a coupling argument:</p>
+  <ol>
+    <li>Let F<sub>c</sub><sup>max</sup> be the execution-time distribution when all <em>c</em> workers are busy.</li>
+    <li>If the real execution time of an item, given any number of busy workers, is stochastically no larger than
+    F<sub>c</sub><sup>max</sup>, each real time can be paired with a draw from F<sub>c</sub><sup>max</sup> that is at least as
+    long.</li>
+    <li>The queue fed with those draws is an ordinary queue with i.i.d. execution times, so A2 holds for it and the bound
+    applies. By the monotonicity of the recursion, its latencies are at least the real ones.</li>
+  </ol>
+  <p><strong>Condition to state:</strong> the slowdown is largest with all workers busy. The within-run ratios support
+  this: for the affected services they increase from one to two to three busy neighbors.<br>
+  <strong>Price:</strong> the bound is looser at low load, when fewer workers are busy. The tail of the latency comes
+  mostly from periods with a long queue, when all workers are busy anyway, so the loss is concentrated in the mean.</p>
+</div>
+
+<h2 class="col">Options</h2>
+<p class="col">Ordered from least to most change. The chips summarize whether the bound stays valid for the
+services that show each effect.</p>
+
+<div class="options">
+  <article class="opt">
+    <div class="head"><h3>Keep and disclose</h3><span class="id">O1</span></div>
+    <p>Keep the models as they are and list A1 and A2 as limitations, with the measured ratios.</p>
+    <dl>
+      <dt>Effect 1</dt><dd><span class="chip bad">not covered</span></dd>
+      <dt>Effect 2</dt><dd><span class="chip bad">not covered</span></dd>
+      <dt>Needs</dt><dd>nothing new</dd>
+      <dt>Risk</dt><dd>coverage misses at <em>c</em> &gt; 1 for affected services; a reviewer may find the ratios</dd>
+    </dl>
+  </article>
+  <article class="opt rec">
+    <div class="head"><h3>Workers as a model input</h3><span class="id">O2</span></div>
+    <p>Stop dropping the worker count in <code>model_inputs</code>; train each GP on benchmarks at several worker counts.</p>
+    <dl>
+      <dt>Effect 1</dt><dd><span class="chip good">covered</span></dd>
+      <dt>Effect 2</dt><dd><span class="chip warn">partly, at the benchmark's load</span></dd>
+      <dt>Needs</dt><dd>benchmarks at 2 to 4 workers; the bound code is unchanged</dd>
+      <dt>Risk</dt><dd>more benchmark runs per service</dd>
+    </dl>
+    <span class="rec-badge">Recommended, together with O3 or O4</span>
+  </article>
+  <article class="opt rec">
+    <div class="head"><h3>Benchmark with all workers busy</h3><span class="id">O3</span></div>
+    <p>For each worker count, benchmark at a load that keeps every worker busy and use that distribution
+    (F<sub>c</sub><sup>max</sup>). The argument above makes the bound valid.</p>
+    <dl>
+      <dt>Effect 1</dt><dd><span class="chip good">covered</span></dd>
+      <dt>Effect 2</dt><dd><span class="chip good">covered, conservatively</span></dd>
+      <dt>Needs</dt><dd>saturated benchmarks per worker count; the monotonicity condition stated in the paper</dd>
+      <dt>Risk</dt><dd>looser bounds at low load</dd>
+    </dl>
+    <span class="rec-badge">Recommended if new benchmarks are possible</span>
+  </article>
+  <article class="opt">
+    <div class="head"><h3>Contention factor per service</h3><span class="id">O4</span></div>
+    <p>Fit s(k) = 1 + σ·k (the contention term of the Universal Scalability Law) per service from the within-run ratios,
+    and scale the one-worker distribution by s(<em>c</em> − 1).</p>
+    <dl>
+      <dt>Effect 1</dt><dd><span class="chip warn">only with a separate per-<em>c</em> factor</span></dd>
+      <dt>Effect 2</dt><dd><span class="chip good">covered, conservatively</span></dd>
+      <dt>Needs</dt><dd>a few runs at several worker counts (the existing campaign suffices)</dd>
+      <dt>Risk</dt><dd>one more parametric assumption; scaling assumes the shape of F is unchanged</dd>
+    </dl>
+    <span class="rec-badge">Cheaper stand-in for O3 with existing data</span>
+  </article>
+  <article class="opt">
+    <div class="head"><h3>Load-dependent node model</h3><span class="id">O5</span></div>
+    <p>Model each node as a load-dependent station whose execution time depends on the number of busy workers, and
+    derive a bound for that queue.</p>
+    <dl>
+      <dt>Effect 1</dt><dd><span class="chip good">covered</span></dd>
+      <dt>Effect 2</dt><dd><span class="chip good">covered, tight</span></dd>
+      <dt>Needs</dt><dd>new theory: the moment-generating-function bounds no longer apply directly</dd>
+      <dt>Risk</dt><dd>research effort; likely loses the closed form and the simple composition</dd>
+    </dl>
+  </article>
+  <article class="opt">
+    <div class="head"><h3>Change the deployment</h3><span class="id">O6</span></div>
+    <p>Make the assumption true: pin each worker to its own physical core (no hyperthread siblings), or scale out with
+    one-worker replicas.</p>
+    <dl>
+      <dt>Effect 1</dt><dd><span class="chip warn">if the cause is placement</span></dd>
+      <dt>Effect 2</dt><dd><span class="chip warn">reduced, not removed</span></dd>
+      <dt>Needs</dt><dd>testbed changes and a rerun to confirm</dd>
+      <dt>Risk</dt><dd>restricts the deployments the paper speaks about</dd>
+    </dl>
+  </article>
+</div>
+
+<h2 class="col">Suggested path</h2>
+<ol class="col">
+  <li><strong>Measure the damage first.</strong> Split the B.1 coverage by worker count and by service, and check whether
+  misses concentrate on the services with large ratios. This needs no retraining.</li>
+  <li><strong>In the paper:</strong> present A1 as a modeling simplification, not a requirement of the bound. Name A2
+  (Assumption 3) as the real premise, and cite the classical service model as its origin and load-dependent stations and
+  the Universal Scalability Law as the known correction.</li>
+  <li><strong>In the method:</strong> add the worker count to the model inputs (O2) and use the all-busy distribution (O3).
+  If no new benchmarks are possible, fit the contention factor on the existing campaign instead (O4), and state the
+  monotonicity condition with the within-run evidence.</li>
+  <li><strong>To explain Effect 1:</strong> read the harness code for the one-worker path, or run one service at a fixed
+  worker count with varying cores.</li>
+</ol>
+
+<p class="foot">Data: <code>statics/results_milos_v2/b1-unthrottled/</code>, analyzed by
+<code>notebooks/tsc/worker_scaling_analysis.py</code> (helpers in <code>worker_scaling.py</code>). The per-service
+numbers for all 22 services are in the companion report
+<a href="https://claude.ai/artifact/R2BzpR1EbBmczSpvcwNKNB">Worker Scaling per Service</a>.</p>
+</main>
+
+<script>
+// Values copied from statics/worker_scaling/ (worker_ratios.csv: alone_ms; within_run.csv: own_ratio_k), n = 1 is the baseline
+const EXAMPLES = [
+  { name: "pc-encoder", title: "pc-encoder: slower even alone",
+    alone: [[1, 1, 1, 1], [2, 1.268, 1.152, 1.387], [3, 1.428, 1.299, 1.542], [4, 1.395, 1.253, 1.521]],
+    busy:  [[1, 1, 1, 1], [2, 0.997, 0.994, 1.000], [3, 1.000, 0.993, 1.003], [4, 1.008, 0.996, 1.015]] },
+  { name: "pitch-tracker", title: "pitch-tracker: slower next to busy workers",
+    alone: [[1, 1, 1, 1], [2, 1.124, 1.026, 1.228], [3, 1.141, 1.043, 1.238], [4, 1.205, 1.099, 1.321]],
+    busy:  [[1, 1, 1, 1], [2, 1.046, 1.038, 1.053], [3, 1.173, 1.125, 1.205], [4, 1.310, 1.189, 1.355]] },
+];
+const SERIES = [
+  { key: "alone", color: "var(--effect-a)", label: "Item alone, service has n workers (vs 1)", dx: -5 },
+  { key: "busy", color: "var(--effect-b)", label: "Item next to n − 1 busy workers (vs alone)", dx: 5 },
+];
+document.getElementById("legend").innerHTML = SERIES.map(s =>
+  `<span><i class="dot" style="background:${s.color}"></i>${s.label}</span>`).join("");
+const W = 440, H = 270, L = 46, R = 14, T = 30, B = 40, lo = 0.9, hi = 1.6;
+const x = n => L + (n - 1) / 3 * (W - L - R);
+const y = v => T + (hi - v) / (hi - lo) * (H - T - B);
+document.getElementById("panels").innerHTML = EXAMPLES.map(ex => {
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${ex.title}">`;
+  s += `<text x="${L}" y="16" class="svg-label" font-weight="600">${ex.title}</text>`;
+  for (let v = 0.9; v <= 1.61; v += 0.1) {
+    const vv = Math.round(v * 10) / 10;
+    s += `<line x1="${L}" x2="${W - R}" y1="${y(vv)}" y2="${y(vv)}" stroke="var(--rule)" stroke-width="${vv === 1 ? 2 : 1}"/>`;
+    s += `<text x="${L - 8}" y="${y(vv) + 4}" text-anchor="end" class="svg-small">${vv.toFixed(1)}×</text>`;
+  }
+  for (const n of [1, 2, 3, 4]) s += `<text x="${x(n)}" y="${H - B + 18}" text-anchor="middle" class="svg-small">${n}</text>`;
+  s += `<text x="${(L + W - R) / 2}" y="${H - 4}" text-anchor="middle" class="svg-small">n (workers, or busy workers incl. the item)</text>`;
+  for (const se of SERIES) {
+    const pts = ex[se.key];
+    s += `<polyline fill="none" stroke="${se.color}" stroke-width="2" stroke-linejoin="round" points="${pts.map(p => `${x(p[0]) + se.dx},${y(p[1])}`).join(" ")}"/>`;
+    for (const [n, v, l, h] of pts) {
+      if (n > 1) s += `<line x1="${x(n) + se.dx}" x2="${x(n) + se.dx}" y1="${y(Math.min(h, hi))}" y2="${y(Math.max(l, lo))}" stroke="${se.color}" stroke-width="2" stroke-linecap="round" opacity="0.5"/>`;
+      s += `<circle cx="${x(n) + se.dx}" cy="${y(v)}" r="4.5" fill="${se.color}" stroke="var(--paper)" stroke-width="2"><title>${se.label}, n = ${n}: ${v.toFixed(2)}×${n > 1 ? ` [${l.toFixed(2)}, ${h.toFixed(2)}]` : " (baseline)"}</title></circle>`;
+    }
+    const last = pts[pts.length - 1];
+    const other = ex[se.key === "alone" ? "busy" : "alone"].at(-1)[1];
+    s += `<text x="${x(4) - 8}" y="${y(last[1]) + (last[1] >= other ? -10 : 16)}" text-anchor="end" class="svg-small" fill="${se.color}">${last[1].toFixed(2)}×</text>`;
+  }
+  return `<div class="panel">${s}</svg></div>`;
+}).join("");
+</script>
+</body>
+</html>
