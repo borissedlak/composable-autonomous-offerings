@@ -68,6 +68,14 @@ Dependencies point one way: `load_independence` depends on `real_data`; `load_de
 and `service_gp`; `finetuning` on `baselines`, `baselines_chain`, `evaluation` and `service_gp`; `optimization` on
 `evaluation`.
 
+## Analysis scripts
+
+| Script | Question | Output |
+|---|---|---|
+| `worker_scaling_analysis.py` | How much the execution time of each service depends on its number of workers, which Pegasus assumes it does not (no model receives the worker count): the ratio to 1 worker of the mean and the 95th percentile at 2 to 4 workers, split into concurrency within the service and a part that remains when an item runs alone, and the projected capacity at full load. Helpers in `worker_scaling.py` next to it, outside `pegasus/` on purpose: the cache key of the evaluation hashes every module of `pegasus/`, so a module there would recompute every cached experiment. Run from `notebooks/tsc/`; `--recompute` rereads the records. | `statics/worker_scaling/`: CSV tables, `summary.json`, and `report.html` (the template `worker_scaling_report.html` filled with the results) |
+| `worker_scaling_coverage.py` | Whether that assumption costs coverage in B.1: reads the cached results of B.1 on all chains (`b1_all_chains` in `2a_base_case.ipynb`, never recomputes them) and splits coverage and tightness of Pegasus Node, Pegasus SNC, GP Queue and the Oracle by E, the slowdown of a held-out run's total execution time that the per-service ratios of `worker_scaling_analysis.py` predict; per chain on all held-out runs and on the multi-worker runs alone; the elasticity of tightness with respect to E. Needs the outputs of `worker_scaling_analysis.py`. Optional argument: the cache file. | `statics/worker_scaling/coverage_*.csv`, `tightness_elasticity.csv` |
+| `load_aware_b4.py` | B.4 with a variant of Pegasus Node whose GPs also receive the number of workers and log10 of the arrival rate, trained on the benchmarks plus the runs of the other chains of `b1/` and `b1-unthrottled/` (none of the chain of B.4), and an ablation on the same data with the current inputs; compared with the current Pegasus Node and the Oracle, which it reads from the cached results of `2c_load.ipynb` (never recomputes them). The training pool is widened at call time, not in `pegasus/`, for the reason above. Optional arguments: the folder of the evaluation cache, `--recompute`. | `statics/load_aware_b4/`: `variant_<sweep>.joblib` (cache), `comparison.csv` |
+
 ## Data and outputs outside this folder
 
 | Path | Contents |
@@ -75,6 +83,7 @@ and `service_gp`; `finetuning` on `baselines`, `baselines_chain`, `evaluation` a
 | `statics/results_milos/` | The testbed campaign that `real_data.py` reads: one folder per experiment (single services, chains, trees, deep chains). The real data source of `1_method_real.ipynb`, the evaluation notebooks (`2a` to `2e`), `explain_5` and `explain_6` needs this folder. The folder is not part of the repository: it is not committed, so a fresh clone does not contain it. |
 | `statics/results_milos_v2/` | The second testbed campaign, the real data of the evaluation notebooks (`2a` to `2e`): `b1/` (the chains of B1, one worker per service), `b1-unthrottled/` (the same chains with one to four workers per service, none throttled), `benchmark/` (every service alone, the training data), `b3/` and `b3-heights/` (fork-join trees). The held-out runs of a chain are its runs in `b1/` and those of its twin in `b1-unthrottled/` with at most three workers per service (`DEFAULT_CHAINS` in `pegasus/evaluation_setup.py`). Not committed, like `statics/results_milos/`. |
 | `statics/load_independence/results_milos_v2_b1/run_states.csv` | Cache of `run_states` (`load_independence.py`) for `explain_9`: one row per run and service of the second campaign. Recomputed from `statics/results_milos_v2/b1/` when missing. |
+| `statics/worker_scaling/` | Outputs of `worker_scaling_analysis.py`; `item_level.csv` caches the per-run statistics (recomputed when missing). Not committed. |
 | `figures/tsc/` | Outputs of the figure scripts. |
 
 ## Other files
