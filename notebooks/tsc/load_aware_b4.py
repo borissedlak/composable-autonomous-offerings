@@ -30,6 +30,7 @@ Everything else (seeds, alpha, confidence, held-out runs, ground truth, handover
 The wider training pool is set up at call time (extended_training) instead of in pegasus/real_data.py, because the
 cache key of the evaluation hashes every module of pegasus/: a change there would recompute every cached experiment.
 """
+import hashlib
 from contextlib import contextmanager
 from dataclasses import replace
 from functools import lru_cache
@@ -41,7 +42,8 @@ import pandas as pd
 
 import pegasus.real_data as real_data
 from pegasus.data import model_inputs
-from pegasus.evaluation import fit_services, pegasus_bound
+from pegasus.evaluation import METHOD_COLORS, fit_services, pegasus_bound
+from pegasus.figures import METHOD_STYLES
 from pegasus.real_data import BENCHMARKS_V2, CAMPAIGN, CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, b4_chain_data, run_table
 from pegasus.service_gp import configurations_of, run_statistics_belief
 
@@ -111,6 +113,39 @@ def beliefs_at(models: dict, data, confidence: float) -> dict:
     all that pegasus_bound reads."""
     x_test = model_inputs(data.x_test, data.workers_column)
     return {**models, "beliefs": [run_statistics_belief(models["gp"][node], configurations_of(x_test, node), confidence) for node in data.path]}
+
+
+def variant_latency(data, fits: dict, s: int, model_seed: int, alpha: float, confidence: float) -> np.ndarray:
+    """End-to-end bound (s) of the variant at the held-out runs of `data`, which must come from real_chain_data with
+    training_campaign=EXTENDED and n_train=N_TRAIN (inside extended_training). The GPs of the seed s are fitted on the
+    first call and kept in `fits` (s -> (training targets, models)); a later call with the same s checks that its
+    training data is the same and only recomputes the beliefs at its held-out runs (beliefs_at), because the inputs
+    contain the arrival rate of the run. The bound is pegasus_bound on the original data, which reads the workers of
+    every service for the queueing part."""
+    aware = load_aware(data)
+    if s not in fits:
+        fits[s] = (data.y_train, fit_services(aware, aware.x_train, data.y_train, model_seed=model_seed, confidence=confidence, with_dnn=False))
+    y_train, models = fits[s]
+    assert all(np.array_equal(data.y_train[node], y_train[node]) for node in data.path), "the training data differs between the settings"
+    return pegasus_bound(data, beliefs_at(models, aware, confidence), alpha)
+
+
+def code_fingerprint() -> str:
+    """Hash of this file, for the cache inputs of the notebook cells that compute the variant: the cache key of
+    evaluation_setup.cached covers pegasus/ and the cell's own code, not this module."""
+    return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:16]
+
+
+def register_method() -> None:
+    """Gives the variant a color (METHOD_COLORS, which sweep_statistics iterates) and a marker and line style
+    (METHOD_STYLES of the figures) at run time, without editing pegasus/: METHOD_COLORS sits in the part of
+    evaluation.py that the cache key hashes. The lists of methods built at import time (competitors in
+    evaluation_setup.py) stay as they are, so no other experiment sees the variant."""
+    METHOD_COLORS.setdefault(VARIANT, "tab:cyan")
+    METHOD_STYLES.setdefault(VARIANT, ("h", "-"))
+
+
+register_method()
 
 
 def sweep_bounds(sweep: str, settings: list, seeds: list, seed: int, alpha: float, confidence: float, coverage_check: dict,
