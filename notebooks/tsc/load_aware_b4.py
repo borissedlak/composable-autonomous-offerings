@@ -1,5 +1,6 @@
-"""B.4 with load- and worker-aware execution-time models: a variant of Pegasus Node for `2c_load.ipynb`, compared
-with the current Pegasus Node.
+"""Load- and worker-aware execution-time models: a variant of Pegasus Node, drawn next to the current Pegasus Node in
+B.1 on all chains (`2a_base_case.ipynb`) and in B.4 (`2c_load.ipynb`). The training data of an evaluated chain leaves
+out every run of that chain (chain_family); the description below says B.4, where the variant was first evaluated.
 
 Current Pegasus (PROPOSED in pegasus/evaluation.py): every service's GPs are trained on the service's benchmark
 (BENCHMARKS_V2: the service alone, one worker, five utilizations) and receive only the quality knobs; model_inputs in
@@ -15,7 +16,7 @@ The variant (VARIANT below) changes two things and nothing else:
   predicts; the rate of every held-out run is known in advance (the workload of the run).
 - Training data: the service's benchmark runs plus its runs in the other chains of the second campaign, one worker
   (CAMPAIGN_V2, `b1/`) and one to four workers (CHAINS_UNTHROTTLED_V2, `b1-unthrottled/`), without any experiment of
-  the chain of B.4 (B4_EXCLUDED); the benchmarks alone have one worker only, so the worker effect could not be learned
+  the evaluated chain (chain_family; for B.4, B4_EXCLUDED); the benchmarks alone have one worker only, so the worker effect could not be learned
   from them. Every chain run has the rate that the campaign set for it.
 The bound itself is unchanged (pegasus_bound): it reads the workers of every service from the held-out configurations
 for the queueing part, as before.
@@ -49,7 +50,7 @@ from pegasus.service_gp import configurations_of, run_statistics_belief
 
 EXTENDED = "benchmark+all-chains"   # training_campaign of real_chain_data under extended_training
 B4_EXCLUDED = ("b1-vision-1-single", "b1u-vision-1", "b1u2-vision-1")   # the chain of B.4 in B.1 and its two measurements with workers
-VARIANT = "Pegasus Node, load and workers"
+VARIANT = "Pegasus Node (load-aware)"
 ABLATION = "Pegasus Node, more data"
 N_TRAIN = None   # every run of the extended pool, in a random order (seed)
 CACHE = CAMPAIGN.parent / "load_aware_b4"   # statics/load_aware_b4/
@@ -70,23 +71,45 @@ def _campaign_nodes(campaign: Path = CAMPAIGN) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def extended_pool(service: str, sources: tuple = ("alone", "pipeline")) -> pd.DataFrame:
-    """Training runs of `service`: its benchmark, then its runs in the chains of CAMPAIGN_V2 and CHAINS_UNTHROTTLED_V2,
-    without B4_EXCLUDED (rows of training_pool)."""
-    pool = pd.concat([_original["training_pool"](service, sources=sources, campaign=campaign) for campaign in (BENCHMARKS_V2, CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2)],
+def chain_family(experiment: str) -> tuple:
+    """The experiments that measured the evaluated chain, which no training run may come from: the chain in
+    CAMPAIGN_V2 (`b1-<application>-<i>-single`) and its two measurements in CHAINS_UNTHROTTLED_V2 (`b1u-...`,
+    `b1u2-...`). Every other experiment (the chain of B.4 in B4_V2) has B4_EXCLUDED, the family of the chain of B.4."""
+    for prefix, suffix in (("b1-", "-single"), ("b1u-", ""), ("b1u2-", "")):
+        if experiment.startswith(prefix) and experiment.endswith(suffix):
+            name = experiment[len(prefix):len(experiment) - len(suffix)]
+            return (f"b1-{name}-single", f"b1u-{name}", f"b1u2-{name}")
+    return B4_EXCLUDED
+
+
+@lru_cache(maxsize=None)
+def _all_runs(service: str, sources: tuple) -> pd.DataFrame:
+    """Every training run of `service`: its benchmark, then its runs in the chains of CAMPAIGN_V2 and
+    CHAINS_UNTHROTTLED_V2 (rows of training_pool); built once per service, because every chain filters the same pool."""
+    return pd.concat([_original["training_pool"](service, sources=sources, campaign=campaign) for campaign in (BENCHMARKS_V2, CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2)],
                      ignore_index=True)
-    return pool[~pool["experiment"].isin(B4_EXCLUDED)].reset_index(drop=True)
+
+
+def extended_pool(service: str, sources: tuple = ("alone", "pipeline"), excluded: tuple = B4_EXCLUDED) -> pd.DataFrame:
+    """Training runs of `service` for an evaluated chain: _all_runs without the experiments `excluded` (chain_family of
+    the chain)."""
+    pool = _all_runs(service, tuple(sources))
+    return pool[~pool["experiment"].isin(excluded)].reset_index(drop=True)
 
 
 @contextmanager
 def extended_training():
-    """Within the block, real_chain_data(..., training_campaign=EXTENDED) trains every service on extended_pool."""
+    """Within the block, real_chain_data(..., training_campaign=EXTENDED) trains every service on extended_pool, without
+    the runs of the evaluated chain (chain_family). A combined chain (b1-...+b1u-max<k>) is loaded part by part, and both
+    parts have the same family, so they get the same training data, as join_chain_data requires."""
     def training_exclusion(experiment, training_campaign=None):
-        return dict(campaign=EXTENDED) if training_campaign == EXTENDED else _original["training_exclusion"](experiment, training_campaign)
+        if training_campaign == EXTENDED:
+            return dict(campaign=EXTENDED, exclude_experiment=chain_family(experiment))
+        return _original["training_exclusion"](experiment, training_campaign)
 
     def training_pool(service, exclude_pipeline=None, sources=("alone", "pipeline"), campaign=CAMPAIGN, exclude_experiment=None):
         if campaign == EXTENDED:
-            return extended_pool(service, tuple(sources))
+            return extended_pool(service, tuple(sources), exclude_experiment)
         return _original["training_pool"](service, exclude_pipeline, sources, campaign, exclude_experiment)
 
     patched = dict(training_pool=training_pool, training_exclusion=training_exclusion, campaign_nodes=_campaign_nodes)
