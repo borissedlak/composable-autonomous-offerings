@@ -60,6 +60,16 @@ RESTARTS = 10              # SLSQP starting points per composition, as run_optim
 OVERLOAD_LATENCY = 10.0    # s; latency that the continuous relaxation gives an overloaded node, so that SLSQP moves away from it
 TIE_WEIGHT = 1e-3          # weight of the two other dimensions in the objective, which only breaks ties of the goal
 GOALS = ("min cost", "min latency", "max quality")
+# Functional capability -> the service (image, without version) that provides it. A scenario requires capabilities;
+# a composition meets the requirement if it contains a service for every one of them.
+CAPABILITIES = {
+    "object detection": "cv-analyzer", "face detection": "face-detector", "QR codes": "qr-detector", "motion detection": "motion-detector",
+    "edge detection": "edge-detector", "image denoising": "image-denoiser", "image compression": "image-compressor", "image transformation": "image-transformer",
+    "noise suppression": "audio-denoiser", "resampling": "audio-resampler", "audio features": "audio-features", "voice activity": "voice-detector",
+    "pitch tracking": "pitch-tracker", "transcription": "speech-transcriber", "audio encoding": "audio-encoder",
+    "downsampling": "pc-downsampler", "ground removal": "ground-remover", "clustering": "pc-clusterer", "normal estimation": "normal-estimator",
+    "registration": "pc-registrar", "visualization": "pc-visualizer", "point cloud encoding": "pc-encoder",
+}
 
 
 @dataclass
@@ -72,6 +82,7 @@ class Scenario:
     min_quality: float = None          # quality: smallest data quality q
     min_model: int = None              # quality (vision): smallest model size of every detector of the composition
     note: str = ""                     # who would pose these SLOs
+    requires: tuple = ()               # functional requirement: capabilities (keys of CAPABILITIES) the composition must provide
 
     def dimensions(self) -> list:
         """The SLO dimensions that the scenario constrains."""
@@ -325,13 +336,24 @@ def configuration_row(comp: Composition, best: dict) -> dict:
     return row
 
 
+def provides(comp: Composition, capabilities: tuple) -> bool:
+    """Whether a composition contains a service for every capability (keys of CAPABILITIES)."""
+    images = {service.split(":")[0] for service in comp.services.values()}
+    return all(CAPABILITIES[capability] in images for capability in capabilities)
+
+
 def plan(comps: list, scenario: Scenario, scales: Scales, solver: str = "slsqp", rng: np.random.Generator = None) -> pd.DataFrame:
     """The best configuration of every composition for a scenario (one row each; feasible False where none meets the
     SLOs), sorted by the objective: the first row is the plan."""
     rows = []
     for comp in comps:
-        best = slsqp_composition(comp, scenario, scales, rng) if solver == "slsqp" else exhaustive_composition(comp, scenario, scales)
-        row = dict(scenario=scenario.name, composition=comp.experiment, services=" → ".join(comp.path), feasible=best is not None)
+        functional = provides(comp, scenario.requires)
+        if not functional:
+            best = None   # the composition lacks a required capability: no configuration can meet the scenario
+        else:
+            best = slsqp_composition(comp, scenario, scales, rng) if solver == "slsqp" else exhaustive_composition(comp, scenario, scales)
+        row = dict(scenario=scenario.name, composition=comp.experiment, services=" → ".join(comp.path), functional=functional,
+                   feasible=best is not None, objective=np.nan)
         if best is not None:
             row |= configuration_row(comp, best)
         rows.append(row)
