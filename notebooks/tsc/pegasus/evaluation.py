@@ -541,10 +541,14 @@ def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xla
         extra_segments = []
         if overlay is not None:
             overlay_settings, overlay_statistics, overlay_label = overlay
+            from .figures import METHOD_STYLES
             for method in METHOD_COLORS:
                 if method in overlay_statistics:
                     overlay_line(ax, overlay_settings, overlay_statistics[method]["tightness"], method, overlay_statistics[method]["holds"])
                     extra_segments += sweep_segments(overlay_settings, overlay_statistics[method]["tightness"])
+                    if method not in statistics:   # only the dashed line: its own legend entry, in its color and marker
+                        ax.plot([], [], color=METHOD_COLORS[method], linestyle=(0, (4, 2)), linewidth=1.5, marker=METHOD_STYLES.get(method, ("o",))[0],
+                                markersize=6, label=method)
             ax.plot([], [], color="0.3", linestyle=(0, (4, 2)), linewidth=1.5, label=overlay_label)
         if onset is not None:
             x, onset_label = onset
@@ -642,6 +646,10 @@ def _tightness_legend(ax, settings: list, statistics: dict, ncol: int = 3, half:
     extra_segments: points and bands drawn besides the methods of `statistics` (e.g. overlay_line), which the legend avoids too."""
     from .figures import holds_handles, legend_inside
     handles, labels = ax.get_legend_handles_labels()
+    # the versions of the proposed method first, in their order: a version drawn only as an overlay (tightness_and_time_figure)
+    # then sits in the first column next to the measured one, whose label is as wide
+    first_proposed = sorted(range(len(labels)), key=lambda k: (labels[k] not in (PROPOSED, PROPOSED_SNC), k))
+    handles, labels = [handles[k] for k in first_proposed], [labels[k] for k in first_proposed]
     marker_handles, marker_labels = holds_handles()
     first = (len(handles) + 1) // 2
     if half == "left":
