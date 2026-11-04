@@ -1034,14 +1034,24 @@ def b4_utilization(sweep: str, setting: float, settings: tuple, max_workers: int
 # ------------------------------------------------------------------------------
 # Fork-join trees (second campaign, TREES_V2): measured latencies of trees of FIFO services
 # ------------------------------------------------------------------------------
-def vm_tree_experiments(tree_set: str) -> dict:
+def vm_tree_experiments(tree_set: str, preliminary: bool = False) -> dict:
     """The trees of the set `tree_set` of VM_V2 (VM_TREE_SETS) that the campaign has finished, levels h -> experiment
     ("b3-vm/<prefix><h>"). A tree is finished once its summary.json is written: the campaign writes dataset.csv after
-    every run, so a tree that is still measured already has one."""
+    every run, so a tree that is still measured already has one. preliminary: also the trees that are still measured
+    and have at least one valid run in their dataset.csv (vm_tree_preliminary)."""
     prefix, levels = VM_TREE_SETS[tree_set]
     experiments = {h: f"{VM_V2.name}/{prefix}{h}" for h in levels}
+    experiments = {h: experiment for h, experiment in experiments.items() if (RESULTS_V2 / experiment).is_dir()}
     return {h: experiment for h, experiment in experiments.items()
-            if (RESULTS_V2 / experiment).is_dir() and (experiment_folder(experiment) / "summary.json").exists()}
+            if (experiment_folder(experiment) / "summary.json").exists()
+            or (preliminary and (experiment_folder(experiment) / "dataset.csv").exists() and len(chain_runs(experiment)) > 0)}
+
+
+def vm_tree_preliminary(tree_set: str) -> dict:
+    """The trees of the set `tree_set` that the campaign is still measuring, levels h -> the number of their valid runs
+    so far: preliminary points of B.3, with fewer runs than a finished tree."""
+    finished = vm_tree_experiments(tree_set)
+    return {h: len(chain_runs(experiment)) for h, experiment in vm_tree_experiments(tree_set, preliminary=True).items() if h not in finished}
 
 
 def tree_handling_overhead(experiment: str) -> float:

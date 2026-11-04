@@ -35,7 +35,7 @@ from .evaluation import (METHOD_COLORS, PROPOSED, PROPOSED_SNC, TIGHTNESS_RANGE,
                          tightness_and_time_figure, tightness_figure, tightness_sweep_figure, time_conclusion)
 from .real_data import (BENCHMARK_AND_CHAINS, BENCHMARKS_V2, CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, b4_chain_data, b4_utilization, campaign_nodes, chain_experiments,
                         chain_path, chain_tail_ratios, real_tree_data, training_pool, tree_structure, unthrottled_pool, unthrottled_runs,
-                        VM_TREE_SETS, vm_tree_experiments)
+                        VM_TREE_SETS, vm_tree_experiments, vm_tree_preliminary)
 from .service_gp import configurations_of
 from .trees import balanced_tree
 
@@ -107,12 +107,16 @@ def configure(data_source: str, chains: str = DEFAULT_CHAINS) -> dict:
             # B.2: its chain with every training run of every service in a random order, from the benchmark and the other chains
             evidence_options=lambda s: dict(experiment=EVIDENCE_CHAIN[chain_campaign] + suffix, n_train=None, training_campaign=BENCHMARK_AND_CHAINS),
             # B.3: the balanced fork-join trees of the second machine (statics/results_milos_v2/b3-vm/, VM_TREE_SETS in real_data.py),
-            # (tree set, levels h) -> experiment, every finished tree of each set (a tree that is still measured joins once it is finished).
-            # "large" (288 to 640 px, 8 configurations drawn for every h) is the main set; "small" (160 to 256 px, the same 8
-            # configurations at every h) a check up to h = 4. The campaign set the arrival rate of every run so that its slowest
-            # service is busy about half of the time.
-            tree_experiments={(tree_set, h): experiment for tree_set in VM_TREE_SETS for h, experiment in vm_tree_experiments(tree_set).items()},
-            tree_levels=sorted({h for tree_set in VM_TREE_SETS for h in vm_tree_experiments(tree_set)}),   # B.3: levels h (2^h - 1 services)
+            # (tree set, levels h) -> experiment, every finished tree of each set and every tree that is still measured but has
+            # valid runs, as a preliminary point (tree_preliminary). "large" (288 to 640 px, 8 configurations drawn for every h) is
+            # the main set; "small" (160 to 256 px, the same 8 configurations at every h) a check up to h = 4. The campaign set the
+            # arrival rate of every run so that its slowest service is busy about half of the time.
+            tree_experiments={(tree_set, h): experiment for tree_set in VM_TREE_SETS
+                              for h, experiment in vm_tree_experiments(tree_set, preliminary=True).items()},
+            tree_levels=sorted({h for tree_set in VM_TREE_SETS for h in vm_tree_experiments(tree_set, preliminary=True)}),   # B.3: levels h (2^h - 1 services)
+            # B.3: the preliminary points, (tree set, levels h) -> valid runs so far; in the cache key, so that a point is computed
+            # anew as runs arrive and once its tree is finished
+            tree_preliminary={(tree_set, h): runs for tree_set in VM_TREE_SETS for h, runs in vm_tree_preliminary(tree_set).items()},
             tree_seeds=seeds,                                                                    # B.3: the seeds of every experiment
             # B.4: the chain of B.1 (detector -> transformer -> compressor) measured again under other arrivals, with the 50
             # configurations of b1u-vision-1 and, in a second measurement, of b1u2-vision-1 (statics/results_milos_v2/b4/,
