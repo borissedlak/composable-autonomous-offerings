@@ -708,3 +708,114 @@ def uncertainty_figure(uncertainty: dict, chain_pegasus: dict, services: list, t
             if name is not None:
                 save_figure(fig, f"{name}_{suffix}")
             plt.show()
+
+
+# ------------------------------------------------------------------------------
+# Slowdown of the services in a tree (B.3 diagnosis; here and not in real_data.py, so that it does not change the cache
+# key of the results: no method uses it)
+# ------------------------------------------------------------------------------
+SLOWDOWN_SERVICES = {   # service type -> (label, color, marker, line style); the services of the trees of B.3, distinct in grayscale
+    "cv-analyzer:v2": ("object detector (leaf)", "#4477AA", "o", "-"),
+    "face-detector:v2": ("face detector (leaf)", "#CC6677", "s", "--"),
+    "image-transformer:v1": ("image transformer (aggregator)", "#DDAA33", "^", "-."),
+}
+CONCURRENCY_BINS = (0, 1, 2, 4, 8, 12, 16, 24, 32, 48)   # bins of the concurrency c for the medians of slowdown_figure
+
+
+def tree_slowdowns(experiments: dict):
+    """Slowdown of every service of the trees `experiments` ((tree set, levels h) -> experiment of VM_V2) in every run,
+    against its grid benchmark on the same machine (VM_TREE_BENCHMARKS), and the concurrency it saw. One row per run and
+    node: tree set, h, run_id, node, service, slowdown, the mean processing time of the node in the run divided by that of
+    its benchmark at the same configuration (median over the benchmarks at u = 0.4, 0.6 and 0.8, whose processing times
+    do not depend on the load on this machine); concurrency, the time-weighted mean number of the other services of the
+    tree that are processing while the node processes an item (trace_steps.csv). Runs: valid, and throttled for less than
+    TREE_THROTTLE_LIMIT at every service; the camera does not count, because its throttling delays the frames before the
+    services and not their processing (so the small trees with h = 5 and 6 count, whose camera fell behind)."""
+    import pandas as pd
+    from .real_data import TREE_SOURCE, TREE_THROTTLE_LIMIT, VM_TREE_BENCHMARKS, campaign_experiments, experiment_folder, run_table
+    benchmark = []
+    for service, view in VM_TREE_BENCHMARKS.items():
+        for experiment in campaign_experiments(view):
+            if experiment.endswith(("u040", "u060", "u080")):
+                table = run_table(experiment)
+                table = table[table["service"] == service]
+                benchmark.append(pd.DataFrame({"service": service, "quality": table["service.data_quality"],
+                                               "model": table["service.model_size"] if "service.model_size" in table else 0,
+                                               "benchmark_ms": table["processing_mean_ms"]}))
+    benchmark = pd.concat(benchmark).fillna({"model": 0}).groupby(["service", "quality", "model"])["benchmark_ms"].median()
+    rows = []
+    for (tree_set, h), experiment in experiments.items():
+        table = run_table(experiment)
+        nodes = table[table["node"] != TREE_SOURCE].copy()
+        throttled = nodes.groupby("run_id")["throttled_fraction"].max()
+        nodes = nodes[nodes["run_id"].isin(throttled.index[throttled < TREE_THROTTLE_LIMIT])]
+        # every service of a run has the shared configuration of the leaves; the image transformer has no model size
+        model = np.where(nodes["service"] == "image-transformer:v1", 0, nodes["leaf-1.model_size"])
+        keys = zip(nodes["service"], nodes["leaf-1.data_quality"], model)
+        nodes["slowdown"] = nodes["processing_mean_ms"].to_numpy() / np.array([benchmark.get(key, np.nan) for key in keys])
+        for run_id, run_nodes in nodes.groupby("run_id"):
+            steps = pd.read_csv(experiment_folder(experiment) / "runs" / run_id / "trace_steps.csv",
+                                usecols=["node", "outcome", "processing_ms", "finished_at_ns"])
+            steps = steps[(steps["outcome"] == "completed") & (steps["node"] != TREE_SOURCE)]
+            end = steps["finished_at_ns"].to_numpy(dtype=float)
+            start = end - steps["processing_ms"].to_numpy() * 1e6
+            # number of processing services over time, B(t), as a step function; its integral over the processing of an
+            # item, divided by the processing time, minus the item itself, is the mean number of others processing meanwhile
+            times = np.concatenate([start, end])
+            order = np.argsort(times, kind="stable")
+            times, steps_up = times[order], np.concatenate([np.ones_like(start), -np.ones_like(end)])[order]
+            area = np.concatenate([[0.0], np.cumsum(np.cumsum(steps_up)[:-1] * np.diff(times))])
+            others = (np.interp(end, times, area) - np.interp(start, times, area)) / np.maximum(end - start, 1.0) - 1.0
+            concurrency = pd.Series(others).groupby(steps["node"].to_numpy()).mean()
+            rows += [dict(tree_set=tree_set, h=h, run_id=run_id, node=row.node, service=row.service, slowdown=row.slowdown,
+                          concurrency=concurrency.get(row.node, np.nan)) for row in run_nodes.itertuples()]
+    return pd.DataFrame(rows).dropna(subset=["slowdown", "concurrency"])
+
+
+def slowdown_bins(slowdowns, quantiles: tuple = (0.1, 0.5, 0.9), min_size: int = 10):
+    """Per service type and bin of CONCURRENCY_BINS with at least min_size rows of tree_slowdowns: the median concurrency
+    of the bin and the `quantiles` of the slowdown (columns q10, q50, q90), and the number of rows (size)."""
+    import pandas as pd
+    binned = slowdowns.assign(bin=pd.cut(slowdowns["concurrency"], CONCURRENCY_BINS, include_lowest=True))
+    grouped = binned.groupby(["service", "bin"], observed=True)
+    table = grouped["slowdown"].quantile(list(quantiles)).unstack().rename(columns=lambda q: f"q{round(100 * q)}")
+    table["concurrency"], table["size"] = grouped["concurrency"].median(), grouped.size()
+    return table[table["size"] >= min_size].reset_index()
+
+
+def slowdown_figure(slowdowns, height_marks: dict = None, name: str = None) -> None:
+    """Slowdown of the services in the trees against the concurrency they saw (tree_slowdowns): per service type the
+    median slowdown in every bin of the concurrency (slowdown_bins), at the median concurrency of the bin, with the band
+    from the 10th to the 90th percentile; the line at 1 is the speed of the benchmark. height_marks: label -> concurrency,
+    drawn as thin vertical lines (e.g. the median concurrency of every height of a tree set). name: file in figures/tsc."""
+    from matplotlib.lines import Line2D
+    from .figures import BAND_ALPHA, legend_inside, paper_figure, paper_style, save_figure
+    table = slowdown_bins(slowdowns)
+    with paper_style():
+        fig, ax = paper_figure()
+        handles, labels, segments = [], [], []
+        for service, (label, color, marker, style) in SLOWDOWN_SERVICES.items():
+            rows = table[table["service"] == service].sort_values("concurrency")
+            if rows.empty:
+                continue
+            ax.fill_between(rows["concurrency"], rows["q10"], rows["q90"], color=color, alpha=BAND_ALPHA, linewidth=0)
+            ax.plot(rows["concurrency"], rows["q50"], color=color, marker=marker, linestyle=style, linewidth=2)
+            handles.append(Line2D([], [], color=color, marker=marker, linestyle=style, linewidth=2))
+            labels.append(label)
+            segments += list(zip(rows["concurrency"], rows["q10"], rows["q90"]))
+        ax.axhline(1, color="black", linewidth=0.8)
+        handles.append(Line2D([], [], color="black", linewidth=0.8))
+        labels.append("speed in the benchmark")
+        top = max(2.0, float(table["q90"].max()) * 1.05)
+        ax.set_ylim(0.9, top)
+        for mark, concurrency in (height_marks or {}).items():
+            ax.axvline(concurrency, color="0.5", linewidth=0.8, linestyle=":")
+            ax.text(concurrency, 0.92, f" {mark}", color="0.35", fontsize=10, ha="left", va="bottom")
+        ax.set_xlim(-1, 1.1 * float(table["concurrency"].max()) + 1)   # up to the largest bin, not to the empty end of the last one
+        ax.set_xlabel("concurrency c: other services processing at the same time")
+        ax.set_ylabel("slowdown (tree ÷ benchmark)")
+        ax.grid(True, linestyle=":", alpha=0.6)
+        legend_inside(ax, handles, labels, segments, locations=("upper left", "upper center"), max_doublings=0, fontsize=10)
+        if name is not None:
+            save_figure(fig, name)
+        plt.show()
