@@ -286,3 +286,78 @@ def time_table(settings: list, times: dict, names: list, label) -> pd.DataFrame:
     rows = {f"training: {', '.join(group)}": seconds(times[group[0]]["training"]) for group in same_models(times, names)}
     rows.update({f"evaluation: {name}": seconds(times[name]["evaluation"]) for name in names})
     return pd.DataFrame(rows, index=[label(value) for value in settings]).T
+
+
+def finetuning_chains_figure(chains: list, depths: dict, statistics: dict, sizes: list, shown: int, level_label: str, output: str = None) -> None:
+    """C.1 on every chain: per chain (independent instances, a dodged dot plot as B.1 on all chains in 2a_base_case.ipynb)
+    the tightness of every method after fine-tuning with `shown` end-to-end samples, the median over the seeds as a dot
+    (filled where the method holds under every seed at that size, hollow where it does not) and the range over the
+    seeds as a thin bar; for the methods that also have a value without samples (both versions of Pegasus), that value
+    as a short dash in the method's color, joined to the dot by a dotted line, so that the gain of the fine-tuning shows.
+    The chains are grouped by application and sorted by their number of services (depths: chain -> K). statistics:
+    chain -> from sweep_statistics over `sizes`. The vertical axis is logarithmic and zoomed to the values drawn.
+    output: file name in figures/tsc (save_figure), or None."""
+    from .evaluation import METHOD_COLORS
+    from .finetuning import STYLES   # inside the function: finetuning imports from this module
+    METHOD_STYLES.update({name: (style[0], style[1:]) for name, style in STYLES.items()})
+    names = [name for name in STYLES if name in statistics[chains[0]]]
+    application = lambda chain: chain.split("-")[1]
+    applications = list(dict.fromkeys(application(chain) for chain in chains))
+    order = sorted(chains, key=lambda chain: (applications.index(application(chain)), depths[chain], chain))
+    positions, columns = np.arange(len(order)), dodge_offsets(len(names))
+    at, before = sizes.index(shown), sizes.index(0) if 0 in sizes else None
+    typical = lambda values: np.median(np.where(np.isnan(values), np.inf, values), axis=-1)   # over the seeds, as sweep_table
+    with paper_style():
+        fig, ax = paper_figure()
+        drawn = []
+        for name, offset in zip(names, columns):
+            color = METHOD_COLORS[name]
+            for x, chain in zip(positions + offset, order):
+                stats = statistics[chain][name]
+                values, value = stats["tightness"][at], typical(stats["tightness"][at])
+                if not np.isfinite(value):
+                    continue
+                ax.vlines(x, np.nanmin(values), np.nanmax(values), color=color, linewidth=1)
+                ax.scatter(x, value, s=40, marker=METHOD_STYLES[name][0], linewidths=1.5, zorder=3, edgecolors=color,
+                           facecolors=color if stats["holds"][at] else "white")
+                drawn.append((x, min(value, np.nanmin(values)), max(value, np.nanmax(values))))
+                if before is not None and stats["computed"][before]:
+                    start = typical(stats["tightness"][before])
+                    ax.plot([x, x], [start, value], color=color, linestyle=":", linewidth=1)
+                    ax.scatter(x, start, s=60, marker="_", linewidths=1.5, color=color, zorder=3)
+                    drawn.append((x, min(start, value), max(start, value)))
+        lowest, top = min(low for _, low, _ in drawn), max(high for _, _, high in drawn)
+        ax.set_yscale("log")
+        ax.set_ylim(min(lowest, 1.0) / 1.15, top * 1.1)   # the red zone tall enough for its label
+        ax.axhspan(ax.get_ylim()[0], 1.0, color=FAILURE_COLOR, linewidth=0)
+        ax.axhline(1.0, color="black", linewidth=1)
+        for boundary in positions[1:] - 0.5:
+            ax.axvline(boundary, color="0.85", linewidth=0.6)
+        centers = []
+        for k, app in enumerate(applications):
+            of_app = positions[[application(chain) == app for chain in order]]
+            if k > 0:
+                ax.axvline(of_app[0] - 0.5, color="0.4", linewidth=1)
+            centers.append(of_app.mean())
+        names_axis = ax.secondary_xaxis("bottom")   # the application names below the instance numbers, in place of an axis label
+        names_axis.set_xticks(centers, applications)
+        names_axis.tick_params(length=0, pad=20)
+        ax.set_xticks(positions, [chain.split("-")[2] for chain in order])
+        ax.set_xlim(-0.5, len(order) - 0.5)
+        ax.set_ylabel(tightness_label(level_label))
+        ax.grid(True, axis="y", linestyle=":", alpha=0.6)
+        handles = [method_handle(name, line=False) for name in names]
+        labels = list(names)
+        handles.append(Line2D([], [], linestyle="", marker="_", markersize=9, markeredgewidth=1.5, color="0.4"))
+        labels.append("n = 0")
+        # short labels for the two marker entries, so that three columns fit into the width of the axes
+        marker_handles, _ = holds_handles()
+        legend_inside(ax, handles + marker_handles, labels + ["holds", "does not hold"], drawn, locations=("upper center", "upper left", "upper right"),
+                      max_doublings=2, ncol=3, fontsize=10, framealpha=0.95, columnspacing=1.0, handletextpad=0.4)
+        ticks = [tick for tick in (1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64) if ax.get_ylim()[0] <= tick <= ax.get_ylim()[1]]
+        ax.set_yticks(ticks, [tightness_tick(tick) for tick in ticks])
+        ax.minorticks_off()
+        ax.text(0.99, 0.01, "underestimated: SLO violated", transform=ax.transAxes, ha="right", va="bottom", color=FAILURE_TEXT_COLOR)
+        if output is not None:
+            save_figure(fig, output)
+        plt.show()
