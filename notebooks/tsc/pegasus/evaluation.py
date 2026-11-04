@@ -518,7 +518,8 @@ def tightness_sweep_figure(settings: list, statistics: dict, xlabel: str, title:
 
 
 def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xlabel: str, title: str, level_label: str,
-                              tick_labels: list = None, log_x: bool = True, name: str = None, time_halves: tuple = None) -> None:
+                              tick_labels: list = None, log_x: bool = True, name: str = None, time_halves: tuple = None,
+                              overlay: tuple = None, onset: tuple = None) -> None:
     """Three separate figures over a sweep. First: the tightness of every method, as in tightness_sweep_figure.
     Second: the training time (s), one line per set of trained models; methods that use the same models (same_models)
     share a line, and its legend names them. Third: the evaluation time (s) of every method. Lines and bands of the time
@@ -526,7 +527,10 @@ def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xla
     sweep_seconds. The title is printed above the figures; name: file name in figures/tsc, saved as <name>_tightness,
     <name>_training and <name>_evaluation, or None. time_halves: (xlabel, tick_labels) of the two time figures as
     half figures side by side in the width of one (half_figure, each with its own vertical axis), which need a shorter
-    horizontal axis; None: full figures with the axis of the tightness figure."""
+    horizontal axis; None: full figures with the axis of the tightness figure.
+    overlay: (settings, statistics, label) of a second ground truth for some methods of the tightness figure, drawn as
+    dashed lines in their colors behind the measured ones (overlay_line), with one legend entry `label`. onset: (x, label)
+    of a vertical line in the tightness figure, e.g. where the services start to slow down."""
     from .figures import fit_half_pair, fit_x_tick_labels, half_figure, legend_inside, paper_figure, paper_style, plain_log_ticks, save_figure
     print(title)
     short = lambda method: method.replace(" (ours)", "")
@@ -534,9 +538,21 @@ def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xla
         fig, ax = paper_figure()
         _sweep_axis(ax, settings, xlabel, tick_labels, log_x)
         _tightness_panel(ax, settings, statistics, level_label)
+        extra_segments = []
+        if overlay is not None:
+            overlay_settings, overlay_statistics, overlay_label = overlay
+            for method in METHOD_COLORS:
+                if method in overlay_statistics:
+                    overlay_line(ax, overlay_settings, overlay_statistics[method]["tightness"], method, overlay_statistics[method]["holds"])
+                    extra_segments += sweep_segments(overlay_settings, overlay_statistics[method]["tightness"])
+            ax.plot([], [], color="0.3", linestyle=(0, (4, 2)), linewidth=1.5, label=overlay_label)
+        if onset is not None:
+            x, onset_label = onset
+            ax.axvline(x, color="0.25", linewidth=1.2, linestyle=(0, (1, 1.5)), zorder=1)
+            ax.plot([], [], color="0.25", linewidth=1.2, linestyle=(0, (1, 1.5)), label=onset_label)
         if not log_x:
             fit_x_tick_labels(ax)
-        _tightness_legend(ax, settings, statistics)
+        _tightness_legend(ax, settings, statistics, extra_segments=extra_segments)
         if name is not None:
             save_figure(fig, f"{name}_tightness")
         plt.show()
@@ -605,10 +621,25 @@ def _tightness_panel(ax, settings: list, statistics: dict, level_label: str, fai
     ax.set_ylabel(tightness_label(level_label))
 
 
-def _tightness_legend(ax, settings: list, statistics: dict, ncol: int = 3, half: str = None) -> None:
+def overlay_line(ax, settings, values: np.ndarray, name: str, held: np.ndarray) -> None:
+    """A second ground truth for the method `name` in a tightness panel: the median over the seeds as a dashed line in the
+    color of the method, behind its measured line (sweep_line) and without a band, markers filled where it holds and
+    hollow where it does not. values: (settings, seeds)."""
+    from .figures import METHOD_STYLES
+    typical = np.median(np.where(np.isnan(values), np.inf, values), axis=1)
+    shown = np.isfinite(typical)
+    settings, typical, held = np.asarray(settings)[shown], typical[shown], np.asarray(held)[shown]
+    color, marker = METHOD_COLORS[name], METHOD_STYLES.get(name, ("o", "-"))[0]
+    ax.plot(settings, typical, color=color, linestyle=(0, (4, 2)), linewidth=1.5, zorder=1.5)
+    ax.scatter(settings, typical, s=28, marker=marker, facecolors=[color if h else "white" for h in held], edgecolors=color, linewidths=1.2,
+               zorder=1.6)
+
+
+def _tightness_legend(ax, settings: list, statistics: dict, ncol: int = 3, half: str = None, extra_segments: list = ()) -> None:
     """The legend of the methods and of the markers inside a tightness panel, where it hides the fewest points and
     bands (legend_inside); the axis keeps TIGHTNESS_RANGE, as in B.1. Call when the axes are complete. half: "left" lists the
-    first half of the methods, "right" the rest and the markers, so that the two halves of a pair share one legend."""
+    first half of the methods, "right" the rest and the markers, so that the two halves of a pair share one legend.
+    extra_segments: points and bands drawn besides the methods of `statistics` (e.g. overlay_line), which the legend avoids too."""
     from .figures import holds_handles, legend_inside
     handles, labels = ax.get_legend_handles_labels()
     marker_handles, marker_labels = holds_handles()
@@ -618,6 +649,7 @@ def _tightness_legend(ax, settings: list, statistics: dict, ncol: int = 3, half:
     elif half == "right":
         handles, labels = handles[first:], labels[first:]
     segments = [segment for name in statistics if name in METHOD_COLORS for segment in sweep_segments(settings, statistics[name]["tightness"])]
+    segments += list(extra_segments)
     legend_inside(ax, handles + marker_handles, labels + marker_labels, segments, max_doublings=0, ncol=ncol, fontsize=10, framealpha=0.95,
                   columnspacing=1.0, handletextpad=0.4)
 
@@ -819,3 +851,98 @@ def slowdown_figure(slowdowns, height_marks: dict = None, name: str = None) -> N
         if name is not None:
             save_figure(fig, name)
         plt.show()
+
+
+def slowdown_onset(slowdowns, tree_set: str, threshold: float):
+    """The height h at which the median slowdown of the services of a tree set (tree_slowdowns, over its services and
+    runs) first exceeds `threshold`, interpolated linearly between that height and the one below it; None if no height
+    exceeds it, and the first height if already that one does."""
+    median = slowdowns[slowdowns["tree_set"] == tree_set].groupby("h")["slowdown"].median().sort_index()
+    above = median.index[median.to_numpy() > threshold]
+    if not len(above):
+        return None
+    h = above[0]
+    below = median.index[median.index < h]
+    if not len(below):
+        return float(h)
+    previous = below[-1]
+    return float(previous + (threshold - median[previous]) / (median[h] - median[previous]) * (h - previous))
+
+
+def tree_training_runs(experiment: str, seed, n_train: int, benchmarks: dict = None) -> set:
+    """The benchmark runs, as (experiment, run_id), that real_tree_data draws to train the models of the tree `experiment`
+    under `seed`: the same generator and the same draws, service type by service type in the same order."""
+    from .real_data import TREE_BENCHMARKS, VM_TREE_BENCHMARKS, VM_V2, training_pool, tree_structure, unthrottled_pool
+    rng_train = np.random.default_rng(np.random.SeedSequence(seed).spawn(3)[0])   # as in real_tree_data
+    if benchmarks is None:
+        benchmarks = VM_TREE_BENCHMARKS if experiment.startswith(VM_V2.name + "/") else TREE_BENCHMARKS
+    chosen = set()
+    for service in sorted(set(tree_structure(experiment)[2])):
+        pool = unthrottled_pool(training_pool(service, campaign=benchmarks[service]))
+        rows = pool.iloc[np.sort(rng_train.choice(len(pool), size=n_train, replace=False))]
+        chosen |= set(zip(rows["experiment"], rows["run_id"]))
+    return chosen
+
+
+def emulated_tree_quantiles(experiment: str, seeds: list, n_train: int, level: float, coverage_check: dict, n_frames: int = 5000,
+                            warmup_share: float = 0.1) -> dict:
+    """Ground truth of the tree `experiment` of VM_V2 as if every service ran as fast as in its benchmark. Per held-out run
+    (unthrottled_runs below TREE_THROTTLE_LIMIT, in the order of real_tree_data), n_frames Poisson arrivals at the rate of
+    the run pass through the fork-join tree of FIFO services with one worker each (fifo_node_leaving; an aggregator
+    receives a frame when the later of its children has released it). The execution time of a frame at a service is
+    drawn with replacement from the processing times of the benchmark runs of its service type at its configuration
+    (records.csv, measurement phase; VM_TREE_BENCHMARKS), plus the handling overhead of the tree (tree_handling_overhead).
+    Per seed only benchmark runs that do not train the models under that seed (tree_training_runs), so that no training
+    run is replayed; if a configuration has no other run, its training runs are used, with a printed note. Latency of a
+    frame: from its arrival until the root releases it, the first warmup_share of the frames dropped; it leaves out the
+    time between the services, as the methods do. seeds: those of real_tree_data ([base seed, s]); n_train: as there.
+    Returns {s: (the `level` quantile per held-out run, the lower edge of its confidence interval)} as measured_quantiles,
+    keyed by the last element of each seed."""
+    import pandas as pd
+    from .real_data import (TREE_THROTTLE_LIMIT, VM_TREE_BENCHMARKS, arrival_rates, experiment_folder, run_table, training_pool,
+                            tree_handling_overhead, tree_structure, unthrottled_pool, unthrottled_runs)
+    from .simulation import fifo_node_leaving, quantile_with_lower_bound
+    from .trees import children_first
+    children, nodes, services = tree_structure(experiment)
+    runs = unthrottled_runs(experiment, below=TREE_THROTTLE_LIMIT)
+    rates = arrival_rates(experiment).loc[runs].to_numpy()
+    configurations = run_table(experiment).drop_duplicates("run_id").set_index("run_id").loc[runs]
+    overhead = tree_handling_overhead(experiment)
+    pools = {service: unthrottled_pool(training_pool(service, campaign=VM_TREE_BENCHMARKS[service])) for service in set(services)}
+    processing = {}   # (experiment, run_id) of a benchmark run -> its processing times (s) in the measurement phase
+
+    def processing_times(benchmark: str, run_id: str) -> np.ndarray:
+        if (benchmark, run_id) not in processing:
+            records = pd.read_csv(experiment_folder(benchmark) / "runs" / run_id / "service" / "records.csv",
+                                  usecols=["admission_phase", "outcome", "started_at_ns", "finished_at_ns"])
+            records = records[(records["admission_phase"] == "measure") & (records["outcome"] == "completed")]
+            processing[(benchmark, run_id)] = ((records["finished_at_ns"] - records["started_at_ns"]) / 1e9).to_numpy()
+        return processing[(benchmark, run_id)]
+
+    results = {}
+    for seed in seeds:
+        excluded = tree_training_runs(experiment, seed, n_train)
+        rng = np.random.default_rng(np.random.SeedSequence(seed).spawn(3)[2])   # a generator that real_tree_data does not use
+        arrivals = np.cumsum(rng.exponential(1.0, (len(runs), n_frames)) / rates[:, None], axis=1)
+        leaving, fallbacks = [None] * len(nodes), 0
+        for position in children_first(children):
+            node, pool = nodes[position], pools[services[position]]
+            execution = np.empty((len(runs), n_frames))
+            for row, run_id in enumerate(runs):
+                matches = pool["data_quality"] == configurations.loc[run_id, f"{node}.data_quality"]
+                if "model_size" in pool:
+                    matches &= pool["model_size"] == configurations.loc[run_id, f"{node}.model_size"]
+                candidates = [(r.experiment, r.run_id) for r in pool[matches].itertuples()]
+                replayed = [run for run in candidates if run not in excluded] or candidates
+                fallbacks += not [run for run in candidates if run not in excluded]
+                samples = np.concatenate([processing_times(*run) for run in replayed])
+                execution[row] = rng.choice(samples, n_frames) + overhead
+            entering = arrivals if not children[position] else np.maximum.reduce([leaving[child] for child in children[position]])
+            leaving[position] = fifo_node_leaving(entering, execution, 1)
+            for child in children[position]:
+                leaving[child] = None
+        if fallbacks:
+            print(f"emulated_tree_quantiles: {experiment}, seed {seed}: {fallbacks} node-runs replay training runs (no other run of their configuration)")
+        latency = (leaving[0] - arrivals)[:, int(warmup_share * n_frames):]
+        results[seed[-1]] = quantile_with_lower_bound(latency, level, **coverage_check)
+    return results
