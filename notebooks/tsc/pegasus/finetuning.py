@@ -97,15 +97,18 @@ def finetuning_methods(data, methods: dict, samples: np.ndarray, test: np.ndarra
     return results
 
 
-def finetuning_figure(sizes: list, statistics: dict, level_label: str, output: Path = None) -> None:
+def finetuning_figure(sizes: list, statistics: dict, level_label: str, output: Path = None, holds_labels: list = None,
+                      legend_options: dict = None) -> None:
     """Tightness of every method of C.1 over the number of end-to-end samples, in the style of the tightness figures of
     B (evaluation.py, figures.py): per method the median over the seeds with the band from the smallest to the largest
     seed (sweep_line), a filled marker where the method holds (statistics[name]["holds"]) and a hollow one where it does
-    not, the measured quantile as a black line at 1x and the red zone below it, where a method underestimates the quantile (SLO violated). Unlike the
-    figures of B, the vertical axis is linear and zoomed to the values of C.1, which lie close above 1x, so that their
-    differences are visible. statistics: from sweep_statistics over `sizes`; a method without a value at a size (the
-    baselines at n = 0) has no point there. output: path without suffix; its name is the file name in figures/tsc
-    (save_figure), or None."""
+    not, the measured quantile as a black line at 1x and the red zone below it, where a method underestimates the quantile
+    (SLO violated). Unlike the figures of B, the vertical axis is linear and zoomed to the values of C.1, which lie close
+    above 1x, so that their differences are visible. The methods are drawn in the order of STYLES. statistics: from
+    sweep_statistics over `sizes`; a method without a value at a size (the baselines at n = 0) has no point there.
+    output: path without suffix; its name is the file name in figures/tsc (save_figure), or None. holds_labels: legend
+    text of the filled and the hollow marker (default: holds_handles), e.g. where the band spans chains instead of seeds.
+    legend_options: options of the legend that replace the defaults below (ncol, fontsize, ...), and "locations", the locations tried in order."""
     from matplotlib.ticker import FuncFormatter
     from .evaluation import sweep_line, sweep_segments
     from .figures import (FAILURE_COLOR, FAILURE_TEXT_COLOR, METHOD_STYLES, holds_handles, legend_inside, paper_figure, paper_style, save_figure,
@@ -120,10 +123,12 @@ def finetuning_figure(sizes: list, statistics: dict, level_label: str, output: P
             segments += sweep_segments(sizes, statistics[name]["tightness"])
         # zoomed: from a little below 1x, so that the red zone shows, to a little above the highest band
         top = max(high for _, _, high in segments)
-        ax.set_ylim(1 - 0.1 * (top - 1), top + 0.1 * (top - 1))
+        # the red zone tall enough for its label at the font size of the axes
+        ax.set_ylim(1 - 0.15 * (top - 1), top + 0.1 * (top - 1))
         ax.axhspan(ax.get_ylim()[0], 1.0, color=FAILURE_COLOR, linewidth=0)
         ax.axhline(1.0, color="black", linewidth=1)
-        ax.text(0.99, 0.01, "underestimated: SLO violated", transform=ax.transAxes, ha="right", va="bottom", color=FAILURE_TEXT_COLOR)
+        # at the left, where the baselines, which need samples, leave the red zone free; short, so that it ends before the first sample size
+        ax.text(0.01, 0.015, "SLO violated", transform=ax.transAxes, ha="left", va="bottom", color=FAILURE_TEXT_COLOR)
         ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: tightness_tick(value)))
         ax.set_ylabel(tightness_label(level_label))
         ax.set_xticks(sizes)
@@ -131,8 +136,27 @@ def finetuning_figure(sizes: list, statistics: dict, level_label: str, output: P
         ax.grid(True, linestyle=":", alpha=0.6)
         handles, labels = ax.get_legend_handles_labels()
         marker_handles, marker_labels = holds_handles()
-        legend_inside(ax, handles + marker_handles, labels + marker_labels, segments, locations=("upper right", "upper center", "upper left"),
-                      max_doublings=0, ncol=2, fontsize=10, framealpha=0.95, columnspacing=1.0, handletextpad=0.4)
+        marker_labels = holds_labels or marker_labels
+        handles, labels = handles + marker_handles, labels + marker_labels
+        locations = ("upper right", "upper center", "upper left")
+        options = dict(ncol=2, fontsize=10, framealpha=0.95, columnspacing=1.0, handletextpad=0.4) | (legend_options or {})
+        locations = options.pop("locations", locations)
+        # legend_inside makes room above the data only on a logarithmic axis (by doubling its top); on this linear axis the
+        # top is raised in steps of a tenth of the data range until the legend fits above the data at one of the locations
+        x, low, high = (np.asarray(values, dtype=float) for values in zip(*segments))
+        for _ in range(20):
+            fits = False
+            for location in locations:
+                legend = ax.legend(handles, labels, loc=location, **options)
+                fig.canvas.draw()
+                box = legend.get_window_extent().transformed(ax.transData.inverted())
+                if not ((x >= box.x0) & (x <= box.x1) & (high >= box.y0) & (low <= box.y1)).any():
+                    fits = True
+                    break
+            if fits:
+                break
+            ax.set_ylim(ax.get_ylim()[0], ax.get_ylim()[1] + 0.1 * (top - 1))
+        legend_inside(ax, handles, labels, segments, locations=locations, max_doublings=0, **options)
         if output is not None:
             save_figure(fig, output.name)
         plt.show()
