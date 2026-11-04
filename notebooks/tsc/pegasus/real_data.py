@@ -54,6 +54,21 @@ the cores of its runs are capped at 1.5. BENCHMARK_GRID15_V2 measured only the f
 On the configurations that both grids measured, the processing times of the two grids agree; those of BENCHMARKS_V2
 are a few percent longer. TREE_BENCHMARKS says which benchmark trains which service type of the trees.
 
+Second machine (VM_V2, the folder `b3-vm/`): the grid benchmarks and the balanced trees measured again on a second testbed
+machine (provenance.json: "rask", a virtual machine with 75 cores of an AMD EPYC 7742; the first machine is "ai2", an AMD
+Ryzen 9 7950X with 32 threads), with the same experiment files. Its experiments lie side by side in one folder, under the
+names of those of the first machine, so they are named "b3-vm/<experiment>" (campaign_of) and its benchmarks are read
+through a FolderView (VM_TREE_BENCHMARKS). The second machine processes an item about 1.75 times as slowly, but its
+processing times hardly depend on the load and have no runs with heavy tails, so its benchmarks describe its trees
+better. Two tree sets (VM_TREE_SETS): `b3h-height-<h>` (small: 160 to 256 px, the same 8 configurations at every h,
+h = 1 to 6) and `b3h-large-height-<h>` (large: 288 to 640 px, 8 configurations drawn anew for every h, h = 1 to 6), each
+8 configurations repeated 6 times. In the small trees the camera, which sends every frame to all leaves, falls behind
+from h = 5 at their arrival rates of 12 to 16 frames/s (at h = 5 its container is throttled in most runs, at h = 6 the
+sending is most of the latency and 18 of 48 runs are invalid), so B.3 uses the small trees up to h = 4; the large trees
+arrive at 1 to 5 frames/s, where the camera keeps up at every h. The folder also holds pilots (`pilot-*`, single runs)
+and a check of the probe cores (`face-cores-*`), which no function reads. An experiment of a tree set that is still
+measured has no summary.json yet and is left out (vm_tree_experiments).
+
 Load and arrival pattern (B4_V2, the folder `b4/`, experiment B4 of `new_experiments.md`): the chain of
 `b1u-vision-1` (detector -> transformer -> compressor, 1 to 4 workers per service) measured again, with the same 50
 configurations, under other arrivals. `b4a-utilization-<u>` sets the Poisson arrival rate of every run so that its
@@ -67,7 +82,7 @@ statistics; `runs/<run>/trace_steps.csv` (pipelines) has one row per request and
 has one row per item of that node. Runs that the campaign marked as invalid (overloaded, drain timeout) are left out.
 Units: the campaign stores milliseconds and nanoseconds; every function here returns seconds.
 """
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from functools import lru_cache, reduce
 from pathlib import Path
 
@@ -87,6 +102,10 @@ BENCHMARK_GRID15_V2 = CAMPAIGN_V2.parent / "benchmark-grid15"   # every configur
 TREE_BENCHMARKS = {"cv-analyzer:v2": BENCHMARK_GRID_V2, "face-detector:v2": BENCHMARK_GRID15_V2, "image-transformer:v1": BENCHMARK_GRID15_V2}
 TREES_V2 = CAMPAIGN_V2.parent / "b3"
 TREE_HEIGHTS_V2 = CAMPAIGN_V2.parent / "b3-heights"
+# Second machine (module docstring): its experiments lie side by side in one folder, under the same names as those of the
+# first machine, so they are named "<folder>/<experiment>" (e.g. "b3-vm/b3h-large-height-3"), relative to RESULTS_V2
+RESULTS_V2 = CAMPAIGN_V2.parent
+VM_V2 = RESULTS_V2 / "b3-vm"
 # The chains of CAMPAIGN_V2 measured again (`b1u-<chain>`): every service with 1 to 4 workers and 0.5 cores more than its
 # workers, so that no run is throttled. Its `check-*` experiments are short checks of the setup, not chains of B1.
 CHAINS_UNTHROTTLED_V2 = CAMPAIGN_V2.parent / "b1-unthrottled"
@@ -101,6 +120,23 @@ COMBINED = "+b1u-max"   # a combined chain "<chain of CAMPAIGN_V2>+b1u-max<k>" (
 # Training source (training_campaign of real_chain_data): the benchmark of a service and its runs in the other chains of
 # CAMPAIGN_V2 (one worker, like the benchmark), without the evaluated chain (training_exclusion)
 BENCHMARK_AND_CHAINS = "benchmark+chains"
+
+
+@dataclass(frozen=True)
+class FolderView:
+    """The experiments of `folder` whose names start with `prefix`, used like a campaign folder (campaign_nodes,
+    training_pool): VM_V2 holds the benchmarks and trees of the second machine side by side in one folder."""
+    folder: Path
+    prefix: str
+
+
+# The benchmarks of VM_V2 that train every service type of its trees, chosen as TREE_BENCHMARKS chooses on the first machine
+VM_TREE_BENCHMARKS = {"cv-analyzer:v2": FolderView(VM_V2, "grid-"), "face-detector:v2": FolderView(VM_V2, "grid15-"),
+                      "image-transformer:v1": FolderView(VM_V2, "grid15-")}
+# The tree sets of VM_V2 for B.3: set -> (prefix of its experiments, its levels h). Left out: h = 5 and 6 of the small trees,
+# whose camera could not send the frames to its 16 or 32 leaves at their rate: at h = 5 the camera was throttled in most
+# runs (no run is held out under TREE_THROTTLE_LIMIT), at h = 6 18 of 48 runs were invalid (module docstring)
+VM_TREE_SETS = {"large": ("b3h-large-height-", (1, 2, 3, 4, 5, 6)), "small": ("b3h-height-", (1, 2, 3, 4))}
 TREE_SOURCE = "camera"   # the node of a tree experiment that sends every frame to the leaves; it is not a service of the tree
 # Held-out runs of a tree: throttled_fraction below this share at every node. In the tree campaign a throttled detector
 # lost only about one CPU period of its run, a single stall, and leaving out every throttled run would drop a sizable
@@ -120,7 +156,11 @@ NORMAL_P95 = 1.6449                                                             
 # ------------------------------------------------------------------------------
 def campaign_of(experiment: str) -> Path:
     """The campaign folder that holds `experiment`: CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, BENCHMARKS_V2, BENCHMARK_GRID_V2,
-    BENCHMARK_GRID15_V2, TREES_V2, TREE_HEIGHTS_V2 or B4_V2 if it has a folder of that name, else CAMPAIGN."""
+    BENCHMARK_GRID15_V2, TREES_V2, TREE_HEIGHTS_V2 or B4_V2 if it has a folder of that name, else CAMPAIGN. An experiment
+    of the second machine, "<folder>/<experiment>" (VM_V2), lies in RESULTS_V2."""
+    if "/" in experiment:
+        assert (RESULTS_V2 / experiment).is_dir(), f"{experiment}: no such folder in {RESULTS_V2}"
+        return RESULTS_V2
     return next((campaign for campaign in (CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, BENCHMARKS_V2, BENCHMARK_GRID_V2, BENCHMARK_GRID15_V2, TREES_V2,
                                            TREE_HEIGHTS_V2, B4_V2) if (campaign / experiment).is_dir()),
                 CAMPAIGN)
@@ -186,18 +226,27 @@ def node_configurations(table: pd.DataFrame, node: str) -> pd.DataFrame:
     return runs[columns].rename(columns=lambda column: column[len(node) + 1:])
 
 
+def campaign_experiments(campaign) -> list:
+    """The experiments of `campaign`, sorted: a campaign folder, without the folders "campaigns" and "results" of the
+    first campaign, which hold no experiments, and the `check-*` experiments of CHAINS_UNTHROTTLED_V2, which are checks
+    of the setup (chain_experiments); or a FolderView, whose experiments are named "<folder>/<experiment>"."""
+    if isinstance(campaign, FolderView):
+        return sorted(f"{campaign.folder.name}/{path.name}" for path in campaign.folder.iterdir()
+                      if path.is_dir() and path.name.startswith(campaign.prefix))
+    return sorted(path.name for path in campaign.iterdir()
+                  if path.is_dir() and path.name not in ("campaigns", "results") and not path.name.startswith("check-"))
+
+
 @lru_cache(maxsize=None)
 def campaign_nodes(campaign: Path = CAMPAIGN) -> pd.DataFrame:
-    """One row per experiment of `campaign` and node: experiment, pipeline (the topology as the campaign writes it,
-    e.g. "qr->cv cv->face"; the node name for a service measured alone), alone (the experiment measures one service
-    alone), node and service. The folders "campaigns" and "results" of the first campaign hold no experiments, and the
-    `check-*` experiments of CHAINS_UNTHROTTLED_V2 are checks of the setup (chain_experiments)."""
+    """One row per experiment of `campaign` (campaign_experiments; a folder or a FolderView) and node: experiment,
+    pipeline (the topology as the campaign writes it, e.g. "qr->cv cv->face"; the node name for a service measured
+    alone), alone (the experiment measures one service alone), node and service."""
     rows = []
-    for folder in sorted(path for path in campaign.iterdir()
-                         if path.is_dir() and path.name not in ("campaigns", "results") and not path.name.startswith("check-")):
-        table = run_table(folder.name)
+    for experiment in campaign_experiments(campaign):
+        table = run_table(experiment)
         nodes = table.drop_duplicates("node")
-        rows += [dict(experiment=folder.name, pipeline=table["pipeline"].iloc[0], alone="->" not in table["pipeline"].iloc[0], node=node, service=service)
+        rows += [dict(experiment=experiment, pipeline=table["pipeline"].iloc[0], alone="->" not in table["pipeline"].iloc[0], node=node, service=service)
                  for node, service in zip(nodes["node"], nodes["service"])]
     return pd.DataFrame(rows)
 
@@ -985,6 +1034,30 @@ def b4_utilization(sweep: str, setting: float, settings: tuple, max_workers: int
 # ------------------------------------------------------------------------------
 # Fork-join trees (second campaign, TREES_V2): measured latencies of trees of FIFO services
 # ------------------------------------------------------------------------------
+def vm_tree_experiments(tree_set: str) -> dict:
+    """The trees of the set `tree_set` of VM_V2 (VM_TREE_SETS) that the campaign has finished, levels h -> experiment
+    ("b3-vm/<prefix><h>"). A tree is finished once its summary.json is written: the campaign writes dataset.csv after
+    every run, so a tree that is still measured already has one."""
+    prefix, levels = VM_TREE_SETS[tree_set]
+    experiments = {h: f"{VM_V2.name}/{prefix}{h}" for h in levels}
+    return {h: experiment for h, experiment in experiments.items()
+            if (RESULTS_V2 / experiment).is_dir() and (experiment_folder(experiment) / "summary.json").exists()}
+
+
+def tree_handling_overhead(experiment: str) -> float:
+    """Handling overhead (s) of a service in the tree `experiment`, which receives its frames from another service (the
+    camera or a child): for a tree of VM_V2 the median of handling_overhead over every node (without the camera) and
+    held-out run of the other finished trees of its set (vm_tree_experiments), because the second machine has no chains
+    of B.1 to measure it on, and the evaluated tree must not inform its own prediction; for a tree of the first machine
+    the handover overhead of the chains of B.1 (hop_overheads), of which none is a tree."""
+    if not experiment.startswith(VM_V2.name + "/"):
+        return hop_overheads()[1]
+    tree_set = next(name for name, (prefix, _) in VM_TREE_SETS.items() if experiment.split("/", 1)[1].startswith(prefix))
+    others = [other for other in vm_tree_experiments(tree_set).values() if other != experiment]
+    return float(np.nanmedian([handling_overhead(other, run_id, node) for other in others for node in tree_structure(other)[1]
+                               for run_id in unthrottled_runs(other, below=TREE_THROTTLE_LIMIT)]))
+
+
 def tree_structure(experiment: str) -> tuple:
     """Topology of the tree experiment `experiment` (TREES_V2, e.g. "b3-balanced-3") in the form of trees.py: children
     (the positions of the children of every position; position 0 is the root, the others follow level by level, the
@@ -1028,7 +1101,8 @@ def _measured_tree_latencies(experiment: str, run_id: str, nodes: tuple) -> tupl
 
 def real_tree_data(experiment: str, level: float, node_level: float, coverage_check: dict, seed, n_train: int = 25,
                    n_trace_items: int = 2000, benchmarks: dict = None) -> TreeData:
-    """Data of one fork-join tree of the second campaign (`experiment` in TREES_V2) for B.3 of the evaluation, in the
+    """Data of one fork-join tree of the second campaign (`experiment` in TREES_V2, TREE_HEIGHTS_V2 or, as
+    "b3-vm/<experiment>", VM_V2) for B.3 of the evaluation, in the
     form of synthetic_tree_data (data.py): every service has one worker, and an aggregator processes a frame once all
     its children have released it.
 
@@ -1039,12 +1113,14 @@ def real_tree_data(experiment: str, level: float, node_level: float, coverage_ch
     measured latency of every position in every run, for the Oracle.
 
     Training (per service type): every service is trained on its benchmark in `benchmarks` (service type -> benchmark
-    folder; default TREE_BENCHMARKS, the grid benchmarks; {service: BENCHMARKS_V2 ...} trains on the benchmarks of B.1);
+    folder or FolderView; default the grid benchmarks of the machine that measured the tree, TREE_BENCHMARKS or
+    VM_TREE_BENCHMARKS; {service: BENCHMARKS_V2 ...} trains on the benchmarks of B.1);
     no run of a tree is used. n_train unthrottled benchmark runs are drawn at random
     per service type (with `seed`), and all positions of that type share its models. Targets as in real_chain_data: the
     mean execution time of a run, with the handling overhead of the run replaced by the handover overhead of
     hop_overheads (measured on the chains of B.1), because every service of a tree receives its frames from another
-    service (the camera or a child); and the spread of the run. The monitored latencies of the baselines are those the
+    service (the camera or a child); on the second machine, the handling overhead measured on its other trees
+    (tree_handling_overhead); and the spread of the run. The monitored latencies of the baselines are those the
     benchmark run measured (its first n_trace_items requests, or as many as the shortest drawn run has), at the rate of
     that run, which x_train_load holds as log10(rate) next to the configuration.
 
@@ -1064,9 +1140,11 @@ def real_tree_data(experiment: str, level: float, node_level: float, coverage_ch
     workload = dict(process="poisson", rate=rates, jitter=0.1)
 
     x_train, y_train, y_train_spread, x_test, x_train_load, x_test_load, monitored_latencies, workers_column = ({} for _ in range(8))
-    handover = hop_overheads()[1]   # s; no chain of B.1 is a tree, so none is left out
+    handover = tree_handling_overhead(experiment)   # s; measured on the same machine as the tree
+    if benchmarks is None:   # the grid benchmarks of the machine that measured the tree
+        benchmarks = VM_TREE_BENCHMARKS if experiment.startswith(VM_V2.name + "/") else TREE_BENCHMARKS
     for service in sorted(set(services)):
-        pool = unthrottled_pool(training_pool(service, campaign=(benchmarks or TREE_BENCHMARKS)[service]))
+        pool = unthrottled_pool(training_pool(service, campaign=benchmarks[service]))
         assert len(pool) >= n_train, f"{service}: {len(pool)} training runs available, {n_train} needed"
         chosen = pool.iloc[np.sort(rng_train.choice(len(pool), size=n_train, replace=False))]
         knobs = [column for column in pool.columns if column not in POOL_COLUMNS and column not in NOT_CONFIGURATION]
