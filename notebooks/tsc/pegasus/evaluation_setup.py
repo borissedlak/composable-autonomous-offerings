@@ -57,17 +57,21 @@ sweep_competitors = [name for name in competitors if name not in only_base_case]
 CACHE = Path(__file__).resolve().parents[3] / "statics" / "evaluation_cache"
 # The chains of the real data (`chains`): "b1", the chains of B1 with one worker per service, where a third of the
 # runs was throttled and is left out; "b1-unthrottled", the same chains measured again with 1 to 4 workers per service
-# and no throttled run; "b1+b1u-max3", every chain of b1 with the runs of its twin in b1-unthrottled in which no service
-# has more than 3 workers (combined_chain in real_data.py). Per option: the folder whose chains are listed, and the suffix
+# and no throttled run; "b1+b1u-max<k>", every chain of b1 with the runs of its twin in b1-unthrottled in which no service
+# has more than k workers (combined_chain in real_data.py). Per option: the folder whose chains are listed, and the suffix
 # of their names
-CHAIN_FOLDERS = {"b1": (CAMPAIGN_V2, ""), "b1-unthrottled": (CHAINS_UNTHROTTLED_V2, ""), "b1+b1u-max3": (CAMPAIGN_V2, "+b1u-max3")}
+CHAIN_FOLDERS = {"b1": (CAMPAIGN_V2, ""), "b1-unthrottled": (CHAINS_UNTHROTTLED_V2, ""),
+                 **{f"b1+b1u-max{k}": (CAMPAIGN_V2, f"+b1u-max{k}") for k in (3, 4)}}
 BASE_CHAIN = {CAMPAIGN_V2: "b1-vision-1-single", CHAINS_UNTHROTTLED_V2: "b1u-vision-1"}   # the chain of B.1 in each folder
 # The chain of B.2 in each folder: denoiser -> object detector -> face detector -> compressor, the chain whose services the
 # models know least evenly (the face detector far worse than the others), see B.2
 EVIDENCE_CHAIN = {CAMPAIGN_V2: "b1-vision-3-single", CHAINS_UNTHROTTLED_V2: "b1u-vision-3"}
-# The chains of the paper: the one-worker runs of b1 and the runs of b1-unthrottled with at most 3 workers per service, the
-# range in which the execution time of a service barely grows with its workers (2a, Services and Chains)
-DEFAULT_CHAINS = "b1+b1u-max3"
+# Held-out runs of every chain experiment (B.1, B.2, B.4 to C.1): at most this many workers per service. 4 is every worker
+# count that b1-unthrottled and b4 measured, so no measured run is left out for its workers. B.3 has no such cap: its
+# trees ran with one worker per service.
+MAX_WORKERS = 4
+# The chains of the paper: the one-worker runs of b1 and the runs of b1-unthrottled with at most MAX_WORKERS workers per service
+DEFAULT_CHAINS = f"b1+b1u-max{MAX_WORKERS}"
 
 
 def configure(data_source: str, chains: str = DEFAULT_CHAINS) -> dict:
@@ -104,7 +108,8 @@ def configure(data_source: str, chains: str = DEFAULT_CHAINS) -> dict:
             # the most benchmark runs that every service of the chain has (unthrottled, with a measurable handling overhead): the largest size of B.2
             n_pool=min(len(unthrottled_pool(training_pool(service, campaign=BENCHMARKS_V2))) for service in chain_path(base_experiment)[1].values()),
             training_options=lambda s: dict(level=1 - alpha, coverage_check=coverage_check, **chain_options(s)),
-            # B.2: its chain with every training run of every service in a random order, from the benchmark and the other chains
+            # B.2: its chain with every training run of every service in a random order, from the benchmark and the other chains;
+            # 2b_evidence.ipynb replaces this pool with the extended pool of the load-aware models (load_aware_b4.py)
             evidence_options=lambda s: dict(experiment=EVIDENCE_CHAIN[chain_campaign] + suffix, n_train=None, training_campaign=BENCHMARK_AND_CHAINS),
             # B.3: the balanced fork-join trees of the second machine (statics/results_milos_v2/b3-vm/, VM_TREE_SETS in real_data.py),
             # (tree set, levels h) -> experiment, every finished tree of each set and every tree that is still measured but has
@@ -127,7 +132,7 @@ def configure(data_source: str, chains: str = DEFAULT_CHAINS) -> dict:
             base_utilization=0.5,                                                                # B.4a: the load of the chains of B.1
             arrival_cv2s=[0, 0.1, 0.3, 0.6, 1, 1.5, 2, 3, 4],                                    # B.4b: C² of the gaps between arrivals at u = 0.5; 0 is periodic
             # B.4: held-out runs in which no service has more than this many workers, as in the chains of B.1 (DEFAULT_CHAINS)
-            b4_max_workers=3,
+            b4_max_workers=MAX_WORKERS,
         )
     # Experiments that the data source does not support; their cells do nothing (the section of each says why). The real part
     # of B.2b uses the first campaign, so it is skipped with either source.

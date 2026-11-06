@@ -1,6 +1,7 @@
-"""Load- and worker-aware execution-time models: a variant of Pegasus Node, drawn next to the current Pegasus Node in
-B.1 on all chains (`2a_base_case.ipynb`) and in B.4 (`2c_load.ipynb`). The training data of an evaluated chain leaves
-out every run of that chain (chain_family); the description below says B.4, where the variant was first evaluated.
+"""Load- and worker-aware execution-time models: the models of Pegasus Node in every experiment on real data except
+the trees of B.3 (B.1, B.2, B.4 to C.2; the notebooks show them under the name Pegasus Node). The training data of an
+evaluated chain leaves out every run of that chain (chain_family); the description below says B.4, where the variant
+was first evaluated, and calls the benchmark-only models "current Pegasus".
 
 Current Pegasus (PROPOSED in pegasus/evaluation.py): every service's GPs are trained on the service's benchmark
 (BENCHMARKS_V2: the service alone, one worker, five utilizations) and receive only the quality knobs; model_inputs in
@@ -33,7 +34,6 @@ cache key of the evaluation hashes every module of pegasus/: a change there woul
 """
 import hashlib
 from contextlib import contextmanager
-from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
 
@@ -42,7 +42,7 @@ import numpy as np
 import pandas as pd
 
 import pegasus.real_data as real_data
-from pegasus.data import model_inputs
+from pegasus.data import load_aware, model_inputs
 from pegasus.evaluation import METHOD_COLORS, fit_services, pegasus_bound
 from pegasus.figures import METHOD_STYLES
 from pegasus.real_data import BENCHMARKS_V2, CAMPAIGN, CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, b4_chain_data, run_table
@@ -122,12 +122,6 @@ def extended_training():
             setattr(real_data, name, function)
 
 
-def load_aware(data):
-    """The ChainData that the variant's models see: the inputs with the arrival rate (x_train_load, x_test_load) and
-    with the number of workers kept (workers_column None, so model_inputs drops nothing)."""
-    return replace(data, x_train=data.x_train_load, x_test=data.x_test_load, workers_column=None)
-
-
 def beliefs_at(models: dict, data, confidence: float) -> dict:
     """models (from fit_services) with their beliefs recomputed at the held-out configurations of `data`, as
     fit_services computes them (run_statistics_belief: the GPs are trained on run statistics), without refitting the
@@ -200,14 +194,17 @@ def sweep_bounds(sweep: str, settings: list, seeds: list, seed: int, alpha: floa
 
 
 CURRENT = {"load": ("b4a_load", "load_methods", "load_truth"), "arrivals": ("b4b_arrivals", "arrival_methods", "arrival_truth")}
-FROM_CURRENT = ("Pegasus Node (ours)", "Oracle")   # read from the cached results of 2c_load.ipynb; the Oracle uses no model
+# read from the cached results of 2c_load.ipynb; the Oracle uses no model. The benchmark-only Pegasus Node is no longer
+# there: 2c_load shows the load-aware models under the name Pegasus Node, so the comparison holds the variant and the ablation
+FROM_CURRENT = ("Oracle",)
 
 
 def current_results(sweep: str, evaluation_cache: Path) -> dict:
     """The cached results of the sweep in 2c_load.ipynb (the newest real-data file for the chains of DEFAULT_CHAINS):
     (setting, seed) -> dict(bounds=name -> latency for FROM_CURRENT, measured, measured_low). Read only, never recomputed."""
+    from pegasus.evaluation_setup import DEFAULT_CHAINS
     name, methods_key, truth_key = CURRENT[sweep]
-    path = max(evaluation_cache.glob(f"{name}_real+b1+b1u-max3_*.joblib"), key=lambda p: p.stat().st_mtime)
+    path = max(evaluation_cache.glob(f"{name}_real+{DEFAULT_CHAINS}_*.joblib"), key=lambda p: p.stat().st_mtime)
     print(f"current Pegasus, {sweep}: {path}")
     cached = joblib.load(path)
     return {key: dict(bounds={n: np.asarray(cached[methods_key][key][n][1]) for n in FROM_CURRENT},

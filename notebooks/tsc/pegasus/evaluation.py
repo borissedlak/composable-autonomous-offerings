@@ -17,6 +17,7 @@ from .service_gp import (RunStatisticsModel, configurations_of, execution_time_b
                          train_run_statistics_models)
 from .bounds import martingale_closed_form_node_bound, martingale_closed_form_node_bounds, network_service_bound
 from .data import model_inputs, path_workers
+from .model_cache import cached_model
 from .trees import leaf_to_root_paths, max_over_paths, max_path_sum
 
 PROPOSED = "Pegasus Node (ours)"   # union bound over the node bounds
@@ -42,6 +43,8 @@ def fit_services(data, x_train, y_train: dict, model_seed: int, confidence: floa
     (RunStatisticsModel in service_gp.py). The time to train the spread GPs is part of "gp". The DNN is trained on the
     run means and uses the same spread GP.
     No model receives the number of workers of a configuration (model_inputs in data.py).
+    The GP of every service is fitted once per training data and then read from the shared model cache (model_cache.py),
+    so experiments that train a service on the same runs share the fit; "seconds"["gp"] is the time of the first training.
     A real tree (TreeData with services) trains one model per service type and computes the beliefs at the
     configurations of every node (model_of)."""
     model = model_of(data)
@@ -49,13 +52,17 @@ def fit_services(data, x_train, y_train: dict, model_seed: int, confidence: floa
     x_train, x_test = model_inputs(x_train, data.workers_column), model_inputs(data.x_test, data.workers_column)
     from_runs = data.y_train_spread is not None
     belief_of = run_statistics_belief if from_runs else execution_time_belief
-    started = time.perf_counter()
+    gp, gp_seconds = {}, 0.0
+    for s in services:   # one fit per service, from the shared model cache if this service was fitted on these runs before
+        x_s = configurations_of(x_train, s)
+        if from_runs:
+            gp[s], seconds = cached_model("run_statistics", (x_s, y_train[s], data.y_train_spread[s]),
+                                          lambda: train_run_statistics_models({s: x_s}, {s: y_train[s]}, {s: data.y_train_spread[s]}, [s])[s])
+        else:
+            gp[s], seconds = cached_model("gp", (x_s, y_train[s]), lambda: train_gp_models({s: x_s}, {s: y_train[s]}, [s])[s])
+        gp_seconds += seconds
     if from_runs:
-        gp = train_run_statistics_models(x_train, y_train, data.y_train_spread, services)
         spread = {s: gp[s].spread for s in services}
-    else:
-        gp = train_gp_models(x_train, y_train, services)
-    gp_seconds = time.perf_counter() - started
     started = time.perf_counter()
     dnn = train_dnn_models(x_train, y_train, services, seed=model_seed) if with_dnn else None
     if from_runs and with_dnn:

@@ -9,15 +9,22 @@ with a few training runs, and one service after the other moves up to its next n
 
 The training runs of every service come in one fixed random order per seed (n_train=None in real_chain_data), and a
 training set of n runs is the first n of them (training_prefix), so that a step only adds runs.
+
+load_aware_pegasus (real data): Pegasus Node uses load-aware execution-time models (load_aware in data.py: the inputs
+with the number of workers and the arrival rate, as in load_aware_b4.py), fitted on the same training runs as the
+models of the baselines, which keep the inputs without workers and rate. The cost of uncertainty of a service is then
+read from the load-aware models.
 """
 from dataclasses import replace
+
+import time
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from .bounds import martingale_closed_form_node_bounds
-from .data import model_inputs, path_workers
-from .evaluation import TIGHTNESS_RANGE, TIGHTNESS_TICKS, compare_methods, fit_services, sweep_line, sweep_segments
+from .data import load_aware, model_inputs, path_workers
+from .evaluation import PROPOSED, TIGHTNESS_RANGE, TIGHTNESS_TICKS, compare_methods, fit_services, pegasus_bound, sweep_line, sweep_segments
 from .figures import FAILURE_COLOR, FAILURE_TEXT_COLOR, holds_handles, legend_inside, paper_figure, paper_style, save_figure
 from .service_gp import configurations_of, execution_time_belief, run_statistics_belief
 
@@ -40,14 +47,16 @@ def training_prefix(data, n_by_service: dict):
     return replace(data, x_train=x_train, **fields)
 
 
-def uncertainty_cost(data, models: dict, alpha: float) -> dict:
+def uncertainty_cost(data, models: dict, alpha: float, model_data=None) -> dict:
     """service -> how much the bound of Pegasus Node at that service would shrink if the model knew the mean execution
     time: the median over the held-out configurations of the node bound (at alpha / K, as in pegasus_bound) with the
     pessimistic mean of the belief minus the node bound with the predicted mean, in s; inf where only the pessimistic
     mean overloads the service. Uses the models and the held-out configurations and arrival rates only, no measured
-    latency."""
+    latency. model_data: `data` with the inputs that the models were fitted on (load_aware(data) for load-aware
+    models); default `data`. The workers of the queueing part always come from `data`."""
+    model_data = data if model_data is None else model_data
     belief_of = run_statistics_belief if data.y_train_spread is not None else execution_time_belief
-    x_test = model_inputs(data.x_test, data.workers_column)   # the models receive no number of workers
+    x_test = model_inputs(model_data.x_test, model_data.workers_column)   # the inputs of the models
     predicted = [(belief_of(models["gp"][s], configurations_of(x_test, s), 0.5)[0], var) for s, (_, var) in zip(data.path, models["beliefs"])]
     workers, K = path_workers(data), len(data.path)
     pessimistic_bounds = martingale_closed_form_node_bounds(models["beliefs"], epsilon=alpha / K, path_workers=workers, **data.workload)
@@ -65,23 +74,36 @@ def service_levels(data, levels: list) -> dict:
 
 
 def incremental_training(data, schedule: str, levels: list, alpha: float, confidence: float, calibration_share: float,
-                         model_seed: int, leave_out: tuple) -> list:
+                         model_seed: int, leave_out: tuple, load_aware_pegasus: bool = False) -> list:
     """Every method on the chain of `data` while the training runs grow under `schedule` (module docstring). `data`
     holds every training run of every service in a fixed random order; every service starts at its first level of
     service_levels and moves up one level per step, one service per step, until every service has all its runs.
     Conformal sets aside the share calibration_share of the runs of the smallest service for calibration, and at least
     19, and is left out where too few runs remain (compare_methods).
+    load_aware_pegasus: Pegasus Node with load-aware models (module docstring).
     Returns one entry per state, in order: (runs per service, name -> (group, latency per held-out configuration),
     name -> (training time, evaluation time), the service that moves up next or None)."""
     steps = service_levels(data, levels)
     level, states, turn = {s: 0 for s in data.path}, [], 0
+    # with load-aware models, compare_methods computes the baselines only, and Pegasus Node is added below
+    leave = leave_out + ((PROPOSED,) if load_aware_pegasus else ())
     while True:
         n = {s: steps[s][level[s]] for s in data.path}
         part = training_prefix(data, n)
         models = fit_services(part, part.x_train, part.y_train, model_seed=model_seed, confidence=confidence, with_dnn=False)
         methods, seconds = compare_methods(part, models, part.x_train, part.monitored_latencies, alpha, confidence,
                                            n_calibration=max(19, round(calibration_share * min(n.values()))), model_seed=model_seed,
-                                           leave_out=leave_out, x_train_load=part.x_train_load)
+                                           leave_out=leave, x_train_load=part.x_train_load)
+        pegasus_part, pegasus_models = part, models
+        if load_aware_pegasus:
+            pegasus_part = load_aware(part)
+            pegasus_models = fit_services(pegasus_part, pegasus_part.x_train, part.y_train, model_seed=model_seed, confidence=confidence, with_dnn=False)
+            started = time.perf_counter()
+            latency = pegasus_bound(part, pegasus_models, alpha)   # the workers of the queueing part from `part`
+            elapsed = time.perf_counter() - started
+            # as in compare_methods: training time of the GPs, evaluation time including the beliefs
+            methods = {PROPOSED: ("proposed", latency), **methods}
+            seconds = {PROPOSED: (pegasus_models["seconds"]["gp"], elapsed + pegasus_models["seconds"]["beliefs"]), **seconds}
         growing = [s for s in data.path if level[s] < len(steps[s]) - 1]
         if not growing:
             states.append((n, methods, seconds, None))
@@ -90,7 +112,7 @@ def incremental_training(data, schedule: str, levels: list, alpha: float, confid
             chosen = next(data.path[(turn + k) % len(data.path)] for k in range(len(data.path)) if data.path[(turn + k) % len(data.path)] in growing)
             turn = data.path.index(chosen) + 1
         else:
-            cost = uncertainty_cost(part, models, alpha)
+            cost = uncertainty_cost(part, pegasus_models, alpha, model_data=pegasus_part)
             chosen = (max if schedule == MOST_UNCERTAIN else min)(growing, key=lambda s: cost[s])
         states.append((n, methods, seconds, chosen))
         level[chosen] += 1
