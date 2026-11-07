@@ -464,13 +464,14 @@ def tightness_figure(results: dict, data, title: str, level_label: str, seeds_re
     plt.show()
 
 
-def sweep_line(ax, settings, values: np.ndarray, name: str, held: np.ndarray = None, label: str = None) -> None:
+def sweep_line(ax, settings, values: np.ndarray, name: str, held: np.ndarray = None, label: str = None, band: bool = True) -> None:
     """One method in a figure over a sweep, in the style of the paper figures (pegasus/figures.py): its color, marker
     and line style. settings: the values of the horizontal axis; values: (settings, seeds), nan where the method has
     no value. The line is the median over the seeds, in which a seed without a value counts as infinitely large, so that
     a setting has no point if half of the seeds or more have no value. The band reaches from the smallest to the
     largest seed with a value. held: per setting, whether the method holds there (see holds); its marker is then
-    filled, otherwise hollow. Without `held` every marker is filled. label: legend entry (default: name)."""
+    filled, otherwise hollow. Without `held` every marker is filled. label: legend entry (default: name). band=False:
+    the median line only, without the band."""
     from .figures import BAND_ALPHA, METHOD_STYLES, method_linewidth
     typical = np.median(np.where(np.isnan(values), np.inf, values), axis=1)
     shown = np.isfinite(typical)
@@ -479,7 +480,8 @@ def sweep_line(ax, settings, values: np.ndarray, name: str, held: np.ndarray = N
     marker, linestyle = METHOD_STYLES.get(name, ("o", "-"))
     filled = np.ones(len(settings), dtype=bool) if held is None else np.asarray(held)[shown]
     ax.plot(settings, typical, linestyle=linestyle, color=color, linewidth=method_linewidth(name))
-    ax.fill_between(settings, np.nanmin(values, axis=1), np.nanmax(values, axis=1), color=color, alpha=BAND_ALPHA, linewidth=0)
+    if band:
+        ax.fill_between(settings, np.nanmin(values, axis=1), np.nanmax(values, axis=1), color=color, alpha=BAND_ALPHA, linewidth=0)
     ax.scatter(settings, typical, s=40, marker=marker, facecolors=[color if f else "white" for f in filled], edgecolors=color, linewidths=1.5,
                zorder=3)
     # the legend entry carries the line and the marker, as in the legends of figures.py
@@ -525,8 +527,9 @@ def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xla
                               overlay: tuple = None, onset: tuple = None) -> None:
     """Three separate figures over a sweep. First: the tightness of every method, as in tightness_sweep_figure.
     Second: the training time (s), one line per set of trained models; methods that use the same models (same_models)
-    share a line, and its legend names them. Third: the evaluation time (s) of every method. Lines and bands of the time
-    figures are the median and the range over the seeds (sweep_line). statistics: from sweep_statistics; times: from
+    share a line, and its legend names them. Third: the evaluation time (s) of every method. The lines of the time
+    figures are the median over the seeds (sweep_line); the training figure also has the band of the range over the
+    seeds, the evaluation figure none. statistics: from sweep_statistics; times: from
     sweep_seconds. The title is printed above the figures; name: file name in figures/tsc/experimental-results, saved as <name>_tightness,
     <name>_training and <name>_evaluation, or None. time_halves: (xlabel, tick_labels) of the two time figures as
     half figures side by side in the width of one (half_figure, each with its own vertical axis), which need a shorter
@@ -586,9 +589,12 @@ def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xla
             group_label = lambda group: (",\n" if time_halves else ", ").join(short(method) for method in group)
             lines = [(group[0], group_label(group)) for group in same_models(times, list(times))] if what == "training" \
                 else [(method, method) for method in times]
+            # the evaluation time without the band over the seeds: a single measurement per seed scatters most there, and the
+            # median carries the trend; the legend then avoids the medians only
+            band = what != "evaluation"
             for method, label in lines:
-                sweep_line(ax, settings, times[method][what], method, label=label)
-                segments += sweep_segments(settings, times[method][what])
+                sweep_line(ax, settings, times[method][what], method, label=label, band=band)
+                segments += sweep_segments(settings, times[method][what]) if band else [(x, y, y) for x, y in _median_points(settings, times[method][what])]
             ax.set_yscale("log")
             plain_log_ticks(ax.yaxis)
             ax.set_ylabel(f"{what} time (s, log scale)")

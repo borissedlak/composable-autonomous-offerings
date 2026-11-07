@@ -24,6 +24,9 @@ service chains under resource constraints. Results feed papers (ICSOC, TSC, Summ
 
 ## How I want you to work
 
+- **Questions are not instructions.** "Can you do X?", "could we …?", "is it possible to …?"
+  ask whether and how; answer them (how, what it costs, what it changes) and wait. Act only
+  on a clear instruction ("do X", "rerun Y", "delete Z").
 - **Ask before large refactors.** This is research code; prefer small, targeted edits.
 - **Don't silently change experiment semantics** (hyperparameters, seeds, SLO definitions,
   β penalty, data splits). If a change affects results, say so explicitly.
