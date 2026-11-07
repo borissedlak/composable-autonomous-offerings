@@ -917,7 +917,7 @@ def slowdown_figure(slowdowns, height_marks: dict = None, name: str = None, mark
     mark_prefix: written once, left of the first vertical line (e.g. "h=" before the labels "3", "4", ...), because the
     lines stand too close in the half-width panel for a prefix in every label."""
     from matplotlib.lines import Line2D
-    from .figures import BAND_ALPHA, half_figure, legend_inside, paper_style, save_figure
+    from .figures import BAND_ALPHA, fit_left_margin, half_figure, legend_inside, paper_style, save_figure
     table = slowdown_bins(slowdowns)
     with paper_style():
         fig, ax = half_figure("left")
@@ -952,6 +952,7 @@ def slowdown_figure(slowdowns, height_marks: dict = None, name: str = None, mark
         # a narrower legend (shorter handles, one column) for the half-width panel, in the font size of the full-width figures
         legend_inside(ax, handles, labels, segments, locations=("upper left", "upper center"), max_doublings=0, ncol=1, fontsize=10,
                       framealpha=0.95, handlelength=1.6, handletextpad=0.4, labelspacing=0.3, borderaxespad=0.3)
+        fit_left_margin(ax)   # short tick labels leave an empty strip in the fixed left margin
         if name is not None:
             save_figure(fig, name)
         plt.show()

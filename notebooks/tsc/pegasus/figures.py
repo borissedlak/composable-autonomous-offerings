@@ -211,6 +211,21 @@ def fit_half_pair(axes: list) -> None:
         ax.set_position((left / width, MARGIN_BOTTOM / height, plot_width / width, 1 - (MARGIN_BOTTOM + MARGIN_TOP) / height))
 
 
+def fit_left_margin(ax) -> None:
+    """Shrink the left margin of a single figure (paper_figure or half_figure) to the width of the labels of its vertical
+    axis, keeping the plot area exactly as wide and as high as before, so the figure becomes narrower by the empty strip.
+    Call when the vertical axis is complete."""
+    fig = ax.figure
+    fig.canvas.draw()
+    labels = ax.yaxis.get_tightbbox(fig.canvas.get_renderer())   # tick labels and axis label, in pixels
+    left = (ax.bbox.x0 - labels.x0) / fig.dpi + 0.02             # 0.02 in so that the axis label does not touch the border
+    width, height = fig.get_size_inches()
+    plot_width = ax.bbox.width / fig.dpi
+    new_width = left + plot_width + MARGIN_RIGHT
+    fig.set_size_inches(new_width, height)
+    ax.set_position((left / new_width, MARGIN_BOTTOM / height, plot_width / new_width, 1 - (MARGIN_BOTTOM + MARGIN_TOP) / height))
+
+
 def fit_x_tick_labels(ax) -> None:
     """Widen a linear horizontal axis until its first and last tick labels lie inside the figure: a long label at the
     end of the axis (e.g. "heaviest (2.35)") would otherwise reach beyond the fixed margins and be cut off."""
