@@ -397,7 +397,7 @@ def tradeoff_figure(comps: list, plans: dict, scenarios: list, app: str, worker_
     latency (ms, log scale) over its configurations with at most `worker_budget` workers, at every data quality (x
     axis); a gap where no such configuration has a finite bound. Stars: the plan of every scenario (plans: (app,
     scenario name) -> plan table), at its data quality and bound, labeled with the scenario's short name and its
-    workers; a plan may use more or fewer workers than worker_budget. name: file name in figures/tsc, or None."""
+    workers; a plan may use more or fewer workers than worker_budget. name: file name in figures/tsc/experimental-results, or None."""
     import matplotlib.pyplot as plt
     from pegasus.figures import paper_figure, paper_style, save_figure
     with paper_style():

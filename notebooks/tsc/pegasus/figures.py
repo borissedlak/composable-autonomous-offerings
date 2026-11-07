@@ -1,5 +1,5 @@
 """Style of the paper figures of the TSC paper: one color, marker and line style per method, the light-red zone where a
-method underestimates the measured quantile (SLO violated), and the export to figures/tsc. The style follows problem_figure.py; see the paper-figure skill.
+method underestimates the measured quantile (SLO violated), and the export to figures/tsc/experimental-results. The style follows problem_figure.py; see the paper-figure skill.
 """
 from contextlib import contextmanager
 from itertools import permutations
@@ -14,10 +14,13 @@ from matplotlib.ticker import LogFormatterSciNotation
 
 from .evaluation import METHOD_COLORS, PROPOSED, PROPOSED_SNC, same_models
 
-FIGURES = Path(__file__).resolve().parents[3] / "figures" / "tsc"
+FIGURES = Path(__file__).resolve().parents[3] / "figures" / "tsc" / "experimental-results"   # the figures of the evaluation (save_figure)
 # marker and line style per method, so that the methods can be told apart in grayscale; the color is METHOD_COLORS
 METHOD_STYLES = {PROPOSED: ("o", "-"), PROPOSED_SNC: ("D", "-"), "GP Sum": ("s", "--"), "DNN Sum": ("X", "--"), "GP Queue": ("^", "-."),
                  "Quantile Union": ("v", ":"), "Conformal": ("P", ":"), "Oracle": ("*", "--")}
+# A second ground truth of a method (overlay_line in evaluation.py): dash-dot-dot, a style that no method uses, so that it
+# stays apart from the dashed methods (e.g. the Oracle) where their lines run close
+OVERLAY_LINESTYLE = (0, (6, 1.5, 1, 1.5, 1, 1.5))
 FAILURE_COLOR, FAILURE_TEXT_COLOR = "mistyrose", "darkred"   # zone where a method underestimates the measured quantile (SLO violated)
 WASTE_COLOR = "0.9"                                           # optional zone where a method wastes resources (far above it)
 BAND_ALPHA = 0.2                                              # bands over seeds or quantiles, drawn without an edge
@@ -237,7 +240,7 @@ def plain_log_ticks(axis) -> None:
 
 
 def save_figure(fig, name: str) -> None:
-    """figures/tsc/<name>.pdf for LaTeX and .jpg for slides, at exactly the size of the figure (no cropping; the fixed
+    """figures/tsc/experimental-results/<name>.pdf for LaTeX and .jpg for slides, at exactly the size of the figure (no cropping; the fixed
     margins of paper_figure and half_figure leave no empty border). Prints a note if a label reaches beyond the figure
     and is cut off, which means that the margins are too small for it."""
     FIGURES.mkdir(parents=True, exist_ok=True)
@@ -296,7 +299,7 @@ def finetuning_chains_figure(chains: list, depths: dict, statistics: dict, sizes
     as a short dash in the method's color, joined to the dot by a dotted line, so that the gain of the fine-tuning shows.
     The chains are grouped by application and sorted by their number of services (depths: chain -> K). statistics:
     chain -> from sweep_statistics over `sizes`. The vertical axis is logarithmic and zoomed to the values drawn.
-    output: file name in figures/tsc (save_figure), or None."""
+    output: file name in figures/tsc/experimental-results (save_figure), or None."""
     from .evaluation import METHOD_COLORS
     from .finetuning import STYLES   # inside the function: finetuning imports from this module
     METHOD_STYLES.update({name: (style[0], style[1:]) for name, style in STYLES.items()})

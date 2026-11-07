@@ -499,7 +499,7 @@ def tightness_sweep_figure(settings: list, statistics: dict, xlabel: str, title:
     not. statistics: from sweep_statistics; tick_labels: text of every setting on the horizontal axis (default: its
     value); level_label: name of the measured quantile (e.g. "p95"). A method has no point where, under half of the
     seeds or more, it has no finite latency at half of the held-out configurations or more. The title is printed above
-    the figure instead of drawn into it (no title in a paper figure); name: file name in figures/tsc, or None.
+    the figure instead of drawn into it (no title in a paper figure); name: file name in figures/tsc/experimental-results, or None.
     half: "left" or "right" for one of two figures side by side in the width of one (half_figure), with the same
     methods. The left one has the labels of the vertical axis and the first half of the legend; the right one shares
     the vertical axis and has the rest of the legend and the text of the red zone."""
@@ -527,12 +527,12 @@ def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xla
     Second: the training time (s), one line per set of trained models; methods that use the same models (same_models)
     share a line, and its legend names them. Third: the evaluation time (s) of every method. Lines and bands of the time
     figures are the median and the range over the seeds (sweep_line). statistics: from sweep_statistics; times: from
-    sweep_seconds. The title is printed above the figures; name: file name in figures/tsc, saved as <name>_tightness,
+    sweep_seconds. The title is printed above the figures; name: file name in figures/tsc/experimental-results, saved as <name>_tightness,
     <name>_training and <name>_evaluation, or None. time_halves: (xlabel, tick_labels) of the two time figures as
     half figures side by side in the width of one (half_figure, each with its own vertical axis), which need a shorter
     horizontal axis; None: full figures with the axis of the tightness figure.
     overlay: (settings, statistics, label) of a second ground truth for some methods of the tightness figure, drawn as
-    dashed lines in their colors behind the measured ones (overlay_line), with `label` written next to the dashed line
+    dash-dot-dot lines (OVERLAY_LINESTYLE in figures.py) in their colors behind the measured ones (overlay_line), with `label` written next to that line
     (place_line_label) instead of in the legend. onset: (x, label) of a vertical line in the tightness figure, e.g.
     where the services start to slow down, with `label` written next to the line."""
     from .figures import fit_half_pair, fit_x_tick_labels, half_figure, legend_inside, paper_figure, paper_style, plain_log_ticks, save_figure
@@ -545,28 +545,30 @@ def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xla
         extra_segments = []
         if overlay is not None:
             overlay_settings, overlay_statistics, overlay_label = overlay
-            from .figures import METHOD_STYLES
+            from .figures import METHOD_STYLES, OVERLAY_LINESTYLE
             for method in METHOD_COLORS:
                 if method in overlay_statistics:
                     overlay_line(ax, overlay_settings, overlay_statistics[method]["tightness"], method, overlay_statistics[method]["holds"])
                     extra_segments += sweep_segments(overlay_settings, overlay_statistics[method]["tightness"])
-                    if method not in statistics:   # only the dashed line: its own legend entry, in its color and marker
-                        ax.plot([], [], color=METHOD_COLORS[method], linestyle=(0, (4, 2)), linewidth=1.5, marker=METHOD_STYLES.get(method, ("o",))[0],
+                    if method not in statistics:   # only the dash-dot-dot line: its own legend entry, in its color and marker
+                        ax.plot([], [], color=METHOD_COLORS[method], linestyle=OVERLAY_LINESTYLE, linewidth=1.5, marker=METHOD_STYLES.get(method, ("o",))[0],
                                 markersize=6, label=method)
         if onset is not None:
             ax.axvline(onset[0], color="0.25", linewidth=1.2, linestyle=(0, (1, 1.5)), zorder=1)
         if not log_x:
             fit_x_tick_labels(ax)
         _tightness_legend(ax, settings, statistics, extra_segments=extra_segments)
-        # the labels of the dashed and the vertical line next to their lines instead of in the legend, where they keep the
+        # the labels of the dash-dot-dot and the vertical line next to their lines instead of in the legend, where they keep the
         # largest distance to every line, band, text and the legend
         drawn = [(settings, statistics[name]["tightness"]) for name in statistics if name in METHOD_COLORS]
         if overlay is not None:
             drawn += [(overlay_settings, overlay_statistics[name]["tightness"]) for name in overlay_statistics if name in METHOD_COLORS]
-            # beside a point of the dashed line, above or below it, in the color of the line (that of its first method)
+            # at the right end of the line, between its last two points, above or below it, in the color of the line (that of its
+            # first method); the middle of the last segment as the axes draw it, so also on a logarithmic axis
             first = next(name for name in METHOD_COLORS if name in overlay_statistics)
-            anchors = [(x, y, ha, va) for x, y in _median_points(overlay_settings, overlay_statistics[first]["tightness"])
-                       for ha in ("right", "left") for va in ("bottom", "top")]
+            last_two = ax.transData.transform(_median_points(overlay_settings, overlay_statistics[first]["tightness"])[-2:])
+            x_middle, y_middle = ax.transData.inverted().transform(last_two.mean(axis=0))
+            anchors = [(x_middle, y_middle, "center", va) for va in ("bottom", "top")]
             place_line_label(ax, overlay_label, anchors, drawn, color=METHOD_COLORS[first], fontsize=10)
         if onset is not None:
             # right of the vertical line, at the height with the most room
@@ -697,24 +699,25 @@ def place_line_label(ax, text: str, anchors: list, drawn: list, offset: float = 
 
 
 def overlay_line(ax, settings, values: np.ndarray, name: str, held: np.ndarray) -> None:
-    """A second ground truth for the method `name` in a tightness panel: the median over the seeds as a dashed line in the
+    """A second ground truth for the method `name` in a tightness panel: the median over the seeds as a dash-dot-dot line (OVERLAY_LINESTYLE) in the
     color of the method, behind its measured line (sweep_line) and without a band, markers filled where it holds and
     hollow where it does not. values: (settings, seeds)."""
-    from .figures import METHOD_STYLES
+    from .figures import METHOD_STYLES, OVERLAY_LINESTYLE
     typical = np.median(np.where(np.isnan(values), np.inf, values), axis=1)
     shown = np.isfinite(typical)
     settings, typical, held = np.asarray(settings)[shown], typical[shown], np.asarray(held)[shown]
     color, marker = METHOD_COLORS[name], METHOD_STYLES.get(name, ("o", "-"))[0]
-    ax.plot(settings, typical, color=color, linestyle=(0, (4, 2)), linewidth=1.5, zorder=1.5)
+    ax.plot(settings, typical, color=color, linestyle=OVERLAY_LINESTYLE, linewidth=1.5, zorder=1.5)
     ax.scatter(settings, typical, s=28, marker=marker, facecolors=[color if h else "white" for h in held], edgecolors=color, linewidths=1.2,
                zorder=1.6)
 
 
-def _tightness_legend(ax, settings: list, statistics: dict, ncol: int = 3, half: str = None, extra_segments: list = ()) -> None:
+def _tightness_legend(ax, settings: list, statistics: dict, ncol: int = 3, half: str = None, extra_segments: list = (), **options) -> None:
     """The legend of the methods and of the markers inside a tightness panel, where it hides the fewest points and
     bands (legend_inside); the axis keeps TIGHTNESS_RANGE, as in B.1. Call when the axes are complete. half: "left" lists the
     first half of the methods, "right" the rest and the markers, so that the two halves of a pair share one legend.
-    extra_segments: points and bands drawn besides the methods of `statistics` (e.g. overlay_line), which the legend avoids too."""
+    extra_segments: points and bands drawn besides the methods of `statistics` (e.g. overlay_line), which the legend avoids too.
+    options: replace the legend options below (as for ax.legend), e.g. a smaller font for a narrow panel."""
     from .figures import holds_handles, legend_inside
     handles, labels = ax.get_legend_handles_labels()
     # the versions of the proposed method first, in their order: a version drawn only as an overlay (tightness_and_time_figure)
@@ -729,8 +732,8 @@ def _tightness_legend(ax, settings: list, statistics: dict, ncol: int = 3, half:
         handles, labels = handles[first:], labels[first:]
     segments = [segment for name in statistics if name in METHOD_COLORS for segment in sweep_segments(settings, statistics[name]["tightness"])]
     segments += list(extra_segments)
-    legend_inside(ax, handles + marker_handles, labels + marker_labels, segments, max_doublings=0, ncol=ncol, fontsize=10, framealpha=0.95,
-                  columnspacing=1.0, handletextpad=0.4)
+    legend_inside(ax, handles + marker_handles, labels + marker_labels, segments, max_doublings=0,
+                  **{**dict(ncol=ncol, fontsize=10, framealpha=0.95, columnspacing=1.0, handletextpad=0.4), **options})
 
 
 def uncertainty_figure(uncertainty: dict, chain_pegasus: dict, services: list, title: str, confidence: float, name: str = None,
@@ -755,7 +758,7 @@ def uncertainty_figure(uncertainty: dict, chain_pegasus: dict, services: list, t
     means (s), median tightness of both, coverage of both); oracle: seed -> (median tightness, coverage) of the Oracle,
     or None. execution_times: service -> its measured mean execution time (s), written next to its name in the legend, so
     that the figure keeps how slow every service is; or None. The title is printed above the figures; name: file name in
-    figures/tsc, saved as <name>_execution (left)
+    figures/tsc/experimental-results, saved as <name>_execution (left)
     and <name>_cost (right), the names they had before, so that references to the files stay valid, or None."""
     from .figures import fit_half_pair, half_figure, legend_inside, paper_style, plain_log_ticks, save_figure
     print(title)
@@ -799,10 +802,15 @@ def uncertainty_figure(uncertainty: dict, chain_pegasus: dict, services: list, t
         ax.plot(chain_runs[np.isfinite(known)], known[np.isfinite(known)], linestyle=":", color=METHOD_COLORS[PROPOSED], linewidth=1.5,
                 label="known means")
         typical = np.median(np.where(np.isnan(statistics[PROPOSED]["tightness"]), np.inf, statistics[PROPOSED]["tightness"]), axis=1)
+        infinite = []   # (x, y_low, y_high) of every "∞", which the legend must leave visible
         for x in chain_runs[~np.isfinite(typical)]:   # no finite bound under half of the seeds or more
-            ax.annotate("∞", (x, TIGHTNESS_RANGE[1]), xytext=(0, -3), textcoords="offset points", ha="center", va="top",
-                        color=METHOD_COLORS[PROPOSED], fontsize=14, fontweight="bold")
-        _tightness_legend(ax, chain_runs, statistics, ncol=1)
+            mark = ax.annotate("∞", (x, TIGHTNESS_RANGE[1]), xytext=(0, -3), textcoords="offset points", ha="center", va="top",
+                               color=METHOD_COLORS[PROPOSED], fontsize=14, fontweight="bold")
+            ax.figure.canvas.draw()
+            box = mark.get_window_extent().transformed(ax.transData.inverted())
+            infinite += [(x_box, box.y0, box.y1) for x_box in (box.x0, x, box.x1)]
+        # a narrower legend (smaller font, shorter handles) fits beside the "∞" in this half-width panel
+        _tightness_legend(ax, chain_runs, statistics, ncol=1, extra_segments=infinite, fontsize=9, handlelength=1.6, borderaxespad=0.3)
         figures.append((fig, "cost"))
 
         left.set_xscale("log")
@@ -898,7 +906,7 @@ def slowdown_figure(slowdowns, height_marks: dict = None, name: str = None) -> N
     """Slowdown of the services in the trees against the concurrency they saw (tree_slowdowns): per service type the
     median slowdown in every bin of the concurrency (slowdown_bins), at the median concurrency of the bin, with the band
     from the 10th to the 90th percentile; the line at 1 is the speed of the benchmark. height_marks: label -> concurrency,
-    drawn as thin vertical lines (e.g. the median concurrency of every height of a tree set). name: file in figures/tsc."""
+    drawn as thin vertical lines (e.g. the median concurrency of every height of a tree set). name: file in figures/tsc/experimental-results."""
     from matplotlib.lines import Line2D
     from .figures import BAND_ALPHA, legend_inside, paper_figure, paper_style, save_figure
     table = slowdown_bins(slowdowns)
@@ -923,8 +931,8 @@ def slowdown_figure(slowdowns, height_marks: dict = None, name: str = None) -> N
             ax.axvline(concurrency, color="0.5", linewidth=0.8, linestyle=":")
             ax.text(concurrency, 0.92, f" {mark}", color="0.35", fontsize=10, ha="left", va="bottom")
         ax.set_xlim(-1, 1.1 * float(table["concurrency"].max()) + 1)   # up to the largest bin, not to the empty end of the last one
-        ax.set_xlabel("concurrency c: other services processing at the same time")
-        ax.set_ylabel("slowdown (tree ÷ benchmark)")
+        ax.set_xlabel("concurrent services")
+        ax.set_ylabel("slowdown vs. benchmark")
         ax.grid(True, linestyle=":", alpha=0.6)
         legend_inside(ax, handles, labels, segments, locations=("upper left", "upper center"), max_doublings=0, fontsize=10)
         if name is not None:
