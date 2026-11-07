@@ -4,19 +4,22 @@ configuration, that meets the SLOs of a client, with a numerical solver on the p
 Setting. An application type (vision, audio, lidar) has five service compositions, the chains b1u-<application>-<i>
 of the second campaign. A configuration of a composition sets
 - q, the data quality that every service of the composition processes (knob data_quality; the image width in pixels
-  for vision, the quality level of the campaign for audio and lidar),
+  for vision, the clip length in seconds for audio, the radius of the point cloud in meters for lidar),
 - w_k, the number of workers of service k (knob parallelism, 1 to 4), and
 - m_k, the model size of every detector that has one (knob model_size, 1 or 2; vision only).
-The client sends items at one fixed arrival rate (items/s, Poisson arrivals) per application.
+The client of a scenario sends items at one fixed arrival rate (items/s, Poisson arrivals).
 
 Three SLO dimensions, each one number per configuration:
 - cost: the total number of workers of the composition, sum_k w_k;
-- latency: the Pegasus Node bound (s) on the p95 of the end-to-end latency at the arrival rate of the application,
+- latency: the Pegasus Node bound (s) on the p95 of the end-to-end latency at the arrival rate of the scenario,
   with the load-aware models (load_aware_b4.py, the default of B.1);
 - quality: the data quality q, and, for vision, the smallest model size among the detectors of the composition.
-A scenario poses one to three of these as constraints (max workers, max latency, min quality) and names one goal that
-the solver optimizes among the configurations that meet them (min cost, min latency or max quality). Ties of the goal
-are broken by the other two dimensions with a small weight (TIE_WEIGHT).
+A scenario poses one or two of these as constraints (max workers, max latency, min quality). Every dimension that it
+does not constrain is free and is optimized (fewer workers, lower latency, higher quality): the objective is a weighted
+sum of the free dimensions, each divided by its typical value in the scenario (median over the configurations that
+meet the constraints), with weights that the scenario sets, so that a weight applies to a relative change. The constrained dimensions enter
+with a small weight (TIE_WEIGHT) that only breaks ties. A configuration with an overloaded service (no finite bound:
+its queue grows without limit) is never feasible.
 
 Prediction. The models of every composition are those of B.1: every service is trained on its benchmarks with one to
 four workers (worker_benchmark_pool in pegasus/real_data.py), without any run of a chain, so that a composition is
@@ -54,12 +57,14 @@ from pegasus.evaluation_setup import alpha, confidence, coverage_check, seed
 from pegasus.service_gp import run_statistics_belief
 
 APPLICATIONS = {app: [f"b1u-{app}-{i}" for i in range(1, 6)] for app in ("vision", "audio", "lidar")}
+QUALITY_UNITS = dict(vision="image width (px)", audio="clip length (s)", lidar="point cloud radius (m)")   # meaning of q
+CORE_HEADROOM = 0.5        # cores per service = workers + CORE_HEADROOM, the rule of the campaign runs (knob <node>.cores)
 CACHE = real_data.CAMPAIGN.parent / "cache" / "slo_planning"   # statics/cache/slo_planning/: the fitted models of every composition (joblib)
 PLANS = real_data.CAMPAIGN.parent / "slo_planning"             # statics/slo_planning/: the plans to deploy (csv)
 RESTARTS = 10              # SLSQP starting points per composition, as run_optimizer_multi of the RASK paper
 OVERLOAD_LATENCY = 10.0    # s; latency that the continuous relaxation gives an overloaded node, so that SLSQP moves away from it
-TIE_WEIGHT = 1e-3          # weight of the two other dimensions in the objective, which only breaks ties of the goal
-GOALS = ("min cost", "min latency", "max quality")
+TIE_WEIGHT = 1e-3          # weight of a constrained dimension in the objective, which only breaks ties of the free dimensions
+DIMENSIONS = ("cost", "latency", "quality")
 # Functional capability -> the service (image, without version) that provides it. A scenario requires capabilities;
 # a composition meets the requirement if it contains a service for every one of them.
 CAPABILITIES = {
@@ -72,22 +77,45 @@ CAPABILITIES = {
 }
 
 
+def label(experiment: str) -> str:
+    """Short name of a composition (application instance): b1u-vision-1 -> V1."""
+    app, i = experiment.removeprefix("b1u-").split("-")
+    return f"{app[0].upper()}{i}"
+
+
 @dataclass
 class Scenario:
     """The SLOs of one client. None: no constraint on that dimension."""
-    name: str
-    goal: str                          # one of GOALS
+    name: str                          # "S-<application letter>-<i> <title>", e.g. "S-V-1 edge box"
+    rate: float                        # arrival rate of the client (items/s, Poisson arrivals)
+    weights: dict                      # free (unconstrained) dimension -> its weight in the objective; every free dimension needs one
     max_workers: int = None            # cost: largest total number of workers of the composition
     max_latency: float = None          # latency: largest Pegasus bound on the p95 end-to-end latency (s)
     min_quality: float = None          # quality: smallest data quality q
-    min_model: int = None              # quality (vision): smallest model size of every detector of the composition
+    min_model: int = None              # quality (vision): smallest model size of every detector; does not constrain q
     note: str = ""                     # who would pose these SLOs
     requires: tuple = ()               # functional requirement: capabilities (keys of CAPABILITIES) the composition must provide
 
-    def dimensions(self) -> list:
-        """The SLO dimensions that the scenario constrains."""
-        return [name for name, value in (("cost", self.max_workers), ("latency", self.max_latency),
-                                         ("quality", self.min_quality if self.min_model is None else self.min_model)) if value is not None]
+    def __post_init__(self):
+        if set(self.weights) != set(self.free()):
+            raise ValueError(f"{self.name}: weights {sorted(self.weights)} must name exactly the free dimensions {self.free()}")
+
+    @property
+    def short(self) -> str:
+        return self.name.split()[0]
+
+    def constrained(self) -> list:
+        """The SLO dimensions that the scenario constrains (quality: by a smallest data quality)."""
+        return [name for name, value in (("cost", self.max_workers), ("latency", self.max_latency), ("quality", self.min_quality)) if value is not None]
+
+    def free(self) -> list:
+        """The SLO dimensions that the scenario does not constrain, which the solver optimizes."""
+        return [name for name in DIMENSIONS if name not in self.constrained()]
+
+    def goal(self) -> str:
+        """The objective in words, e.g. "min latency (1) + max quality (0.5)"."""
+        verbs = dict(cost="min cost", latency="min latency", quality="max quality")
+        return " + ".join(f"{verbs[name]} ({self.weights[name]:g})" for name in self.free())
 
     def constraints(self) -> str:
         parts = [f"≤ {self.max_workers} workers" if self.max_workers is not None else None,
@@ -113,6 +141,10 @@ class Composition:
     models: np.ndarray                 # grid of the model size
     tables: dict = field(repr=False)   # node -> node bound (s), shape (qualities, workers[, models]); inf if overloaded
     extrapolated: list = field(default_factory=list)   # nodes whose training runs never had the arrival rate `rate`
+
+    @property
+    def label(self) -> str:
+        return label(self.experiment)
 
     @property
     def n_dims(self) -> int:
@@ -164,6 +196,13 @@ def fit_composition(experiment: str, model_seed: int = seed, refresh: bool = Fal
     return fitted
 
 
+def rate_range(experiment: str, model_seed: int = seed) -> tuple:
+    """The arrival rates (items/s) that every service of a composition had in its training runs: (low, high), the
+    intersection of the ranges of its services; low > high if they do not overlap."""
+    ranges = np.array(list(fit_composition(experiment, model_seed)["log_rates"].values()))
+    return 10 ** ranges[:, 0].max(), 10 ** ranges[:, 1].min()
+
+
 def composition(experiment: str, rate: float, model_seed: int = seed, refresh: bool = False) -> Composition:
     """A composition with the node bounds of every service on its knob grid at the arrival rate `rate` (items/s)."""
     fitted, space = fit_composition(experiment, model_seed, refresh), chain_space(experiment)
@@ -196,20 +235,35 @@ def composition(experiment: str, rate: float, model_seed: int = seed, refresh: b
 # ------------------------------------------------------------------------------
 @dataclass
 class Scales:
-    """Normalization of the three dimensions within one application, so that the objective weighs them alike."""
-    max_workers: float
-    latency: float      # s, a typical latency of the application
-    q_low: float
-    q_high: float
+    """The typical value of every dimension in one scenario, which normalizes the dimension in the objective: a weight
+    then applies to a relative change. Example: typical quality 500 px and latency 0.5 s, weights quality 1 and latency
+    0.5: 50 px more quality (10 % of 500) are worth 100 ms more latency (20 % of 0.5 s, times 0.5)."""
+    cost: float         # workers
+    latency: float      # s
+    quality: float     # unit of the application's data quality
+
+
+def typical_scales(comps: list, scenario: Scenario) -> Scales:
+    """The typical values of a scenario: the median of every dimension over the grid configurations of the candidate
+    compositions (those that provide the required capabilities) that meet the scenario's constraints."""
+    values = {name: [] for name in DIMENSIONS}
+    for comp in comps:
+        if not provides(comp, scenario.requires):
+            continue
+        metrics = grid_metrics(comp, all_grid_indices(comp))
+        ok = feasible(scenario, **metrics)
+        for name, key in (("cost", "cost"), ("latency", "latency"), ("quality", "quality")):
+            values[name].append(np.asarray(metrics[key], dtype=float)[ok])
+    return Scales(**{name: float(np.median(np.concatenate(parts))) for name, parts in values.items()})
 
 
 def objective(scenario: Scenario, scales: Scales, cost, latency, quality):
-    """Value that the solver minimizes: the goal of the scenario, plus TIE_WEIGHT times each of the other two
-    dimensions, all in normalized units (cost / max workers, latency / typical latency, quality on [0, 1] over its
-    range, negated because a larger quality is better)."""
-    terms = {"min cost": np.asarray(cost) / scales.max_workers, "min latency": np.asarray(latency) / scales.latency,
-             "max quality": -(np.asarray(quality) - scales.q_low) / (scales.q_high - scales.q_low)}
-    return sum((1.0 if goal == scenario.goal else TIE_WEIGHT) * term for goal, term in terms.items())
+    """Value that the solver minimizes: the weighted sum of the free dimensions of the scenario (weights of the
+    scenario), plus TIE_WEIGHT times each constrained dimension, every dimension divided by its typical value in the
+    scenario (quality negated because a larger quality is better)."""
+    terms = {"cost": np.asarray(cost) / scales.cost, "latency": np.asarray(latency) / scales.latency,
+             "quality": -np.asarray(quality) / scales.quality}
+    return sum(scenario.weights.get(name, TIE_WEIGHT) * term for name, term in terms.items())
 
 
 def feasible(scenario: Scenario, cost, latency, quality, model) -> np.ndarray:
@@ -295,11 +349,11 @@ def slsqp_composition(comp: Composition, scenario: Scenario, scales: Scales, rng
 
     constraints = []   # SLSQP: every function must be >= 0 where the constraint holds; scaled to comparable units
     if scenario.max_workers is not None:
-        constraints.append(dict(type="ineq", fun=lambda x: (scenario.max_workers - _denormalize(comp, x)[1].sum()) / scales.max_workers))
+        constraints.append(dict(type="ineq", fun=lambda x: (scenario.max_workers - _denormalize(comp, x)[1].sum()) / scales.cost))
     if scenario.max_latency is not None:
         constraints.append(dict(type="ineq", fun=lambda x: (scenario.max_latency - latency(x)) / scales.latency))
     if scenario.min_quality is not None:
-        constraints.append(dict(type="ineq", fun=lambda x: (_denormalize(comp, x)[0] - scenario.min_quality) / (scales.q_high - scales.q_low)))
+        constraints.append(dict(type="ineq", fun=lambda x: (_denormalize(comp, x)[0] - scenario.min_quality) / scales.quality))
     if scenario.min_model is not None and not comp.model_nodes:
         return None   # no detector: the model constraint cannot be met
     if scenario.min_model is not None:
@@ -361,14 +415,20 @@ def plan(comps: list, scenario: Scenario, scales: Scales, solver: str = "slsqp",
 
 def deployment_table(plans: dict, rates: dict) -> pd.DataFrame:
     """One row per (application, scenario) with the chosen composition and its configuration in the knob names of the
-    campaign (shared.data_quality, <node>.parallelism, <node>.model_size), for deploying it on the testbed."""
+    campaign (shared.data_quality, <node>.parallelism, <node>.cores = parallelism + CORE_HEADROOM, <node>.model_size),
+    for deploying it on the testbed at the arrival rate of the scenario (rates: scenario name -> items/s)."""
     rows = []
     for (app, scenario), table in plans.items():
         chosen = table.iloc[0]
-        row = dict(application=app, scenario=scenario, arrival_rate=rates[app], feasible=bool(chosen["feasible"]))
+        row = dict(application=app, scenario=scenario, arrival_rate=rates[scenario], feasible=bool(chosen["feasible"]))
         if chosen["feasible"]:
-            knobs = {key: int(value) for key, value in chosen.items() if key.endswith((".parallelism", ".model_size")) and pd.notna(value)}
-            row |= dict(composition=chosen["composition"], services=chosen["services"], workers=int(chosen["workers"]),
+            knobs = {}
+            for key, value in chosen.items():
+                if key.endswith(".parallelism") and pd.notna(value):
+                    knobs[key], knobs[key.replace(".parallelism", ".cores")] = int(value), int(value) + CORE_HEADROOM
+                elif key.endswith(".model_size") and pd.notna(value):
+                    knobs[key] = int(value)
+            row |= dict(composition=label(chosen["composition"]), experiment=chosen["composition"], services=chosen["services"], workers=int(chosen["workers"]),
                         predicted_p95_ms=round(float(chosen["latency_ms"]), 1), knobs=json.dumps({"shared.data_quality": int(chosen["data_quality"]), **knobs}))
         rows.append(row)
     return pd.DataFrame(rows)
@@ -385,48 +445,54 @@ def solver_agreement(slsqp: dict, exhaustive: dict, seconds: dict) -> pd.DataFra
     rows = []
     for key, table in slsqp.items():
         a, b = table.iloc[0], exhaustive[key].iloc[0]
-        rows.append(dict(application=key[0], scenario=key[1], slsqp=a["composition"] if a["feasible"] else None,
-                         exhaustive=b["composition"] if b["feasible"] else None, same_composition=a["composition"] == b["composition"],
+        rows.append(dict(application=key[0], scenario=key[1], slsqp=label(a["composition"]) if a["feasible"] else None,
+                         exhaustive=label(b["composition"]) if b["feasible"] else None, same_composition=a["composition"] == b["composition"],
                          objective_gap=a["objective"] - b["objective"] if a["feasible"] and b["feasible"] else np.nan,
                          slsqp_s=seconds["slsqp"][key], exhaustive_s=seconds["exhaustive"][key]))
     return pd.DataFrame(rows)
 
 
-def tradeoff_figure(comps: list, plans: dict, scenarios: list, app: str, worker_budget: int, name: str = None) -> None:
-    """One figure for an application. Lines: for every composition, the smallest Pegasus bound on the p95 end-to-end
-    latency (ms, log scale) over its configurations with at most `worker_budget` workers, at every data quality (x
-    axis); a gap where no such configuration has a finite bound. Stars: the plan of every scenario (plans: (app,
-    scenario name) -> plan table), at its data quality and bound, labeled with the scenario's short name and its
-    workers; a plan may use more or fewer workers than worker_budget. name: file name in figures/tsc/experimental-results, or None."""
+def tradeoff_figure(comps: dict, plans: dict, scenarios: list, app: str, worker_budget: int, name: str = None) -> None:
+    """One figure for an application with one panel per scenario (comps: scenario name -> the compositions at the
+    scenario's arrival rate; plans: (app, scenario name) -> plan table). In a panel, one line per composition that
+    provides the scenario's capabilities: the smallest Pegasus bound on the p95 end-to-end latency (ms, log scale) over
+    its configurations within the scenario's worker limit (worker_budget if it has none) and its model constraint, at
+    every data quality (x axis); a gap where no such configuration has a finite bound. Dashed lines: the scenario's
+    latency and quality constraints. Star: the plan, labeled with its total workers. name: file name in figures/tsc/experimental-results,
+    or None."""
     import matplotlib.pyplot as plt
-    from pegasus.figures import paper_figure, paper_style, save_figure
+    from pegasus.figures import paper_style, save_figure
+    experiments = [c.experiment for c in next(iter(comps.values()))]
+    colors = dict(zip(experiments, plt.get_cmap("tab10").colors))
+    markers = dict(zip(experiments, "osD^v"))
     with paper_style():
-        fig, ax = paper_figure()
-        colors = dict(zip([c.experiment for c in comps], plt.get_cmap("tab10").colors))
-        for comp in comps:
-            metrics = grid_metrics(comp, all_grid_indices(comp))
-            within = metrics["cost"] <= worker_budget
-            best = [np.min(metrics["latency"][within & (metrics["quality"] == q)], initial=np.inf) for q in comp.qualities]
-            best = np.where(np.isfinite(best), best, np.nan)
-            ax.plot(comp.qualities, 1e3 * best, marker="o", markersize=3, color=colors[comp.experiment],
-                    label=f"{comp.experiment.removeprefix('b1u-')} ({len(comp.path)} services)")
-        stars = {}   # (composition, quality, bound, workers) -> short names of the scenarios with that plan, one label per star
-        for scenario in scenarios:
+        fig, axes = plt.subplots(1, len(scenarios), figsize=(3.0 * len(scenarios), 3.3), sharey=True, layout="constrained")
+        for ax, scenario in zip(axes, scenarios):
+            budget = scenario.max_workers if scenario.max_workers is not None else worker_budget
+            for comp in comps[scenario.name]:
+                if not provides(comp, scenario.requires):
+                    continue
+                metrics = grid_metrics(comp, all_grid_indices(comp))
+                within = (metrics["cost"] <= budget) & (metrics["model"] >= (scenario.min_model or 0))
+                best = np.array([np.min(metrics["latency"][within & (metrics["quality"] == q)], initial=np.inf) for q in comp.qualities])
+                ax.plot(comp.qualities, 1e3 * np.where(np.isfinite(best), best, np.nan), marker=markers[comp.experiment], markersize=3,
+                        linewidth=1.5, color=colors[comp.experiment], label=comp.label)
+            if scenario.max_latency is not None:
+                ax.axhline(1e3 * scenario.max_latency, color="black", linestyle="--", linewidth=1)
+            if scenario.min_quality is not None:
+                ax.axvline(scenario.min_quality, color="black", linestyle="--", linewidth=1)
             chosen = plans[(app, scenario.name)].iloc[0]
             if chosen["feasible"]:
-                key = (chosen["composition"], chosen["data_quality"], round(chosen["latency_ms"], 6), int(chosen["workers"]))
-                stars.setdefault(key, []).append(scenario.name.split()[0])
-        q_low, q_high = comps[0].qualities[[0, -1]]
-        for (experiment, quality, latency, workers), names in stars.items():
-            ax.plot(quality, latency, marker="*", markersize=13, color=colors[experiment], markeredgecolor="black", linestyle="none", zorder=5)
-            right = quality > q_low + 0.8 * (q_high - q_low)   # label above and left of the star, so that it stays inside the axes
-            ax.annotate(f"{', '.join(names)} ({workers}w)", (quality, latency), textcoords="offset points", xytext=(-6, 8) if right else (6, -10),
-                        ha="right" if right else "left", fontsize=9)
-        ax.set_yscale("log")
-        ax.set_xlabel("data quality")
-        ax.set_ylabel(f"p95 bound (ms), ≤ {worker_budget} workers")
-        ax.grid(True, linestyle=":", alpha=0.6)
-        ax.legend(fontsize=8, loc="best", framealpha=0.95)
+                ax.plot(chosen["data_quality"], chosen["latency_ms"], marker="*", markersize=14, color=colors[chosen["composition"]],
+                        markeredgecolor="black", linestyle="none", zorder=5)
+                ax.annotate(f"{int(chosen['workers'])}w", (chosen["data_quality"], chosen["latency_ms"]), textcoords="offset points",
+                            xytext=(0, 9), ha="center", fontsize=10)
+            ax.set_title(f"{scenario.short}, {scenario.rate:g}/s, ≤ {budget} w", fontsize=11)
+            ax.set_yscale("log")
+            ax.set_xlabel(f"q, {QUALITY_UNITS[app]}", fontsize=10)
+            ax.grid(True, linestyle=":", alpha=0.6)
+            ax.legend(fontsize=8, loc="best", framealpha=0.95)
+        axes[0].set_ylabel("p95 bound (ms)")
         if name is not None:
             save_figure(fig, name)
         plt.show()
