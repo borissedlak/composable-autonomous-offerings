@@ -12,7 +12,7 @@ Every notebook starts with
     globals().update(b1_base(data_source))   # where the notebook needs the base case of B.1
 so that a parameter is defined once for all notebooks. configure, b1_base and cached take `chains` (CHAIN_FOLDERS) to
 run the real data on other chains; its default is the option of the paper, DEFAULT_CHAINS. b1_base computes the base case once and keeps it in
-statics/evaluation_cache/ (never committed); see b1_base for when it is computed anew.
+statics/cache/evaluation/ (never committed); see b1_base for when it is computed anew.
 """
 import ast
 import hashlib
@@ -33,7 +33,7 @@ from .evaluation import (METHOD_COLORS, PROPOSED, PROPOSED_SNC, TIGHTNESS_RANGE,
                          compare_tree_methods, coverage,
                          finite_share, fit_services, ground_truth_conclusion, sweep_conclusion, sweep_seconds, sweep_statistics,
                          tightness_and_time_figure, tightness_figure, tightness_sweep_figure, time_conclusion)
-from .real_data import (BENCHMARK_AND_CHAINS, BENCHMARKS_V2, CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, b4_chain_data, b4_utilization, campaign_nodes, chain_experiments,
+from .real_data import (BENCHMARKS_V2, CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, b4_chain_data, b4_utilization, campaign_nodes, chain_experiments,
                         chain_path, chain_tail_ratios, real_tree_data, training_pool, tree_structure, unthrottled_pool, unthrottled_runs,
                         VM_TREE_SETS, vm_tree_experiments, vm_tree_preliminary)
 from .service_gp import configurations_of
@@ -54,7 +54,7 @@ competitors = [name for name in METHOD_COLORS if name != "Oracle"]   # the propo
 only_base_case = ("DNN Sum",)
 sweep_competitors = [name for name in competitors if name not in only_base_case]  # the methods of B.2 to B.6 without the Oracle
 
-CACHE = Path(__file__).resolve().parents[3] / "statics" / "evaluation_cache"
+CACHE = Path(__file__).resolve().parents[3] / "statics" / "cache" / "evaluation"
 # The chains of the real data (`chains`): "b1", the chains of B1 with one worker per service, where a third of the
 # runs was throttled and is left out; "b1-unthrottled", the same chains measured again with 1 to 4 workers per service
 # and no throttled run; "b1+b1u-max<k>", every chain of b1 with the runs of its twin in b1-unthrottled in which no service
@@ -108,9 +108,9 @@ def configure(data_source: str, chains: str = DEFAULT_CHAINS) -> dict:
             # the most benchmark runs that every service of the chain has (unthrottled, with a measurable handling overhead): the largest size of B.2
             n_pool=min(len(unthrottled_pool(training_pool(service, campaign=BENCHMARKS_V2))) for service in chain_path(base_experiment)[1].values()),
             training_options=lambda s: dict(level=1 - alpha, coverage_check=coverage_check, **chain_options(s)),
-            # B.2: its chain with every training run of every service in a random order, from the benchmark and the other chains;
-            # 2b_evidence.ipynb replaces this pool with the extended pool of the load-aware models (load_aware_b4.py)
-            evidence_options=lambda s: dict(experiment=EVIDENCE_CHAIN[chain_campaign] + suffix, n_train=None, training_campaign=BENCHMARK_AND_CHAINS),
+            # B.2: its chain with every training run of every service in a random order, from the one-worker benchmark;
+            # 2b_evidence.ipynb replaces this pool with the worker benchmarks of the load-aware models (load_aware_b4.py)
+            evidence_options=lambda s: dict(experiment=EVIDENCE_CHAIN[chain_campaign] + suffix, n_train=None, training_campaign=BENCHMARKS_V2),
             # B.3: the balanced fork-join trees of the second machine (statics/results_milos_v2/b3-vm/, VM_TREE_SETS in real_data.py),
             # (tree set, levels h) -> experiment, every finished tree of each set and every tree that is still measured but has
             # valid runs, as a preliminary point (tree_preliminary). "large" (288 to 640 px, 8 configurations drawn for every h) is
@@ -170,18 +170,16 @@ def base_case(bases: dict, base_models: dict, s: int) -> tuple:
     K = len(data.path)
     methods, _ = compare_methods(data, models, data.x_train, data.monitored_latencies, alpha, confidence, n_calibration, model_seed=seed + s,
                                  x_train_load=data.x_train_load)
-    workload, handover = data.workload, data.handover   # handover: the time between the services, which every method adds (compare_methods)
+    workload = data.workload
     beliefs, lower_means, workers = models["beliefs"], models["lower_means"], path_workers(data)   # workers of every service per configuration
     # Ablation: the other ways to bound the nodes and to compose them, all on the same GP beliefs
     compositions = {
-        "union bound, Chernoff (SNC) nodes": ("proposed", sum(snc_latency_bound(*b, epsilon=alpha / K, workers=w, **workload) for b, w in zip(beliefs, workers))
-                                              + handover),
+        "union bound, Chernoff (SNC) nodes": ("proposed", sum(snc_latency_bound(*b, epsilon=alpha / K, workers=w, **workload) for b, w in zip(beliefs, workers))),
         "union bound, propagated Chernoff (SNC) nodes": ("proposed", propagated_node_bounds(beliefs, epsilon=alpha / K, path_lower_means=lower_means,
-                                                                                            path_workers=workers, **workload).sum(axis=0) + handover),
+                                                                                            path_workers=workers, **workload).sum(axis=0)),
         "union bound, martingale nodes = Pegasus Node": ("proposed", methods[PROPOSED][1]),
         "network service curve, independent services = Pegasus SNC": ("proposed", methods[PROPOSED_SNC][1]),
-        "network service curve, Hölder (any dependence)": ("proposed", network_service_bound(beliefs, epsilon=alpha, path_workers=workers, **workload)
-                                                           + handover),
+        "network service curve, Hölder (any dependence)": ("proposed", network_service_bound(beliefs, epsilon=alpha, path_workers=workers, **workload)),
     }
     return methods, compositions
 
@@ -221,7 +219,7 @@ def b1_base(data_source: str, refresh: bool = False, chains: str = DEFAULT_CHAIN
     per_seed (one (methods, compositions) per seed, base_case), base (the data of the first seed, for what is the same
     under every seed), K (services in the chain), workload, n_train (training configurations per service) and arrivals
     (the arrival process in words).
-    Computed once and kept in statics/evaluation_cache/b1_<tag>_<key>.joblib (tag: _cache_tag); the key (_cache_key)
+    Computed once and kept in statics/cache/evaluation/b1_<tag>_<key>.joblib (tag: _cache_tag); the key (_cache_key)
     changes with the parameters and the code of the package, so a stale file is never read. refresh=True computes it
     anew anyway. chains: as in configure."""
     options = configure(data_source, chains)
@@ -290,7 +288,7 @@ def _function_code(function) -> bytes:
 
 def cached(name: str, data_source: str, compute, inputs: dict = None, refresh: bool = False, chains: str = DEFAULT_CHAINS) -> dict:
     """The results of the experiment `name`: compute() returns them as a dictionary name -> value (for
-    globals().update). They are kept in statics/evaluation_cache/<name>_<tag>_<key>.joblib (tag: _cache_tag), where the key
+    globals().update). They are kept in statics/cache/evaluation/<name>_<tag>_<key>.joblib (tag: _cache_tag), where the key
     covers the shared parameters above, `inputs` (the settings of the experiment that compute reads from outside, e.g.
     the swept sizes), what compute itself computes (_function_code) and the code of the package (_computation_code). A
     change of any of them computes the results anew; refresh=True does so anyway. The base case of B.1 that compute

@@ -17,7 +17,7 @@ from .service_gp import (RunStatisticsModel, configurations_of, execution_time_b
                          train_run_statistics_models)
 from .bounds import martingale_closed_form_node_bound, martingale_closed_form_node_bounds, network_service_bound
 from .data import model_inputs, path_workers
-from .model_cache import cached_model
+from .model_cache import training_clock
 from .trees import leaf_to_root_paths, max_over_paths, max_path_sum
 
 PROPOSED = "Pegasus Node (ours)"   # union bound over the node bounds
@@ -43,8 +43,9 @@ def fit_services(data, x_train, y_train: dict, model_seed: int, confidence: floa
     (RunStatisticsModel in service_gp.py). The time to train the spread GPs is part of "gp". The DNN is trained on the
     run means and uses the same spread GP.
     No model receives the number of workers of a configuration (model_inputs in data.py).
-    The GP of every service is fitted once per training data and then read from the shared model cache (model_cache.py),
-    so experiments that train a service on the same runs share the fit; "seconds"["gp"] is the time of the first training.
+    Every GP and network is fitted once per training data and then read from the shared model cache (model_cache.py),
+    so experiments that train a service on the same runs share the fit; "seconds"["gp"] and "seconds"["dnn"] are the
+    times of the first training.
     A real tree (TreeData with services) trains one model per service type and computes the beliefs at the
     configurations of every node (model_of)."""
     model = model_of(data)
@@ -52,22 +53,22 @@ def fit_services(data, x_train, y_train: dict, model_seed: int, confidence: floa
     x_train, x_test = model_inputs(x_train, data.workers_column), model_inputs(data.x_test, data.workers_column)
     from_runs = data.y_train_spread is not None
     belief_of = run_statistics_belief if from_runs else execution_time_belief
-    gp, gp_seconds = {}, 0.0
-    for s in services:   # one fit per service, from the shared model cache if this service was fitted on these runs before
-        x_s = configurations_of(x_train, s)
-        if from_runs:
-            gp[s], seconds = cached_model("run_statistics", (x_s, y_train[s], data.y_train_spread[s]),
-                                          lambda: train_run_statistics_models({s: x_s}, {s: y_train[s]}, {s: data.y_train_spread[s]}, [s])[s])
-        else:
-            gp[s], seconds = cached_model("gp", (x_s, y_train[s]), lambda: train_gp_models({s: x_s}, {s: y_train[s]}, [s])[s])
-        gp_seconds += seconds
+    gp = {}
+    with training_clock() as gp_clock:   # one fit per service, from the shared model cache if this service was fitted on these runs before
+        for s in services:
+            x_s = configurations_of(x_train, s)
+            if from_runs:
+                gp[s] = train_run_statistics_models({s: x_s}, {s: y_train[s]}, {s: data.y_train_spread[s]}, [s])[s]
+            else:
+                gp[s] = train_gp_models({s: x_s}, {s: y_train[s]}, [s])[s]
+    gp_seconds = gp_clock.seconds
     if from_runs:
         spread = {s: gp[s].spread for s in services}
-    started = time.perf_counter()
-    dnn = train_dnn_models(x_train, y_train, services, seed=model_seed) if with_dnn else None
+    with training_clock() as dnn_clock:
+        dnn = train_dnn_models(x_train, y_train, services, seed=model_seed) if with_dnn else None
     if from_runs and with_dnn:
         dnn = {s: RunStatisticsModel(dnn[s], spread[s], log_center=False) for s in services}
-    dnn_seconds = time.perf_counter() - started
+    dnn_seconds = dnn_clock.seconds
     started = time.perf_counter()
     belief = {key: belief_of(gp[model[key]], configurations_of(x_test, key), confidence) for key in sorted(model)}
     lower_mean = {key: belief_of(gp[model[key]], configurations_of(x_test, key), 1 - confidence)[0] for key in sorted(model)}
@@ -86,21 +87,18 @@ def pegasus_bound(data, models: dict, alpha: float) -> np.ndarray:
     """Pegasus Node: the union bound over the closed-form martingale node bounds, per held-out configuration (s). The
     waiting time at a service is bounded by Kingman's martingale bound exp(-theta w); with a Gaussian execution time,
     the latency bound of the service follows from one formula. Every service is bounded with the external arrivals
-    (the paper's assumption on internal arrivals). A service with several workers is bounded by cyclic assignment (bounds.py).
-    Plus data.handover, the time between the services that the measured end-to-end latency contains."""
+    (the paper's assumption on internal arrivals). A service with several workers is bounded by cyclic assignment (bounds.py)."""
     K = len(data.path)
-    return (martingale_closed_form_node_bounds(models["beliefs"], epsilon=alpha / K, path_workers=path_workers(data), **data.workload).sum(axis=0)
-            + data.handover)
+    return martingale_closed_form_node_bounds(models["beliefs"], epsilon=alpha / K, path_workers=path_workers(data), **data.workload).sum(axis=0)
 
 
 def pegasus_snc_bound(data, models: dict, alpha: float) -> np.ndarray:
     """Pegasus SNC: one bound for the whole chain from its network service curve, per held-out configuration (s). One
     Chernoff step on the product of the services' latency moments bounds the end-to-end latency at the full violation
     probability alpha, instead of alpha / K per service. Multiplying the moments requires that the execution times of
-    an item are independent between the services, so no Hoelder step is applied (all exponents 1). Plus data.handover,
-    as in pegasus_bound."""
+    an item are independent between the services, so no Hoelder step is applied (all exponents 1)."""
     return network_service_bound(models["beliefs"], epsilon=alpha, holder_exponents=[1] * len(data.path), path_workers=path_workers(data),
-                                 **data.workload) + data.handover
+                                 **data.workload)
 
 
 def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alpha: float, confidence: float,
@@ -119,9 +117,7 @@ def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alph
     With real data (data.y_train_spread is given), the GPs of Quantile Union and Conformal are fitted on the logarithm
     of the latency quantile, like the GP of the mean execution time (fit_services): the latency of a real service
     differs by orders of magnitude between its configurations. No model receives the number of workers of a
-    configuration (model_inputs in data.py); GP Queue and both versions of Pegasus get it from path_workers.
-    Every method and the Oracle add data.handover, the time between the services that the measured end-to-end latency
-    contains and no service latency does (both versions of Pegasus inside pegasus_bound and pegasus_snc_bound)."""
+    configuration (model_inputs in data.py); GP Queue and both versions of Pegasus get it from path_workers."""
     K, workload = len(data.path), data.workload
     workers_by_position = path_workers(data) or [1] * K
     log_target = data.y_train_spread is not None
@@ -152,17 +148,17 @@ def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alph
     for name, group, training_seconds, compute in candidates:
         if name in leave_out:
             continue
-        started = time.perf_counter()
-        latency = compute()
-        elapsed = time.perf_counter() - started
-        if training_seconds is None:
+        with training_clock() as clock:
+            started = time.perf_counter()
+            latency = compute()
+            elapsed = time.perf_counter() - started
+        if training_seconds is None:   # the method trained its own models: elapsed minus its training as it ran (fits loaded from the cache)
             latency, training_seconds = latency
-            elapsed -= training_seconds
-        # the two versions of Pegasus add the handover time themselves (pegasus_bound), because other code calls them directly
-        methods[name] = (group, latency if name in (PROPOSED, PROPOSED_SNC) else latency + data.handover)
+            elapsed -= training_seconds - clock.seconds + clock.wall
+        methods[name] = (group, latency)
         seconds[name] = (training_seconds, elapsed + earlier_seconds.get(name, 0.0))
     if data.node_latencies is not None:         # reference: what a union bound reaches with measured instead of predicted nodes
-        methods["Oracle"] = ("reference", union_bound_oracle(data.node_latencies, alpha) + data.handover)
+        methods["Oracle"] = ("reference", union_bound_oracle(data.node_latencies, alpha))
     return methods, seconds
 
 
@@ -237,12 +233,13 @@ def compare_tree_methods(data, models: dict, alpha: float, confidence: float, n_
     for name, group, training_seconds, compute in candidates:
         if name in leave_out:
             continue
-        started = time.perf_counter()
-        latency = compute()
-        elapsed = time.perf_counter() - started
-        if training_seconds is None:
+        with training_clock() as clock:
+            started = time.perf_counter()
+            latency = compute()
+            elapsed = time.perf_counter() - started
+        if training_seconds is None:   # the method trained its own models: elapsed minus its training as it ran (fits loaded from the cache)
             latency, training_seconds = latency
-            elapsed -= training_seconds
+            elapsed -= training_seconds - clock.seconds + clock.wall
         methods[name] = (group, latency)
         seconds[name] = (training_seconds, elapsed + earlier_seconds.get(name, 0.0))
     methods["Oracle"] = ("reference", max_path_sum(paths, lambda k, previous: data.node_quantiles[:, k]))
@@ -264,9 +261,8 @@ def queueing_formula_inputs(data, models: dict, true_mean: np.ndarray, true_var:
     predicted_var = np.column_stack([std ** 2 for _, std in predictions])
     pessimistic_mean = np.column_stack([mean for mean, _ in models["beliefs"]])
     workers = path_workers(data) or [1] * len(data.path)
-    # plus the time between the services, as every method of compare_methods
     formula = lambda mean, var: sum(queueing_formula_latency(mean[:, k], var[:, k], epsilon=alpha, workers=workers[k], **data.workload)
-                                    for k in range(len(data.path))) + data.handover
+                                    for k in range(len(data.path)))
     variants = {"predicted mean, predicted variance (the baseline)": formula(predicted_mean, predicted_var),
                 "predicted mean, true variance": formula(predicted_mean, true_var),
                 "true mean, predicted variance": formula(true_mean, predicted_var),
@@ -536,8 +532,9 @@ def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xla
     half figures side by side in the width of one (half_figure, each with its own vertical axis), which need a shorter
     horizontal axis; None: full figures with the axis of the tightness figure.
     overlay: (settings, statistics, label) of a second ground truth for some methods of the tightness figure, drawn as
-    dashed lines in their colors behind the measured ones (overlay_line), with one legend entry `label`. onset: (x, label)
-    of a vertical line in the tightness figure, e.g. where the services start to slow down."""
+    dashed lines in their colors behind the measured ones (overlay_line), with `label` written next to the dashed line
+    (place_line_label) instead of in the legend. onset: (x, label) of a vertical line in the tightness figure, e.g.
+    where the services start to slow down, with `label` written next to the line."""
     from .figures import fit_half_pair, fit_x_tick_labels, half_figure, legend_inside, paper_figure, paper_style, plain_log_ticks, save_figure
     print(title)
     short = lambda method: method.replace(" (ours)", "")
@@ -556,14 +553,25 @@ def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xla
                     if method not in statistics:   # only the dashed line: its own legend entry, in its color and marker
                         ax.plot([], [], color=METHOD_COLORS[method], linestyle=(0, (4, 2)), linewidth=1.5, marker=METHOD_STYLES.get(method, ("o",))[0],
                                 markersize=6, label=method)
-            ax.plot([], [], color="0.3", linestyle=(0, (4, 2)), linewidth=1.5, label=overlay_label)
         if onset is not None:
-            x, onset_label = onset
-            ax.axvline(x, color="0.25", linewidth=1.2, linestyle=(0, (1, 1.5)), zorder=1)
-            ax.plot([], [], color="0.25", linewidth=1.2, linestyle=(0, (1, 1.5)), label=onset_label)
+            ax.axvline(onset[0], color="0.25", linewidth=1.2, linestyle=(0, (1, 1.5)), zorder=1)
         if not log_x:
             fit_x_tick_labels(ax)
         _tightness_legend(ax, settings, statistics, extra_segments=extra_segments)
+        # the labels of the dashed and the vertical line next to their lines instead of in the legend, where they keep the
+        # largest distance to every line, band, text and the legend
+        drawn = [(settings, statistics[name]["tightness"]) for name in statistics if name in METHOD_COLORS]
+        if overlay is not None:
+            drawn += [(overlay_settings, overlay_statistics[name]["tightness"]) for name in overlay_statistics if name in METHOD_COLORS]
+            # beside a point of the dashed line, above or below it, in the color of the line (that of its first method)
+            first = next(name for name in METHOD_COLORS if name in overlay_statistics)
+            anchors = [(x, y, ha, va) for x, y in _median_points(overlay_settings, overlay_statistics[first]["tightness"])
+                       for ha in ("right", "left") for va in ("bottom", "top")]
+            place_line_label(ax, overlay_label, anchors, drawn, color=METHOD_COLORS[first], fontsize=10)
+        if onset is not None:
+            # right of the vertical line, at the height with the most room
+            anchors = [(onset[0], y, "left", "center") for y in np.geomspace(*TIGHTNESS_RANGE, 40)]
+            place_line_label(ax, onset[1], anchors, drawn, color="0.25", fontsize=10)
         if name is not None:
             save_figure(fig, f"{name}_tightness")
         plt.show()
@@ -630,6 +638,62 @@ def _tightness_panel(ax, settings: list, statistics: dict, level_label: str, fai
     ax.set_yticks(TIGHTNESS_TICKS, [tightness_tick(tick) for tick in TIGHTNESS_TICKS])
     ax.yaxis.set_minor_locator(plt.NullLocator())
     ax.set_ylabel(tightness_label(level_label))
+
+
+def _median_points(settings, values: np.ndarray) -> list:
+    """(x, y) of every point of a sweep_line: the median over the seeds where it is finite."""
+    typical = np.median(np.where(np.isnan(values), np.inf, values), axis=1)
+    return [(x, y) for x, y in zip(np.asarray(settings, dtype=float), typical) if np.isfinite(y)]
+
+
+def place_line_label(ax, text: str, anchors: list, drawn: list, offset: float = 4, **text_options) -> list:
+    """Writes `text` next to a line of the axes, at the one of `anchors` where its box keeps the largest distance (in
+    pixels) to everything drawn and stays inside the axes: the lines of the sweeps in `drawn` ((settings, values) as for
+    sweep_line, values (settings, seeds)), each as the line of its medians and the lines of its smallest and largest
+    seed, the texts already in the axes (e.g. the failure zone) and the legend, so call it after the legend. anchors:
+    (x, y, ha, va) in data coordinates; the text stands `offset` points away from the anchor on the side that ha and va
+    give. Returns the (x, y_low, y_high) segments of the box."""
+    ax.figure.canvas.draw()
+    to_pixels = ax.transData.transform
+    points = []   # pixels of every line, sampled between its points
+    for settings, values in drawn:
+        finite = np.where(np.isnan(values), np.inf, values)
+        for line in (np.median(finite, axis=1), np.nanmin(values, axis=1), np.nanmax(values, axis=1)):
+            shown = np.isfinite(line)
+            corners = to_pixels(np.column_stack([np.asarray(settings, dtype=float)[shown], line[shown]]))
+            for start, end in zip(corners[:-1], corners[1:]):
+                points += list(start + np.linspace(0, 1, 25)[:, None] * (end - start))
+            points += list(corners)
+    renderer = ax.figure.canvas.get_renderer()
+    for other in ax.texts + ([ax.get_legend()] if ax.get_legend() is not None else []):
+        box = other.get_window_extent(renderer)
+        points += [(x, y) for x in np.linspace(box.x0, box.x1, 12) for y in np.linspace(box.y0, box.y1, 6)]   # the whole box, so no label lands inside it
+    points = np.array(points) if points else np.empty((0, 2))
+    frame = ax.get_window_extent(renderer)
+    shift = offset * ax.figure.dpi / 72   # points -> pixels
+    best = None
+    for x, y, ha, va in anchors:
+        dx = {"left": shift, "right": -shift, "center": 0}[ha]
+        dy = {"bottom": shift, "top": -shift, "center": 0}[va]
+        label = ax.annotate(text, (x, y), xytext=(dx * 72 / ax.figure.dpi, dy * 72 / ax.figure.dpi), textcoords="offset points",
+                            ha=ha, va=va, **text_options)
+        box = label.get_window_extent(renderer)
+        label.remove()
+        if box.x0 < frame.x0 or box.x1 > frame.x1 or box.y0 < frame.y0 or box.y1 > frame.y1:
+            continue
+        # distance of every point to the box, 0 inside it
+        gap = np.hypot(np.maximum(0, np.maximum(box.x0 - points[:, 0], points[:, 0] - box.x1)),
+                       np.maximum(0, np.maximum(box.y0 - points[:, 1], points[:, 1] - box.y1))).min() if len(points) else np.inf
+        if best is None or gap > best[0]:
+            best = (gap, (x, y, ha, va, dx, dy), box)
+    if best is None:
+        print(f"place_line_label: no room for {text!r} inside the axes")
+        return []
+    _, (x, y, ha, va, dx, dy), box = best
+    ax.annotate(text, (x, y), xytext=(dx * 72 / ax.figure.dpi, dy * 72 / ax.figure.dpi), textcoords="offset points", ha=ha, va=va,
+                **text_options)
+    corners = ax.transData.inverted().transform([[box.x0, box.y0], [box.x1, box.y1]])
+    return [(x, corners[0, 1], corners[1, 1]) for x in np.linspace(corners[0, 0], corners[1, 0], 8)]
 
 
 def overlay_line(ax, settings, values: np.ndarray, name: str, held: np.ndarray) -> None:
@@ -906,7 +970,8 @@ def emulated_tree_quantiles(experiment: str, seeds: list, n_train: int, level: f
     the run pass through the fork-join tree of FIFO services with one worker each (fifo_node_leaving; an aggregator
     receives a frame when the later of its children has released it). The execution time of a frame at a service is
     drawn with replacement from the processing times of the benchmark runs of its service type at its configuration
-    (records.csv, measurement phase; VM_TREE_BENCHMARKS), plus the handling overhead of the tree (tree_handling_overhead).
+    (records.csv, measurement phase; VM_TREE_BENCHMARKS), each plus the handling overhead of its own benchmark run, as the
+    training targets of real_tree_data.
     Per seed only benchmark runs that do not train the models under that seed (tree_training_runs), so that no training
     run is replayed; if a configuration has no other run, its training runs are used, with a printed note. Latency of a
     frame: from its arrival until the root releases it, the first warmup_share of the frames dropped; it leaves out the
@@ -915,14 +980,13 @@ def emulated_tree_quantiles(experiment: str, seeds: list, n_train: int, level: f
     keyed by the last element of each seed."""
     import pandas as pd
     from .real_data import (TREE_THROTTLE_LIMIT, VM_TREE_BENCHMARKS, arrival_rates, experiment_folder, run_table, training_pool,
-                            tree_handling_overhead, tree_structure, unthrottled_pool, unthrottled_runs)
+                            handling_overhead, tree_structure, unthrottled_pool, unthrottled_runs)
     from .simulation import fifo_node_leaving, quantile_with_lower_bound
     from .trees import children_first
     children, nodes, services = tree_structure(experiment)
     runs = unthrottled_runs(experiment, below=TREE_THROTTLE_LIMIT)
     rates = arrival_rates(experiment).loc[runs].to_numpy()
     configurations = run_table(experiment).drop_duplicates("run_id").set_index("run_id").loc[runs]
-    overhead = tree_handling_overhead(experiment)
     pools = {service: unthrottled_pool(training_pool(service, campaign=VM_TREE_BENCHMARKS[service])) for service in set(services)}
     processing = {}   # (experiment, run_id) of a benchmark run -> its processing times (s) in the measurement phase
 
@@ -950,8 +1014,9 @@ def emulated_tree_quantiles(experiment: str, seeds: list, n_train: int, level: f
                 candidates = [(r.experiment, r.run_id) for r in pool[matches].itertuples()]
                 replayed = [run for run in candidates if run not in excluded] or candidates
                 fallbacks += not [run for run in candidates if run not in excluded]
-                samples = np.concatenate([processing_times(*run) for run in replayed])
-                execution[row] = rng.choice(samples, n_frames) + overhead
+                # execution time: the processing time plus the handling overhead of its benchmark run
+                samples = np.concatenate([processing_times(*run) + handling_overhead(*run, "service") for run in replayed])
+                execution[row] = rng.choice(samples, n_frames)
             entering = arrivals if not children[position] else np.maximum.reduce([leaving[child] for child in children[position]])
             leaving[position] = fifo_node_leaving(entering, execution, 1)
             for child in children[position]:

@@ -12,6 +12,7 @@ on its own; none sees a run of the chain. They differ in what is measured per se
 The baselines that are trained on runs of the chain are in `baselines_chain.py`.
 Units: execution times and latencies in seconds; `epsilon` / `alpha` is the violation probability.
 """
+import inspect
 import time
 import warnings
 from contextlib import contextmanager
@@ -22,6 +23,7 @@ from scipy.special import factorial
 from scipy.stats import norm
 from sklearn.exceptions import ConvergenceWarning
 
+from .model_cache import cached_model, training_clock
 from .service_gp import MIN_LENGTH_SCALE, configurations_of, train_gp_models
 
 
@@ -77,8 +79,12 @@ class ServiceDNN:
 
 
 def train_dnn_models(x_train, y_train_dict: dict, service_names: list, seed: int = 0) -> dict:
-    """One ServiceDNN per service, the counterpart of train_gp_models in service_gp.py."""
-    return {name: ServiceDNN(configurations_of(x_train, name), np.asarray(y_train_dict[name]), seed=seed + k)
+    """One ServiceDNN per service, the counterpart of train_gp_models in service_gp.py; every network is trained once
+    per training data and seed and then read from the shared model cache (model_cache.py)."""
+    code = inspect.getsource(ServiceDNN) + torch.__version__
+    return {name: cached_model("dnn", (configurations_of(x_train, name), np.asarray(y_train_dict[name])),
+                               lambda name=name, k=k: ServiceDNN(configurations_of(x_train, name), np.asarray(y_train_dict[name]), seed=seed + k),
+                               params=(seed + k,), code=code)[0]
             for k, name in enumerate(service_names)}
 
 
@@ -115,8 +121,9 @@ def summed_service_quantiles(x_train, monitored_latencies: dict, path: list, eps
     _service_quantile_models."""
     services = sorted(set(path))
     started = time.perf_counter()
-    models, _ = _service_quantile_models(x_train, monitored_latencies, services, 1 - epsilon, log_target)
-    training_seconds = time.perf_counter() - started
+    with training_clock() as clock:
+        models, _ = _service_quantile_models(x_train, monitored_latencies, services, 1 - epsilon, log_target)
+    training_seconds = time.perf_counter() - started - clock.wall + clock.seconds   # the first training of a cached fit, not its loading
     predicted = {s: models[s].predict(np.atleast_2d(configurations_of(x_test, s))) for s in services}
     if log_target:
         predicted = {s: np.exp(predicted[s]) for s in services}
@@ -151,7 +158,8 @@ def conformal_service_bounds(x_train, monitored_latencies: dict, path: list, eps
         calibration_latencies = {s: monitored_latencies[s][calibrate[s]] for s in services}
         x_train = {s: configurations_of(x_train, s)[fit[s]] for s in services}
         monitored_latencies = {s: monitored_latencies[s][fit[s]] for s in services}
-    models, _ = _service_quantile_models(x_train, monitored_latencies, services, 1 - epsilon / n_nodes, log_target)
+    with training_clock() as clock:
+        models, _ = _service_quantile_models(x_train, monitored_latencies, services, 1 - epsilon / n_nodes, log_target)
     if log_target:
         predict = lambda s, x: np.exp(models[s].predict(np.atleast_2d(x)))
     else:
@@ -163,7 +171,7 @@ def conformal_service_bounds(x_train, monitored_latencies: dict, path: list, eps
         scores = np.sort(measured[monitored] / predict(s, configurations_of(x_calibration, s)[monitored]))
         rank = int(np.ceil((len(scores) + 1) * (1 - miscoverage)))
         corrections[s] = scores[rank - 1] if rank <= len(scores) else np.inf
-    training_seconds = time.perf_counter() - started
+    training_seconds = time.perf_counter() - started - clock.wall + clock.seconds   # the first training of a cached fit, not its loading
     bounds = {s: predict(s, configurations_of(x_test, s)) * corrections[s] for s in services}
     total = sum(bounds[s] for s in path)
     return (total, training_seconds) if return_seconds else total

@@ -30,7 +30,7 @@ INPUT_SETS = {"quality": [],
               "cores_per_worker": ["cores_per_worker"],
               "cores_per_worker_with_load": ["cores_per_worker", "load"]}
 RUN_COLUMNS = ("run_id", "experiment", "alone", "mean_ms", "load")   # columns of service_runs that are neither knobs nor inputs
-CACHE = CAMPAIGN.parent / "input_sets"   # results of cross_validate_all, one folder per campaign
+CACHE = CAMPAIGN.parent / "cache" / "input_sets"   # statics/cache/input_sets/: results of cross_validate_all, one folder per campaign
 
 
 @lru_cache(maxsize=None)

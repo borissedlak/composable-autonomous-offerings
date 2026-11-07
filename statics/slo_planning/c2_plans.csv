@@ -1,16 +1,16 @@
 application,scenario,arrival_rate,feasible,composition,services,workers,predicted_p95_ms,knobs
-vision,V1 edge box,15.0,True,b1u-vision-1,detector → transformer → compressor,4,2838.2,"{""shared.data_quality"": 640, ""detector.parallelism"": 2, ""transformer.parallelism"": 1, ""compressor.parallelism"": 1, ""detector.model_size"": 1}"
-vision,V2 interactive AR,15.0,True,b1u-vision-2,faces → transformer → edges,3,71.9,"{""shared.data_quality"": 320, ""faces.parallelism"": 1, ""transformer.parallelism"": 1, ""edges.parallelism"": 1, ""faces.model_size"": 1}"
-vision,V3 forensic detail,15.0,True,b1u-vision-3,denoiser → detector → faces → compressor,9,1649.3,"{""shared.data_quality"": 512, ""denoiser.parallelism"": 1, ""detector.parallelism"": 4, ""faces.parallelism"": 3, ""compressor.parallelism"": 1, ""detector.model_size"": 2, ""faces.model_size"": 2}"
-vision,V4 retail analytics,15.0,True,b1u-vision-4,transformer → denoiser → motion → codes → edges,5,161.5,"{""shared.data_quality"": 416, ""transformer.parallelism"": 1, ""denoiser.parallelism"": 1, ""motion.parallelism"": 1, ""codes.parallelism"": 1, ""edges.parallelism"": 1}"
-vision,V5 traffic monitoring,15.0,True,b1u-vision-5,motion → codes → detector → faces → edges → compressor,10,295.2,"{""shared.data_quality"": 320, ""motion.parallelism"": 1, ""codes.parallelism"": 1, ""detector.parallelism"": 3, ""faces.parallelism"": 3, ""edges.parallelism"": 1, ""compressor.parallelism"": 1, ""detector.model_size"": 2, ""faces.model_size"": 2}"
-audio,A1 minimal footprint,4.0,True,b1u-audio-1,resampler → cleaner → features,3,132.1,"{""shared.data_quality"": 12, ""resampler.parallelism"": 1, ""cleaner.parallelism"": 1, ""features.parallelism"": 1}"
-audio,A2 voice assistant,4.0,True,b1u-audio-2,cleaner → voice → encoder,3,40.1,"{""shared.data_quality"": 2, ""cleaner.parallelism"": 1, ""voice.parallelism"": 1, ""encoder.parallelism"": 1}"
-audio,A3 music archive,4.0,True,b1u-audio-3,resampler → voice → pitch → encoder,4,181.9,"{""shared.data_quality"": 11, ""resampler.parallelism"": 1, ""voice.parallelism"": 1, ""pitch.parallelism"": 1, ""encoder.parallelism"": 1}"
-audio,A4 live captions,4.0,True,b1u-audio-4,cleaner → voice → transcriber,7,1343.8,"{""shared.data_quality"": 5, ""cleaner.parallelism"": 1, ""voice.parallelism"": 2, ""transcriber.parallelism"": 4}"
-audio,A5 conferencing,4.0,True,b1u-audio-2,cleaner → voice → encoder,4,116.9,"{""shared.data_quality"": 8, ""cleaner.parallelism"": 1, ""voice.parallelism"": 2, ""encoder.parallelism"": 1}"
-lidar,L1 embedded,20.0,True,b1u-lidar-1,downsampler → ground → clusterer,6,181.7,"{""shared.data_quality"": 40, ""downsampler.parallelism"": 1, ""ground.parallelism"": 3, ""clusterer.parallelism"": 2}"
-lidar,L2 collision avoidance,20.0,True,b1u-lidar-1,downsampler → ground → clusterer,4,46.3,"{""shared.data_quality"": 6, ""downsampler.parallelism"": 1, ""ground.parallelism"": 2, ""clusterer.parallelism"": 1}"
-lidar,L3 HD mapping,20.0,True,b1u-lidar-5,downsampler → normals → registrar → clusterer → packer,5,1258.3,"{""shared.data_quality"": 30, ""downsampler.parallelism"": 1, ""normals.parallelism"": 1, ""registrar.parallelism"": 1, ""clusterer.parallelism"": 1, ""packer.parallelism"": 1}"
-lidar,L4 fleet perception,20.0,True,b1u-lidar-2,ground → normals → packer,6,234.6,"{""shared.data_quality"": 26, ""ground.parallelism"": 3, ""normals.parallelism"": 2, ""packer.parallelism"": 1}"
-lidar,L5 robotaxi,20.0,True,b1u-lidar-4,ground → clusterer → viewer → packer,10,191.8,"{""shared.data_quality"": 40, ""ground.parallelism"": 4, ""clusterer.parallelism"": 2, ""viewer.parallelism"": 1, ""packer.parallelism"": 3}"
+vision,V1 edge box,15.0,True,b1u-vision-1,detector → transformer → compressor,4.0,2177.5,"{""shared.data_quality"": 640, ""detector.parallelism"": 2, ""transformer.parallelism"": 1, ""compressor.parallelism"": 1, ""detector.model_size"": 1}"
+vision,V2 interactive AR,15.0,True,b1u-vision-2,faces → transformer → edges,3.0,82.1,"{""shared.data_quality"": 352, ""faces.parallelism"": 1, ""transformer.parallelism"": 1, ""edges.parallelism"": 1, ""faces.model_size"": 1}"
+vision,V3 forensic detail,15.0,False,,,,,
+vision,V4 retail analytics,15.0,True,b1u-vision-4,transformer → denoiser → motion → codes → edges,5.0,150.2,"{""shared.data_quality"": 416, ""transformer.parallelism"": 1, ""denoiser.parallelism"": 1, ""motion.parallelism"": 1, ""codes.parallelism"": 1, ""edges.parallelism"": 1}"
+vision,V5 traffic monitoring,15.0,True,b1u-vision-5,motion → codes → detector → faces → edges → compressor,10.0,291.3,"{""shared.data_quality"": 320, ""motion.parallelism"": 1, ""codes.parallelism"": 1, ""detector.parallelism"": 3, ""faces.parallelism"": 3, ""edges.parallelism"": 1, ""compressor.parallelism"": 1, ""detector.model_size"": 2, ""faces.model_size"": 2}"
+audio,A1 minimal footprint,4.0,True,b1u-audio-1,resampler → cleaner → features,3.0,154.5,"{""shared.data_quality"": 12, ""resampler.parallelism"": 1, ""cleaner.parallelism"": 1, ""features.parallelism"": 1}"
+audio,A2 voice assistant,4.0,False,,,,,
+audio,A3 music archive,4.0,True,b1u-audio-3,resampler → voice → pitch → encoder,4.0,232.5,"{""shared.data_quality"": 12, ""resampler.parallelism"": 1, ""voice.parallelism"": 1, ""pitch.parallelism"": 1, ""encoder.parallelism"": 1}"
+audio,A4 live captions,4.0,False,,,,,
+audio,A5 conferencing,4.0,False,,,,,
+lidar,L1 embedded,20.0,True,b1u-lidar-1,downsampler → ground → clusterer,6.0,162.3,"{""shared.data_quality"": 40, ""downsampler.parallelism"": 1, ""ground.parallelism"": 4, ""clusterer.parallelism"": 1}"
+lidar,L2 collision avoidance,20.0,False,,,,,
+lidar,L3 HD mapping,20.0,True,b1u-lidar-5,downsampler → normals → registrar → clusterer → packer,5.0,1483.4,"{""shared.data_quality"": 30, ""downsampler.parallelism"": 1, ""normals.parallelism"": 1, ""registrar.parallelism"": 1, ""clusterer.parallelism"": 1, ""packer.parallelism"": 1}"
+lidar,L4 fleet perception,20.0,True,b1u-lidar-2,ground → normals → packer,5.0,237.7,"{""shared.data_quality"": 24, ""ground.parallelism"": 2, ""normals.parallelism"": 2, ""packer.parallelism"": 1}"
+lidar,L5 robotaxi,20.0,True,b1u-lidar-4,ground → clusterer → viewer → packer,9.0,192.7,"{""shared.data_quality"": 40, ""ground.parallelism"": 4, ""clusterer.parallelism"": 2, ""viewer.parallelism"": 1, ""packer.parallelism"": 2}"

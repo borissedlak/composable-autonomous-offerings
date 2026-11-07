@@ -1,7 +1,7 @@
 """Load- and worker-aware execution-time models: the models of Pegasus Node in every experiment on real data except
-the trees of B.3 (B.1, B.2, B.4 to C.2; the notebooks show them under the name Pegasus Node). The training data of an
-evaluated chain leaves out every run of that chain (chain_family); the description below says B.4, where the variant
-was first evaluated, and calls the benchmark-only models "current Pegasus".
+the trees of B.3 (B.1, B.2, B.4 to C.2; the notebooks show them under the name Pegasus Node). They train on the
+benchmarks of the services only (WORKER_BENCHMARKS), never on a run of a chain; the description below says B.4, where
+the variant was first evaluated, and calls the one-worker benchmark models "current Pegasus".
 
 Current Pegasus (PROPOSED in pegasus/evaluation.py): every service's GPs are trained on the service's benchmark
 (BENCHMARKS_V2: the service alone, one worker, five utilizations) and receive only the quality knobs; model_inputs in
@@ -15,22 +15,24 @@ The variant (VARIANT below) changes two things and nothing else:
   x_test_load of real_chain_data, with the worker column kept (workers_column=None for the fit). The arrival rate is
   the load input rather than the utilization, because the utilization contains the execution time that the model
   predicts; the rate of every held-out run is known in advance (the workload of the run).
-- Training data: the service's benchmark runs plus its runs in the other chains of the second campaign, one worker
-  (CAMPAIGN_V2, `b1/`) and one to four workers (CHAINS_UNTHROTTLED_V2, `b1-unthrottled/`), without any experiment of
-  the evaluated chain (chain_family; for B.4, B4_EXCLUDED); the benchmarks alone have one worker only, so the worker effect could not be learned
-  from them. Every chain run has the rate that the campaign set for it.
+- Training data: the service's benchmark runs with one to four workers (WORKER_BENCHMARKS in pegasus/real_data.py,
+  `benchmark/w1/` to `benchmark/w4/`, worker_benchmark_pool), so that the worker effect is learned from the service
+  measured alone; the one-worker benchmark (`w1/`) alone could not show it. No run of any chain trains a model, so
+  every evaluated chain is an unseen composition and all chains share one training pool. Every run has the rate that
+  the benchmark set for it from its utilization per worker.
 The bound itself is unchanged (pegasus_bound): it reads the workers of every service from the held-out configurations
 for the queueing part, as before.
 
-ABLATION trains on the same extended data with the inputs of the current Pegasus (no workers, no rate), so that the
-comparison separates the effect of more data from the effect of the new inputs.
+ABLATION trains on the same worker benchmarks with the inputs of the current Pegasus (no workers, no rate), so that
+the comparison separates the effect of more data from the effect of the new inputs.
 
-Training runs per service: every run of the extended pool (N_TRAIN = None, real_chain_data), the same for the
+Training runs per service: every run of the worker benchmarks (N_TRAIN = None, real_chain_data), the same for the
 variant and the ablation; the current Pegasus of B.4a uses every benchmark run that all three services have (n_pool).
-Everything else (seeds, alpha, confidence, held-out runs, ground truth, handover) is that of 2c_load.ipynb.
+Everything else (seeds, alpha, confidence, held-out runs, ground truth) is that of 2c_load.ipynb.
 
-The wider training pool is set up at call time (extended_training) instead of in pegasus/real_data.py, because the
-cache key of the evaluation hashes every module of pegasus/: a change there would recompute every cached experiment.
+The training pool is set up at call time (extended_training) instead of in pegasus/real_data.py, because the cache key
+of the evaluation hashes every module of pegasus/: a change of the variant's pool here recomputes only the cells of the
+variant (code_fingerprint).
 """
 import hashlib
 from contextlib import contextmanager
@@ -45,14 +47,13 @@ import pegasus.real_data as real_data
 from pegasus.data import load_aware, model_inputs
 from pegasus.evaluation import METHOD_COLORS, fit_services, pegasus_bound
 from pegasus.figures import METHOD_STYLES
-from pegasus.real_data import BENCHMARKS_V2, CAMPAIGN, CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, b4_chain_data, run_table
+from pegasus.real_data import CAMPAIGN, b4_chain_data, run_table, worker_benchmark_pool
 from pegasus.service_gp import configurations_of, run_statistics_belief
 
-EXTENDED = "benchmark+all-chains"   # training_campaign of real_chain_data under extended_training
-B4_EXCLUDED = ("b1-vision-1-single", "b1u-vision-1", "b1u2-vision-1")   # the chain of B.4 in B.1 and its two measurements with workers
+EXTENDED = "benchmark-workers"   # training_campaign of real_chain_data under extended_training: the worker benchmarks
 VARIANT = "Pegasus Node (load-aware)"
 ABLATION = "Pegasus Node, more data"
-N_TRAIN = None   # every run of the extended pool, in a random order (seed)
+N_TRAIN = None   # every run of the worker benchmarks, in a random order (seed)
 CACHE = CAMPAIGN.parent / "load_aware_b4"   # statics/load_aware_b4/
 
 _original = dict(training_pool=real_data.training_pool, training_exclusion=real_data.training_exclusion, campaign_nodes=real_data.campaign_nodes)
@@ -71,45 +72,26 @@ def _campaign_nodes(campaign: Path = CAMPAIGN) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def chain_family(experiment: str) -> tuple:
-    """The experiments that measured the evaluated chain, which no training run may come from: the chain in
-    CAMPAIGN_V2 (`b1-<application>-<i>-single`) and its two measurements in CHAINS_UNTHROTTLED_V2 (`b1u-...`,
-    `b1u2-...`). Every other experiment (the chain of B.4 in B4_V2) has B4_EXCLUDED, the family of the chain of B.4."""
-    for prefix, suffix in (("b1-", "-single"), ("b1u-", ""), ("b1u2-", "")):
-        if experiment.startswith(prefix) and experiment.endswith(suffix):
-            name = experiment[len(prefix):len(experiment) - len(suffix)]
-            return (f"b1-{name}-single", f"b1u-{name}", f"b1u2-{name}")
-    return B4_EXCLUDED
-
-
 @lru_cache(maxsize=None)
-def _all_runs(service: str, sources: tuple) -> pd.DataFrame:
-    """Every training run of `service`: its benchmark, then its runs in the chains of CAMPAIGN_V2 and
-    CHAINS_UNTHROTTLED_V2 (rows of training_pool); built once per service, because every chain filters the same pool."""
-    return pd.concat([_original["training_pool"](service, sources=sources, campaign=campaign) for campaign in (BENCHMARKS_V2, CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2)],
-                     ignore_index=True)
-
-
-def extended_pool(service: str, sources: tuple = ("alone", "pipeline"), excluded: tuple = B4_EXCLUDED) -> pd.DataFrame:
-    """Training runs of `service` for an evaluated chain: _all_runs without the experiments `excluded` (chain_family of
-    the chain)."""
-    pool = _all_runs(service, tuple(sources))
-    return pool[~pool["experiment"].isin(excluded)].reset_index(drop=True)
+def extended_pool(service: str, sources: tuple = ("alone", "pipeline")) -> pd.DataFrame:
+    """Training runs of `service` for every evaluated chain: its benchmark runs with one to four workers
+    (worker_benchmark_pool); built once per service, because every chain uses the same pool."""
+    return worker_benchmark_pool(service, sources)
 
 
 @contextmanager
 def extended_training():
-    """Within the block, real_chain_data(..., training_campaign=EXTENDED) trains every service on extended_pool, without
-    the runs of the evaluated chain (chain_family). A combined chain (b1-...+b1u-max<k>) is loaded part by part, and both
-    parts have the same family, so they get the same training data, as join_chain_data requires."""
+    """Within the block, real_chain_data(..., training_campaign=EXTENDED) trains every service on extended_pool, which
+    holds no run of a chain. A combined chain (b1-...+b1u-max<k>) is loaded part by part, and both parts get the same
+    training data, as join_chain_data requires."""
     def training_exclusion(experiment, training_campaign=None):
         if training_campaign == EXTENDED:
-            return dict(campaign=EXTENDED, exclude_experiment=chain_family(experiment))
+            return dict(campaign=EXTENDED)
         return _original["training_exclusion"](experiment, training_campaign)
 
     def training_pool(service, exclude_pipeline=None, sources=("alone", "pipeline"), campaign=CAMPAIGN, exclude_experiment=None):
         if campaign == EXTENDED:
-            return extended_pool(service, tuple(sources), exclude_experiment)
+            return extended_pool(service, tuple(sources))
         return _original["training_pool"](service, exclude_pipeline, sources, campaign, exclude_experiment)
 
     patched = dict(training_pool=training_pool, training_exclusion=training_exclusion, campaign_nodes=_campaign_nodes)
@@ -169,7 +151,7 @@ def sweep_bounds(sweep: str, settings: list, seeds: list, seed: int, alpha: floa
                  b4_max_workers: int, base_options: dict) -> dict:
     """The variant and the ablation on every setting of one sweep of B.4 ("load" or "arrivals") and every seed:
     (setting, seed) -> dict(bounds=name -> latency per held-out run (s), measured, measured_low). The data of a setting
-    is that of 2c_load.ipynb (b4_chain_data with seed [seed, s]) with the extended training pool. The GPs of a seed are
+    is that of 2c_load.ipynb (b4_chain_data with seed [seed, s]) with the worker benchmarks as training pool. The GPs of a seed are
     fitted once, on the data of the first setting, and every later setting checks that its training data is the same;
     the beliefs are recomputed at every setting's held-out runs (beliefs_at), because the variant's inputs contain
     the arrival rate of the run. The bound is pegasus_bound on the original data, so that it reads the workers of

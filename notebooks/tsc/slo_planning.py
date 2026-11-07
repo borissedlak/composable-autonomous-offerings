@@ -18,11 +18,10 @@ A scenario poses one to three of these as constraints (max workers, max latency,
 the solver optimizes among the configurations that meet them (min cost, min latency or max quality). Ties of the goal
 are broken by the other two dimensions with a small weight (TIE_WEIGHT).
 
-Prediction. The models of every composition are those of B.1: every service is trained on its benchmark and on its
-runs in the other chains, without any run of the composition itself (chain_family in load_aware_b4.py), so that a
-composition is planned as if it had never run. Pegasus Node bounds every service on its own (with the external
-arrival rate and epsilon = alpha / K for K services), so the end-to-end bound is the sum of the node bounds plus the
-handover time. A node bound depends only on the knobs of its own service: `composition` computes it once on the grid
+Prediction. The models of every composition are those of B.1: every service is trained on its benchmarks with one to
+four workers (worker_benchmark_pool in pegasus/real_data.py), without any run of a chain, so that a composition is
+planned as if it had never run. Pegasus Node bounds every service on its own (with the external
+arrival rate and epsilon = alpha / K for K services), so the end-to-end bound is the sum of the node bounds. A node bound depends only on the knobs of its own service: `composition` computes it once on the grid
 of every service's knobs, and the bound of any configuration of the composition is a sum of table entries.
 
 Solver. As in the RASK paper (SummerSOC, agent/components/Optimizer_v2.py): SLSQP (scipy.optimize.minimize) on the
@@ -55,7 +54,8 @@ from pegasus.evaluation_setup import alpha, confidence, coverage_check, seed
 from pegasus.service_gp import run_statistics_belief
 
 APPLICATIONS = {app: [f"b1u-{app}-{i}" for i in range(1, 6)] for app in ("vision", "audio", "lidar")}
-CACHE = real_data.CAMPAIGN.parent / "slo_planning"     # statics/slo_planning/: fitted models (joblib) and the plans (csv)
+CACHE = real_data.CAMPAIGN.parent / "cache" / "slo_planning"   # statics/cache/slo_planning/: the fitted models of every composition (joblib)
+PLANS = real_data.CAMPAIGN.parent / "slo_planning"             # statics/slo_planning/: the plans to deploy (csv)
 RESTARTS = 10              # SLSQP starting points per composition, as run_optimizer_multi of the RASK paper
 OVERLOAD_LATENCY = 10.0    # s; latency that the continuous relaxation gives an overloaded node, so that SLSQP moves away from it
 TIE_WEIGHT = 1e-3          # weight of the two other dimensions in the objective, which only breaks ties of the goal
@@ -112,7 +112,6 @@ class Composition:
     model_nodes: list                  # nodes with a model_size knob
     models: np.ndarray                 # grid of the model size
     tables: dict = field(repr=False)   # node -> node bound (s), shape (qualities, workers[, models]); inf if overloaded
-    handover: float = 0.0              # s, added to every end-to-end bound
     extrapolated: list = field(default_factory=list)   # nodes whose training runs never had the arrival rate `rate`
 
     @property
@@ -126,7 +125,7 @@ class Composition:
     def latency(self, q_index: np.ndarray, w_index: np.ndarray, m_index: np.ndarray) -> np.ndarray:
         """End-to-end bound (s) at grid configurations given by grid indices: q_index (n,), w_index (n, nodes),
         m_index (n, model nodes)."""
-        total = np.full(len(q_index), self.handover)
+        total = np.zeros(len(q_index))
         for k, node in enumerate(self.path):
             table = self.tables[node]
             if node in self.model_nodes:
@@ -147,8 +146,8 @@ def _cache_file(experiment: str, model_seed: int) -> Path:
 
 
 def fit_composition(experiment: str, model_seed: int = seed, refresh: bool = False) -> dict:
-    """The load-aware models of every service of a composition (as in B.1, without any run of the composition), its
-    path, the input names of every service and the handover time; cached in CACHE (about a minute per composition)."""
+    """The load-aware models of every service of a composition (as in B.1, without any run of a chain), its
+    path and the input names of every service; cached in CACHE (about a minute per composition)."""
     file = _cache_file(experiment, model_seed)
     if file.exists() and not refresh:
         return joblib.load(file)
@@ -158,7 +157,7 @@ def fit_composition(experiment: str, model_seed: int = seed, refresh: bool = Fal
         names = real_data.feature_names(experiment, la.EXTENDED)
     aware = la.load_aware(data)
     models = fit_services(aware, aware.x_train, data.y_train, model_seed=model_seed, confidence=confidence, with_dnn=False)
-    fitted = dict(path=list(data.path), services=real_data.chain_path(experiment)[1], names=names, gp=models["gp"], handover=data.handover,
+    fitted = dict(path=list(data.path), services=real_data.chain_path(experiment)[1], names=names, gp=models["gp"],
                   log_rates={node: (data.x_train_load[node][:, -1].min(), data.x_train_load[node][:, -1].max()) for node in data.path})
     CACHE.mkdir(parents=True, exist_ok=True)
     joblib.dump(fitted, file)
@@ -189,7 +188,7 @@ def composition(experiment: str, rate: float, model_seed: int = seed, refresh: b
         mean, var = run_statistics_belief(fitted["gp"][node], x, confidence)
         bound = martingale_closed_form_node_bound(mean, var, "poisson", rate, epsilon, workers=grid[:, 1].astype(int))
         tables[node] = np.asarray(bound, dtype=float).reshape([len(a) for a in axes])
-    return Composition(experiment, path, fitted["services"], rate, qualities, workers, model_nodes, models, tables, fitted["handover"], extrapolated)
+    return Composition(experiment, path, fitted["services"], rate, qualities, workers, model_nodes, models, tables, extrapolated)
 
 
 # ------------------------------------------------------------------------------
@@ -256,7 +255,7 @@ def _relaxation(comp: Composition):
 
     def latency(x: np.ndarray) -> float:
         x = np.clip(x, 0, 1)
-        total = comp.handover
+        total = 0.0
         for k, node in enumerate(comp.path):
             point = [x[0], x[1 + k]] + ([x[1 + len(comp.path) + comp.model_nodes.index(node)]] if node in comp.model_nodes else [])
             total += float(interpolators[node](point)[0])

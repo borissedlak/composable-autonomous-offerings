@@ -10,6 +10,8 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ConstantKernel as C, Matern, WhiteKernel
 from sklearn.preprocessing import StandardScaler
 
+from .model_cache import cached_model
+
 
 class ScaledGPRegressor:
     """
@@ -79,7 +81,8 @@ def train_gp_models(X_train, y_train_dict: dict, service_names: list, min_length
     n_restarts_optimizer: restarts of the hyperparameter search from random starting points.
     ard: one length scale per input (automatic relevance determination), so that the hyperparameter search can give an
     input that does not matter a long length scale; with ard=False, one length scale for all inputs (the model of the
-    results before 2026-10-14; explain_7 and Section 2 of explain_8 compare the two)."""
+    results before 2026-10-14; explain_7 and Section 2 of explain_8 compare the two).
+    Every GP is fitted once per training data and parameters and then read from the shared model cache (model_cache.py)."""
     models = {}
     length_scale_bounds = (1e-5, 1e5) if min_length_scale is None else (min_length_scale, 1e5)
     for name in service_names:
@@ -89,9 +92,12 @@ def train_gp_models(X_train, y_train_dict: dict, service_names: list, min_length
             WhiteKernel(noise_level=1e-3, noise_level_bounds=(1e-5, 1e-1))
         )
 
-        model = ScaledGPRegressor(kernel=kernel, n_restarts_optimizer=n_restarts_optimizer, random_state=42)
-        model.fit(x, y_train_dict[name])
-        models[name] = model
+        def fit(x=x, y=y_train_dict[name], kernel=kernel):
+            model = ScaledGPRegressor(kernel=kernel, n_restarts_optimizer=n_restarts_optimizer, random_state=42)
+            model.fit(x, y)
+            return model
+
+        models[name], _ = cached_model("gp", (x, y_train_dict[name]), fit, params=(min_length_scale, n_restarts_optimizer, ard))
 
     return models
 
