@@ -842,7 +842,7 @@ def uncertainty_figure(uncertainty: dict, chain_pegasus: dict, services: list, t
 SLOWDOWN_SERVICES = {   # service type -> (label, color, marker, line style); the services of the trees of B.3, distinct in grayscale
     "cv-analyzer:v2": ("object detector (leaf)", "#4477AA", "o", "-"),
     "face-detector:v2": ("face detector (leaf)", "#CC6677", "s", "--"),
-    "image-transformer:v1": ("image transformer (aggregator)", "#DDAA33", "^", "-."),
+    "image-transformer:v1": ("transform (aggregator)", "#DDAA33", "^", "-."),
 }
 CONCURRENCY_BINS = (0, 1, 2, 4, 8, 12, 16, 24, 32, 48)   # bins of the concurrency c for the medians of slowdown_figure
 
@@ -908,16 +908,19 @@ def slowdown_bins(slowdowns, quantiles: tuple = (0.1, 0.5, 0.9), min_size: int =
     return table[table["size"] >= min_size].reset_index()
 
 
-def slowdown_figure(slowdowns, height_marks: dict = None, name: str = None) -> None:
+def slowdown_figure(slowdowns, height_marks: dict = None, name: str = None, mark_prefix: str = "") -> None:
     """Slowdown of the services in the trees against the concurrency they saw (tree_slowdowns): per service type the
     median slowdown in every bin of the concurrency (slowdown_bins), at the median concurrency of the bin, with the band
     from the 10th to the 90th percentile; the line at 1 is the speed of the benchmark. height_marks: label -> concurrency,
-    drawn as thin vertical lines (e.g. the median concurrency of every height of a tree set). name: file in figures/tsc/experimental-results."""
+    drawn as thin vertical lines (e.g. the median concurrency of every height of a tree set). name: file in figures/tsc/experimental-results.
+    Half width (half_figure "left", the size of the left panel of B.4), so that it fits one column beside another half figure.
+    mark_prefix: written once, left of the first vertical line (e.g. "h=" before the labels "3", "4", ...), because the
+    lines stand too close in the half-width panel for a prefix in every label."""
     from matplotlib.lines import Line2D
-    from .figures import BAND_ALPHA, legend_inside, paper_figure, paper_style, save_figure
+    from .figures import BAND_ALPHA, half_figure, legend_inside, paper_style, save_figure
     table = slowdown_bins(slowdowns)
     with paper_style():
-        fig, ax = paper_figure()
+        fig, ax = half_figure("left")
         handles, labels, segments = [], [], []
         for service, (label, color, marker, style) in SLOWDOWN_SERVICES.items():
             rows = table[table["service"] == service].sort_values("concurrency")
@@ -928,19 +931,27 @@ def slowdown_figure(slowdowns, height_marks: dict = None, name: str = None) -> N
             handles.append(Line2D([], [], color=color, marker=marker, linestyle=style, linewidth=2))
             labels.append(label)
             segments += list(zip(rows["concurrency"], rows["q10"], rows["q90"]))
-        ax.axhline(1, color="black", linewidth=0.8)
-        handles.append(Line2D([], [], color="black", linewidth=0.8))
-        labels.append("speed in the benchmark")
-        top = max(2.0, float(table["q90"].max()) * 1.05)
-        ax.set_ylim(0.9, top)
+        # ax.axhline(1, color="black", linewidth=0.8)   # the speed of the benchmark, without a legend entry: the axis says "vs. benchmark"
+        # headroom above the highest band for the legend, which takes a larger share of the height in the half-width panel
+        top = max(2.0, float(table["q90"].max()) * 1.3)
+        ax.set_ylim(0.85, top)   # a strip below the line at 1 for the labels of height_marks, clear of the markers on that line
         for mark, concurrency in (height_marks or {}).items():
             ax.axvline(concurrency, color="0.5", linewidth=0.8, linestyle=":")
-            ax.text(concurrency, 0.92, f" {mark}", color="0.35", fontsize=10, ha="left", va="bottom")
-        ax.set_xlim(-1, 1.1 * float(table["concurrency"].max()) + 1)   # up to the largest bin, not to the empty end of the last one
+            # a small font and a fixed offset of 1 pt instead of a leading space, so that the labels of close lines do not overlap
+            ax.annotate(mark, (concurrency, 0.86), xytext=(1, 0), textcoords="offset points", color="0.35", fontsize=9, ha="left", va="bottom")
+        if mark_prefix and height_marks:
+            ax.annotate(mark_prefix, (min(height_marks.values()), 0.86), xytext=(-1, 0), textcoords="offset points", color="0.35",
+                        fontsize=9, ha="right", va="bottom")
+        # up to the last point of the lines, not to the empty end of the last bin; the margins of 3% and 5% of the axis keep
+        # the first and the last marker whole
+        largest = float(table["concurrency"].max())
+        ax.set_xlim(-0.03 * largest, 1.05 * largest)
         ax.set_xlabel("concurrent services")
         ax.set_ylabel("slowdown vs. benchmark")
         ax.grid(True, linestyle=":", alpha=0.6)
-        legend_inside(ax, handles, labels, segments, locations=("upper left", "upper center"), max_doublings=0, fontsize=10)
+        # a narrower legend (shorter handles, one column) for the half-width panel, in the font size of the full-width figures
+        legend_inside(ax, handles, labels, segments, locations=("upper left", "upper center"), max_doublings=0, ncol=1, fontsize=10,
+                      framealpha=0.95, handlelength=1.6, handletextpad=0.4, labelspacing=0.3, borderaxespad=0.3)
         if name is not None:
             save_figure(fig, name)
         plt.show()
