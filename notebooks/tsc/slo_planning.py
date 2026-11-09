@@ -57,7 +57,9 @@ from pegasus.evaluation_setup import alpha, confidence, coverage_check, seed
 from pegasus.service_gp import run_statistics_belief
 
 APPLICATIONS = {app: [f"b1u-{app}-{i}" for i in range(1, 6)] for app in ("vision", "audio", "lidar")}
-QUALITY_UNITS = dict(vision="image width (px)", audio="clip length (s)", lidar="point cloud radius (m)")   # meaning of q
+QUALITY_UNITS = dict(vision="image width (px)", audio="clip length (s)", lidar="point cloud rad. (m)")   # meaning of q
+QUALITY_SHORT = dict(vision="px", audio="s", lidar="m")   # its unit
+THIRD_MARGINS = (0.50, 0.025, 0.04)   # inches: below (tick labels and x label), above and right of the plot area of a third-width figure
 CORE_HEADROOM = 0.5        # cores per service = workers + CORE_HEADROOM, the rule of the campaign runs (knob <node>.cores)
 CACHE = real_data.CAMPAIGN.parent / "cache" / "slo_planning"   # statics/cache/slo_planning/: the fitted models of every composition (joblib)
 PLANS = real_data.CAMPAIGN.parent / "slo_planning"             # statics/slo_planning/: the plans to deploy (csv)
@@ -142,6 +144,7 @@ class Composition:
     models: np.ndarray                 # grid of the model size
     tables: dict = field(repr=False)   # node -> node bound (s), shape (qualities, workers[, models]); inf if overloaded
     extrapolated: list = field(default_factory=list)   # nodes whose training runs never had the arrival rate `rate`
+    q_range: dict = field(default_factory=dict)        # node -> (smallest, largest) data quality of its training runs, any model size
 
     @property
     def label(self) -> str:
@@ -228,7 +231,8 @@ def composition(experiment: str, rate: float, model_seed: int = seed, refresh: b
         mean, var = run_statistics_belief(fitted["gp"][node], x, confidence)
         bound = martingale_closed_form_node_bound(mean, var, "poisson", rate, epsilon, workers=grid[:, 1].astype(int))
         tables[node] = np.asarray(bound, dtype=float).reshape([len(a) for a in axes])
-    return Composition(experiment, path, fitted["services"], rate, qualities, workers, model_nodes, models, tables, extrapolated)
+    q_range = {node: (lambda q: (q.min(), q.max()))(la.extended_pool(fitted["services"][node])["data_quality"]) for node in path}
+    return Composition(experiment, path, fitted["services"], rate, qualities, workers, model_nodes, models, tables, extrapolated, q_range)
 
 
 # ------------------------------------------------------------------------------
@@ -479,19 +483,33 @@ def solver_agreement(slsqp: dict, exhaustive: dict, seconds: dict) -> pd.DataFra
 
 
 def _tradeoff_panel(ax, scenario: Scenario, comps: list, chosen: pd.Series, app: str, worker_budget: int, colors: dict, markers: dict,
-                    measurement: tuple = None) -> None:
+                    measurement: tuple = None, single: bool = False, third: bool = False) -> None:
     """One panel of `tradeoff_figure`: scenario, its compositions `comps` at its rate, its plan row `chosen`. measurement:
     (data quality, predicted bound, measured p95, measured p99), all of one earlier deployment, drawn at its data quality (ms)
-    or None."""
+    or None; with a predicted bound of None only the measurement. single: the panel is a figure of its own (larger fonts, no
+    title, which the caption gives). third: for a figure one third of the usual width: short x label, a legend of the compositions
+    only (the measurement and the extrapolated stretch are explained in the text)."""
+    small, big = (9, 12) if single else (8, 10)
     budget = scenario.max_workers if scenario.max_workers is not None else worker_budget
+    extrapolated_q = False
     for comp in comps:
         if not provides(comp, scenario.requires):
             continue
         metrics = grid_metrics(comp, all_grid_indices(comp))
         within = (metrics["cost"] <= budget) & (metrics["model"] >= (scenario.min_model or 0))
         best = np.array([np.min(metrics["latency"][within & (metrics["quality"] == q)], initial=np.inf) for q in comp.qualities])
-        ax.plot(comp.qualities, 1e3 * np.where(np.isfinite(best), best, np.nan), marker=markers[comp.experiment], markersize=3,
-                linewidth=1.5, color=colors[comp.experiment], label=comp.label)
+        y = 1e3 * np.where(np.isfinite(best), best, np.nan)
+        # a quality outside the training runs of any service of the composition: its GP extrapolates the quality input
+        outside = np.array([any(not lo <= q <= hi for lo, hi in comp.q_range.values()) for q in comp.qualities])
+        near = outside.copy()   # the dashed stretch also reaches the neighboring trained point, so that it joins the solid line
+        near[1:] |= outside[:-1]
+        near[:-1] |= outside[1:]
+        ax.plot(comp.qualities, np.where(~outside, y, np.nan), marker=markers[comp.experiment], markersize=3, linewidth=1.5,
+                color=colors[comp.experiment], label=comp.label)
+        ax.plot(comp.qualities, np.where(near, y, np.nan), linewidth=1.5, linestyle="--", color=colors[comp.experiment])
+        ax.plot(comp.qualities, np.where(outside, y, np.nan), marker=markers[comp.experiment], markersize=3, linestyle="none",
+                color=colors[comp.experiment], markerfacecolor="white")
+        extrapolated_q = extrapolated_q or bool(outside.any())
     if scenario.max_latency is not None:
         ax.axhline(1e3 * scenario.max_latency, color="black", linestyle="--", linewidth=1)
     if scenario.min_quality is not None:
@@ -500,19 +518,28 @@ def _tradeoff_panel(ax, scenario: Scenario, comps: list, chosen: pd.Series, app:
         ax.plot(chosen["data_quality"], chosen["latency_ms"], marker="*", markersize=14, color=colors[chosen["composition"]],
                 markerfacecolor=colors[chosen["composition"]] if chosen["feasible"] else "white",
                 markeredgecolor="black", linestyle="none", zorder=5)
-        ax.annotate(f"{int(chosen['workers'])}w", (chosen["data_quality"], chosen["latency_ms"]), textcoords="offset points",
-                    xytext=(0, 9), ha="center", fontsize=10)
+        note = ax.annotate(f"{int(chosen['workers'])}w", (chosen["data_quality"], chosen["latency_ms"]), textcoords="offset points",
+                           xytext=(0, 9), ha="center", fontsize=big)
+        low, high = ax.get_xlim()
+        if single and chosen["data_quality"] > high - 0.08 * (high - low):
+            note.set_ha("right")   # a star near the right edge: its label would reach beyond the figure
+            note.xyann = (5, 9)
     if measurement is not None:
         q, bound, p95, p99 = measurement
-        ax.plot(q, bound, marker="D", markersize=6, markerfacecolor="white", markeredgecolor="black", linestyle="none", zorder=6,
-                label="bound, current models")
+        if bound is not None:
+            ax.plot(q, bound, marker="D", markersize=6, markerfacecolor="white", markeredgecolor="black", linestyle="none", zorder=6,
+                    label=None if third else "bound, current models")
         ax.plot([q, q], [p95, p99], color="black", linewidth=1.5, marker="_", markersize=6, zorder=6)   # not errorbar: its 0 lower error stretches a log axis
-        ax.plot(q, p95, marker="o", markersize=5, color="black", linestyle="none", zorder=6, label="measured p95 (bar to p99)")
-    ax.set_title(f"{scenario.short}, {scenario.rate:g}/s, ≤ {budget} w", fontsize=11)
+        ax.plot(q, p95, marker="o", markersize=5, color="black", linestyle="none", zorder=6, label=None if third else "measured p95 (bar to p99)")
+    if extrapolated_q and not third:
+        ax.plot([], [], color="gray", linestyle="--", marker="o", markersize=3, markerfacecolor="white", label="extrapolated")
+    if not single:
+        ax.set_title(f"{scenario.short}, {scenario.rate:g}/s, ≤ {budget} w", fontsize=11)
     ax.set_yscale("log")
-    ax.set_xlabel(f"q, {QUALITY_UNITS[app]}", fontsize=10)
+    ax.set_xlabel(QUALITY_UNITS[app], fontsize=big)   # the meaning and the unit of q, also in the narrow figures
     ax.grid(True, linestyle=":", alpha=0.6)
-    ax.legend(fontsize=8, loc="best", framealpha=0.95)
+    ax.legend(fontsize=small if single else 8, loc="best", framealpha=0.95,
+              **(dict(handlelength=1.0, labelspacing=0.2, borderpad=0.3, borderaxespad=0.3) if third else {}))
 
 
 def _testbed_panel(ax, scenario: Scenario, latency: np.ndarray, bound: float) -> None:
@@ -571,7 +598,8 @@ def tradeoff_figure(comps: dict, plans: dict, scenarios: list, app: str, worker_
     scenario's arrival rate; plans: (app, scenario name) -> plan table). In a panel, one line per composition that
     provides the scenario's capabilities: the smallest Pegasus bound on the p95 end-to-end latency (ms, log scale) over
     its configurations within the scenario's worker limit (worker_budget if it has none) and its model constraint, at
-    every data quality (x axis); a gap where no such configuration has a finite bound. Dashed lines: the scenario's
+    every data quality (x axis); a gap where no such configuration has a finite bound; dashed with hollow markers where the
+    data quality lies outside the training runs of a service of the composition (`Composition.q_range`). Dashed lines: the scenario's
     latency and quality constraints. Star: the plan, labeled with its total workers (hollow: best effort, no configuration
     meets the SLOs). measured, deployed (testbed requests and plans of an earlier deployment, see `measured_c2`): also a
     diamond (the bound that the current models give that deployment's configuration) and a dot with a bar from the measured p95 to the measured p99 (ms), at its data
@@ -585,6 +613,59 @@ def tradeoff_figure(comps: dict, plans: dict, scenarios: list, app: str, worker_
             _tradeoff_panel(ax, scenario, comps[scenario.name], plans[(app, scenario.name)].iloc[0], app, worker_budget, colors, markers,
                             None if measured is None else _measurement(scenario, comps[scenario.name], measured, deployed))
         axes[0].set_ylabel("p95 bound (ms)")
+        if name is not None:
+            save_figure(fig, name)
+        plt.show()
+
+
+def _short_log_ticks(axis) -> None:
+    """Tick labels of a logarithmic axis as plain numbers, thousands as 1k, 10k (like `pegasus.figures.plain_log_ticks`,
+    narrower), at the ticks that matplotlib labels anyway."""
+    from matplotlib.ticker import LogFormatterSciNotation
+
+    class Short(LogFormatterSciNotation):
+        def __call__(self, x, pos=None):
+            if not super().__call__(x, pos):
+                return ""
+            return f"{x / 1000:g}k" if x >= 1000 else f"{x:g}"
+    axis.set_major_formatter(Short())
+    axis.set_minor_formatter(Short(labelOnlyBase=False, minor_thresholds=(1, 0.4)))
+
+
+def tradeoff_panel_figure(comps: list, plan: pd.Series, scenario: Scenario, app: str, worker_budget: int, measured: dict = None,
+                          deployed: pd.DataFrame = None, show_bound: bool = True, third: bool = False, ylabel: bool = True,
+                          name: str = None) -> None:
+    """One panel of `tradeoff_figure` as a figure of its own, at the size of every evaluation figure (comps: the five
+    compositions at the scenario's rate; plan: its plan row). measured, deployed: the measurement of the deployed plan as in
+    `tradeoff_figure`; show_bound False: without the diamond, for a deployed configuration that is the plan (the star is then
+    its bound). third: exactly one third of the width of an evaluation figure and its height, so that three of them stand side
+    by side in the width of one (the left margin shrinks to the labels of the vertical axis, whose ticks are short: 1k).
+    ylabel False: without the axis label, which the first of the figures gives for all. name: file name in
+    figures/tsc/experimental-results, or None."""
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import MaxNLocator
+    from pegasus.figures import FIGSIZE, paper_figure, paper_style, plain_log_ticks, save_figure
+    colors, markers = _trade_colors({scenario.name: comps})
+    measurement = None if measured is None else _measurement(scenario, comps, measured, deployed)
+    if measurement is not None and not show_bound:
+        measurement = (measurement[0], None, measurement[2], measurement[3])
+    with paper_style():
+        if third:
+            width, height = FIGSIZE[0] / 3, FIGSIZE[1]
+            bottom, top, right = THIRD_MARGINS
+            fig = plt.figure(figsize=(width, height))
+            ax = fig.add_axes((0.5 / width, bottom / height, 1 - (0.5 + right) / width, 1 - (bottom + top) / height))
+        else:
+            fig, ax = paper_figure()
+        _tradeoff_panel(ax, scenario, comps, plan, app, worker_budget, colors, markers, measurement, single=True, third=third)
+        if ylabel:
+            ax.set_ylabel("bound (ms)" if third else "p95 bound (ms)")
+        (_short_log_ticks if third else plain_log_ticks)(ax.yaxis)
+        if third:
+            ax.xaxis.set_major_locator(MaxNLocator(4, prune="upper"))
+            fig.canvas.draw()
+            left = (ax.bbox.x0 - ax.yaxis.get_tightbbox(fig.canvas.get_renderer()).x0) / fig.dpi + 0.005   # the labels of the vertical axis, no more
+            ax.set_position((left / width, bottom / height, 1 - (left + right) / width, 1 - (bottom + top) / height))
         if name is not None:
             save_figure(fig, name)
         plt.show()
