@@ -27,13 +27,12 @@ planned as if it had never run. Pegasus Node bounds every service on its own (wi
 arrival rate and epsilon = alpha / K for K services), so the end-to-end bound is the sum of the node bounds. A node bound depends only on the knobs of its own service: `composition` computes it once on the grid
 of every service's knobs, and the bound of any configuration of the composition is a sum of table entries.
 
-Solver. As in the RASK paper (SummerSOC, agent/components/Optimizer_v2.py): SLSQP (scipy.optimize.minimize) on the
-knobs normalized to [0, 1], restarted from RESTARTS random points per composition. SLSQP needs continuous knobs: the
-node bounds are linearly interpolated between the grid points, and an overloaded node (no finite bound) gets
-OVERLOAD_LATENCY instead. Every SLSQP solution is rounded to the grid and repaired: among the grid configurations
-within one grid step of it in every knob, the best that meets the constraints is kept. The plan is the best
-composition. Solver "exhaustive" enumerates every grid configuration of every composition instead, as a reference that
-tells whether SLSQP found the optimum of the grid.
+Solver. The default is the exhaustive search: it enumerates every grid configuration of every composition and keeps the
+best that meets the constraints (the grids are small enough, and the bounds are table lookups). The solver of the RASK
+paper (SummerSOC, agent/components/Optimizer_v2.py) is kept but not used by the notebook: solver "slsqp" runs SLSQP
+(scipy.optimize.minimize) on the knobs normalized to [0, 1], restarted from RESTARTS random points per composition, with
+the node bounds linearly interpolated between the grid points (an overloaded node gets OVERLOAD_LATENCY) and every
+solution rounded to the grid and repaired within one grid step per knob.
 
 Units: latencies in seconds, rates in items/s.
 """
@@ -395,7 +394,7 @@ def provides(comp: Composition, capabilities: tuple) -> bool:
     return all(CAPABILITIES[capability] in images for capability in capabilities)
 
 
-def plan(comps: list, scenario: Scenario, scales: Scales, solver: str = "slsqp", rng: np.random.Generator = None) -> pd.DataFrame:
+def plan(comps: list, scenario: Scenario, scales: Scales, solver: str = "exhaustive", rng: np.random.Generator = None) -> pd.DataFrame:
     """The best configuration of every composition for a scenario (one row each; feasible False where none meets the
     SLOs), sorted by the objective: the first row is the plan."""
     rows = []
