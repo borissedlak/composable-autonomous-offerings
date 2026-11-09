@@ -41,6 +41,7 @@ import itertools
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 
 import joblib
 import numpy as np
@@ -336,6 +337,20 @@ def _best_of(comp: Composition, scenario: Scenario, scales: Scales, indices: np.
     return dict(objective=float(values[k]), indices=indices[k], **{name: metric[k] for name, metric in metrics.items()})
 
 
+def _closest_of(comp: Composition, scenario: Scenario, indices: np.ndarray):
+    """The best-effort configuration of a scenario that no configuration meets: among the grid configurations that meet every
+    constraint except the latency limit and have a finite bound, the one with the smallest bound (the closest to the limit),
+    or None. Its `objective` is that bound (s)."""
+    metrics = grid_metrics(comp, indices)
+    without_latency_limit = SimpleNamespace(max_workers=scenario.max_workers, max_latency=None, min_quality=scenario.min_quality,
+                                            min_model=scenario.min_model)   # not replace(): a Scenario checks its weights against the free dimensions
+    ok = feasible(without_latency_limit, **metrics)
+    if not ok.any():
+        return None
+    k = int(np.flatnonzero(ok)[np.argmin(metrics["latency"][ok])])
+    return dict(objective=float(metrics["latency"][k]), indices=indices[k], **{name: metric[k] for name, metric in metrics.items()})
+
+
 def slsqp_composition(comp: Composition, scenario: Scenario, scales: Scales, rng: np.random.Generator, restarts: int = RESTARTS) -> dict:
     """The best configuration of one composition for a scenario: SLSQP on the continuous relaxation from `restarts`
     random starts, every solution rounded to the grid and repaired within one grid step per knob. Returns the best
@@ -397,31 +412,42 @@ def provides(comp: Composition, capabilities: tuple) -> bool:
 
 def plan(comps: list, scenario: Scenario, scales: Scales, solver: str = "exhaustive", rng: np.random.Generator = None) -> pd.DataFrame:
     """The best configuration of every composition for a scenario (one row each; feasible False where none meets the
-    SLOs), sorted by the objective: the first row is the plan."""
-    rows = []
-    for comp in comps:
-        functional = provides(comp, scenario.requires)
-        if not functional:
-            best = None   # the composition lacks a required capability: no configuration can meet the scenario
-        else:
-            best = slsqp_composition(comp, scenario, scales, rng) if solver == "slsqp" else exhaustive_composition(comp, scenario, scales)
-        row = dict(scenario=scenario.name, composition=comp.experiment, services=" → ".join(comp.path), functional=functional,
-                   feasible=best is not None, objective=np.nan)
-        if best is not None:
-            row |= configuration_row(comp, best)
-        rows.append(row)
-    return pd.DataFrame(rows).sort_values(["feasible", "objective"], ascending=[False, True], na_position="last").reset_index(drop=True)
+    SLOs), sorted by the objective: the first row is the plan. If no composition meets the SLOs and the scenario has a
+    latency limit, every composition that provides the required capabilities instead gets its best-effort configuration
+    (`_closest_of`, the smallest predicted bound, feasible False, best_effort True) sorted by that bound, so that the plan
+    is the closest one to the limit."""
+    def rows_of(best_of) -> list:
+        rows = []
+        for comp in comps:
+            functional = provides(comp, scenario.requires)
+            best = best_of(comp) if functional else None   # a composition without a required capability cannot meet the scenario
+            row = dict(scenario=scenario.name, composition=comp.experiment, services=" → ".join(comp.path), functional=functional,
+                       feasible=False, best_effort=False, objective=np.nan)
+            if best is not None:
+                row |= configuration_row(comp, best)
+            rows.append(row)
+        return rows
+    rows = rows_of(lambda comp: slsqp_composition(comp, scenario, scales, rng) if solver == "slsqp" else exhaustive_composition(comp, scenario, scales))
+    for row in rows:
+        row["feasible"] = bool(np.isfinite(row["objective"]))
+    if not any(row["feasible"] for row in rows) and solver != "slsqp" and scenario.max_latency is not None:
+        rows = rows_of(lambda comp: _closest_of(comp, scenario, all_grid_indices(comp)))
+        for row in rows:
+            row["best_effort"] = bool(np.isfinite(row["objective"]))
+    return pd.DataFrame(rows).sort_values(["feasible", "best_effort", "objective"], ascending=[False, False, True], na_position="last").reset_index(drop=True)
 
 
 def deployment_table(plans: dict, rates: dict) -> pd.DataFrame:
     """One row per (application, scenario) with the chosen composition and its configuration in the knob names of the
     campaign (shared.data_quality, <node>.parallelism, <node>.cores = parallelism + CORE_HEADROOM, <node>.model_size),
-    for deploying it on the testbed at the arrival rate of the scenario (rates: scenario name -> items/s)."""
+    for deploying it on the testbed at the arrival rate of the scenario (rates: scenario name -> items/s). feasible: the
+    configuration meets every SLO; best_effort: no configuration does, and this one has the smallest predicted bound."""
     rows = []
     for (app, scenario), table in plans.items():
         chosen = table.iloc[0]
-        row = dict(application=app, scenario=scenario, arrival_rate=rates[scenario], feasible=bool(chosen["feasible"]))
-        if chosen["feasible"]:
+        row = dict(application=app, scenario=scenario, arrival_rate=rates[scenario], feasible=bool(chosen["feasible"]),
+                   best_effort=bool(chosen.get("best_effort", False)))
+        if chosen["feasible"] or row["best_effort"]:
             knobs = {}
             for key, value in chosen.items():
                 if key.endswith(".parallelism") and pd.notna(value):
@@ -458,7 +484,8 @@ def tradeoff_figure(comps: dict, plans: dict, scenarios: list, app: str, worker_
     provides the scenario's capabilities: the smallest Pegasus bound on the p95 end-to-end latency (ms, log scale) over
     its configurations within the scenario's worker limit (worker_budget if it has none) and its model constraint, at
     every data quality (x axis); a gap where no such configuration has a finite bound. Dashed lines: the scenario's
-    latency and quality constraints. Star: the plan, labeled with its total workers. name: file name in figures/tsc/experimental-results,
+    latency and quality constraints. Star: the plan, labeled with its total workers (hollow: best effort, no configuration
+    meets the SLOs). name: file name in figures/tsc/experimental-results,
     or None."""
     import matplotlib.pyplot as plt
     from pegasus.figures import paper_style, save_figure
@@ -482,8 +509,9 @@ def tradeoff_figure(comps: dict, plans: dict, scenarios: list, app: str, worker_
             if scenario.min_quality is not None:
                 ax.axvline(scenario.min_quality, color="black", linestyle="--", linewidth=1)
             chosen = plans[(app, scenario.name)].iloc[0]
-            if chosen["feasible"]:
+            if chosen["feasible"] or chosen.get("best_effort", False):   # hollow star: best effort, no configuration meets the SLOs
                 ax.plot(chosen["data_quality"], chosen["latency_ms"], marker="*", markersize=14, color=colors[chosen["composition"]],
+                        markerfacecolor=colors[chosen["composition"]] if chosen["feasible"] else "white",
                         markeredgecolor="black", linestyle="none", zorder=5)
                 ax.annotate(f"{int(chosen['workers'])}w", (chosen["data_quality"], chosen["latency_ms"]), textcoords="offset points",
                             xytext=(0, 9), ha="center", fontsize=10)
@@ -502,7 +530,7 @@ def tradeoff_figure(comps: dict, plans: dict, scenarios: list, app: str, worker_
 # Testbed runs of the deployed plans
 # ------------------------------------------------------------------------------
 def measured_c2(deployed: pd.DataFrame) -> dict:
-    """The testbed runs of the deployed plans (`deployed`: c2_plans.csv). Returns scenario name -> (latencies, as_planned):
+    """The testbed runs of the deployed plans (`deployed`: c2_plans_old.csv). Returns scenario name -> (latencies, as_planned):
     the end-to-end latency (ms) of every completed request of the scenario's runs, pooled over the runs, and whether the
     deployed configuration (data quality, workers, cores, model sizes, arrival rate in experiment.yaml) is the planned one."""
     import yaml
