@@ -60,6 +60,7 @@ QUALITY_UNITS = dict(vision="image width (px)", audio="clip length (s)", lidar="
 CORE_HEADROOM = 0.5        # cores per service = workers + CORE_HEADROOM, the rule of the campaign runs (knob <node>.cores)
 CACHE = real_data.CAMPAIGN.parent / "cache" / "slo_planning"   # statics/cache/slo_planning/: the fitted models of every composition (joblib)
 PLANS = real_data.CAMPAIGN.parent / "slo_planning"             # statics/slo_planning/: the plans to deploy (csv)
+C2_RESULTS = real_data.CAMPAIGN.parent / "results_milos_v2" / "c2"   # statics/results_milos_v2/c2/: testbed runs of the deployed plans (not committed)
 RESTARTS = 10              # SLSQP starting points per composition, as run_optimizer_multi of the RASK paper
 OVERLOAD_LATENCY = 10.0    # s; latency that the continuous relaxation gives an overloaded node, so that SLSQP moves away from it
 TIE_WEIGHT = 1e-3          # weight of a constrained dimension in the objective, which only breaks ties of the free dimensions
@@ -492,6 +493,84 @@ def tradeoff_figure(comps: dict, plans: dict, scenarios: list, app: str, worker_
             ax.grid(True, linestyle=":", alpha=0.6)
             ax.legend(fontsize=8, loc="best", framealpha=0.95)
         axes[0].set_ylabel("p95 bound (ms)")
+        if name is not None:
+            save_figure(fig, name)
+        plt.show()
+
+
+# ------------------------------------------------------------------------------
+# Testbed runs of the deployed plans
+# ------------------------------------------------------------------------------
+def measured_c2(deployed: pd.DataFrame) -> dict:
+    """The testbed runs of the deployed plans (`deployed`: c2_plans.csv). Returns scenario name -> (latencies, as_planned):
+    the end-to-end latency (ms) of every completed request of the scenario's runs, pooled over the runs, and whether the
+    deployed configuration (data quality, workers, cores, model sizes, arrival rate in experiment.yaml) is the planned one."""
+    import yaml
+    out = {}
+    for _, plan in deployed[deployed["feasible"]].iterrows():
+        sid = plan["scenario"].split()[0].lower()   # "S-V-1 edge box" -> "s-v-1", the prefix of the experiment folder
+        folder = sorted(C2_RESULTS.glob(f"c2-{sid}-*/*/"))[-1]
+        experiment = yaml.safe_load((folder / "experiment.yaml").read_text())
+        ran = {"shared.data_quality": experiment["shared_knobs"]["data_quality"]}
+        for node, spec in experiment["nodes"].items():
+            ran[f"{node}.parallelism"], ran[f"{node}.cores"] = spec["parallelism"], spec["cores"]
+            if "model_size" in spec.get("knobs", {}):
+                ran[f"{node}.model_size"] = spec["knobs"]["model_size"]
+        as_planned = ran == json.loads(plan["knobs"]) and experiment["load"]["rps"] == plan["arrival_rate"]
+        traces = (pd.read_csv(f) for f in sorted(folder.glob("runs/*/traces.csv")))
+        out[plan["scenario"]] = (np.concatenate([t.loc[t["completed"], "total_ms"].to_numpy() for t in traces]), as_planned)
+    return out
+
+
+def testbed_table(deployed: pd.DataFrame, measured: dict, scenarios: dict) -> pd.DataFrame:
+    """One row per deployed scenario at the grain of the requests: their number, the predicted p95 bound (ms), the measured
+    p95 and p99 (ms), the share of requests slower than the bound (%), the tightness bound / measured p95, and the latency
+    SLO of the scenario (ms, if it has one). scenarios: scenario name -> Scenario."""
+    rows = []
+    for _, plan in deployed[deployed["feasible"]].iterrows():
+        latency, as_planned = measured[plan["scenario"]]
+        bound, p95 = plan["predicted_p95_ms"], np.percentile(latency, 95)
+        limit = scenarios[plan["scenario"]].max_latency
+        rows.append(dict(application=plan["application"], scenario=plan["scenario"], requests=len(latency), as_planned=as_planned,
+                         bound_ms=bound, measured_p95_ms=p95, measured_p99_ms=np.percentile(latency, 99),
+                         above_bound_pct=100 * (latency > bound).mean(), tightness=bound / p95,
+                         slo_ms=None if limit is None else 1e3 * limit))
+    return pd.DataFrame(rows)
+
+
+def testbed_figure(measured: dict, deployed: pd.DataFrame, scenarios: list, app: str, name: str = None) -> None:
+    """One figure for an application with one panel per scenario, at the grain of the requests. x axis: end-to-end latency
+    x (ms). y axis (log scale): the share of the scenario's requests that were slower than x (the complementary empirical
+    distribution of all requests of its runs). Horizontal line: the share 0.05 that a p95 bound may leave above it.
+    Solid vertical line: the predicted p95 bound of the deployed plan. Dashed vertical line: the latency SLO, if any.
+    The bound is at least the measured p95 where the vertical line lies right of the crossing of the curve with 0.05.
+    name: file name in figures/tsc/experimental-results, or None."""
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+    from pegasus.figures import paper_style, save_figure
+    with paper_style():
+        fig, axes = plt.subplots(1, len(scenarios), figsize=(3.0 * len(scenarios), 3.3), sharey=True, layout="constrained")
+        for ax, scenario in zip(axes, scenarios):
+            latency = np.sort(measured[scenario.name][0])
+            n = len(latency)
+            bound = float(deployed.loc[deployed["scenario"] == scenario.name, "predicted_p95_ms"].iloc[0])
+            ax.step(latency[:-1], 1 - np.arange(1, n) / n, where="post", color="tab:blue", linewidth=1.5)   # P(latency > x)
+            ax.axhline(0.05, color="black", linewidth=1, linestyle=":")
+            ax.axvline(bound, color="tab:red", linewidth=1.5)
+            if scenario.max_latency is not None:
+                ax.axvline(1e3 * scenario.max_latency, color="black", linestyle="--", linewidth=1)
+            ax.set_xlim(0, 1.05 * max(bound, latency[-1], 1e3 * (scenario.max_latency or 0)))
+            ax.set_yscale("log")
+            ax.set_ylim(0.5 / n, 1)
+            ax.set_title(f"{scenario.short}, {scenario.rate:g}/s", fontsize=11)
+            ax.set_xlabel("latency x (ms)", fontsize=10)
+            ax.grid(True, linestyle=":", alpha=0.6)
+        axes[0].set_ylabel("share of requests slower than x")
+        axes[0].legend(handles=[Line2D([], [], color="tab:blue", linewidth=1.5, label="measured requests"),
+                                Line2D([], [], color="tab:red", linewidth=1.5, label="predicted p95 bound"),
+                                Line2D([], [], color="black", linewidth=1, linestyle="--", label="latency SLO"),
+                                Line2D([], [], color="black", linewidth=1, linestyle=":", label="0.05")],
+                       fontsize=8, loc="lower left", framealpha=0.95)
         if name is not None:
             save_figure(fig, name)
         plt.show()
