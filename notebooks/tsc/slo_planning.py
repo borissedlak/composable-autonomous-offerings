@@ -478,48 +478,112 @@ def solver_agreement(slsqp: dict, exhaustive: dict, seconds: dict) -> pd.DataFra
     return pd.DataFrame(rows)
 
 
-def tradeoff_figure(comps: dict, plans: dict, scenarios: list, app: str, worker_budget: int, name: str = None) -> None:
+def _tradeoff_panel(ax, scenario: Scenario, comps: list, chosen: pd.Series, app: str, worker_budget: int, colors: dict, markers: dict,
+                    measurement: tuple = None) -> None:
+    """One panel of `tradeoff_figure`: scenario, its compositions `comps` at its rate, its plan row `chosen`. measurement:
+    (data quality, predicted bound, measured p95, measured p99), all of one earlier deployment, drawn at its data quality (ms)
+    or None."""
+    budget = scenario.max_workers if scenario.max_workers is not None else worker_budget
+    for comp in comps:
+        if not provides(comp, scenario.requires):
+            continue
+        metrics = grid_metrics(comp, all_grid_indices(comp))
+        within = (metrics["cost"] <= budget) & (metrics["model"] >= (scenario.min_model or 0))
+        best = np.array([np.min(metrics["latency"][within & (metrics["quality"] == q)], initial=np.inf) for q in comp.qualities])
+        ax.plot(comp.qualities, 1e3 * np.where(np.isfinite(best), best, np.nan), marker=markers[comp.experiment], markersize=3,
+                linewidth=1.5, color=colors[comp.experiment], label=comp.label)
+    if scenario.max_latency is not None:
+        ax.axhline(1e3 * scenario.max_latency, color="black", linestyle="--", linewidth=1)
+    if scenario.min_quality is not None:
+        ax.axvline(scenario.min_quality, color="black", linestyle="--", linewidth=1)
+    if chosen["feasible"] or chosen.get("best_effort", False):   # hollow star: best effort, no configuration meets the SLOs
+        ax.plot(chosen["data_quality"], chosen["latency_ms"], marker="*", markersize=14, color=colors[chosen["composition"]],
+                markerfacecolor=colors[chosen["composition"]] if chosen["feasible"] else "white",
+                markeredgecolor="black", linestyle="none", zorder=5)
+        ax.annotate(f"{int(chosen['workers'])}w", (chosen["data_quality"], chosen["latency_ms"]), textcoords="offset points",
+                    xytext=(0, 9), ha="center", fontsize=10)
+    if measurement is not None:
+        q, bound, p95, p99 = measurement
+        ax.plot(q, bound, marker="D", markersize=6, markerfacecolor="white", markeredgecolor="black", linestyle="none", zorder=6,
+                label="bound, current models")
+        ax.plot([q, q], [p95, p99], color="black", linewidth=1.5, marker="_", markersize=6, zorder=6)   # not errorbar: its 0 lower error stretches a log axis
+        ax.plot(q, p95, marker="o", markersize=5, color="black", linestyle="none", zorder=6, label="measured p95 (bar to p99)")
+    ax.set_title(f"{scenario.short}, {scenario.rate:g}/s, ≤ {budget} w", fontsize=11)
+    ax.set_yscale("log")
+    ax.set_xlabel(f"q, {QUALITY_UNITS[app]}", fontsize=10)
+    ax.grid(True, linestyle=":", alpha=0.6)
+    ax.legend(fontsize=8, loc="best", framealpha=0.95)
+
+
+def _testbed_panel(ax, scenario: Scenario, latency: np.ndarray, bound: float) -> None:
+    """One panel of `testbed_figure`: the requests (ms) of a scenario and the predicted bound (ms) of its deployed plan."""
+    latency = np.sort(latency)
+    n = len(latency)
+    ax.step(latency[:-1], 1 - np.arange(1, n) / n, where="post", color="tab:blue", linewidth=1.5)   # P(latency > x)
+    ax.axhline(0.05, color="black", linewidth=1, linestyle=":")
+    ax.axvline(bound, color="tab:red", linewidth=1.5)
+    if scenario.max_latency is not None:
+        ax.axvline(1e3 * scenario.max_latency, color="black", linestyle="--", linewidth=1)
+    ax.set_xlim(0, 1.05 * max(bound, latency[-1], 1e3 * (scenario.max_latency or 0)))
+    ax.set_yscale("log")
+    ax.set_ylim(0.5 / n, 1)
+    ax.set_xlabel("latency x (ms)", fontsize=10)
+    ax.grid(True, linestyle=":", alpha=0.6)
+
+
+def _testbed_legend(ax) -> None:
+    from matplotlib.lines import Line2D
+    ax.legend(handles=[Line2D([], [], color="tab:blue", linewidth=1.5, label="measured requests"),
+                       Line2D([], [], color="tab:red", linewidth=1.5, label="predicted p95 bound"),
+                       Line2D([], [], color="black", linewidth=1, linestyle="--", label="latency SLO"),
+                       Line2D([], [], color="black", linewidth=1, linestyle=":", label="0.05")],
+              fontsize=8, loc="lower left", framealpha=0.95)
+
+
+def bound_of_knobs(comp: Composition, knobs: dict) -> float:
+    """The predicted p95 bound (ms) that the models of `comp` give a configuration in the knob names of the campaign
+    (`knobs` as in the deployment table)."""
+    q = list(comp.qualities).index(knobs["shared.data_quality"])
+    w = [knobs[f"{node}.parallelism"] - 1 for node in comp.path]
+    m = [list(comp.models).index(knobs[f"{node}.model_size"]) for node in comp.model_nodes]
+    return 1e3 * float(grid_metrics(comp, np.array([[q] + w + m]))["latency"][0])
+
+
+def _measurement(scenario: Scenario, comps: list, measured: dict, deployed: pd.DataFrame) -> tuple:
+    """(data quality, bound, measured p95, measured p99) of the deployed plan of a scenario: the bound (ms) is the one that
+    the current models give its configuration, not the one that it was planned with."""
+    row = deployed[deployed["scenario"] == scenario.name].iloc[0]
+    knobs = json.loads(row["knobs"])
+    comp = next(c for c in comps if c.experiment == row["experiment"])
+    latency = measured[scenario.name][0]
+    return knobs["shared.data_quality"], bound_of_knobs(comp, knobs), np.percentile(latency, 95), np.percentile(latency, 99)
+
+
+def _trade_colors(comps: dict) -> tuple:
+    import matplotlib.pyplot as plt
+    experiments = [c.experiment for c in next(iter(comps.values()))]
+    return dict(zip(experiments, plt.get_cmap("tab10").colors)), dict(zip(experiments, "osD^v"))
+
+
+def tradeoff_figure(comps: dict, plans: dict, scenarios: list, app: str, worker_budget: int, name: str = None,
+                    measured: dict = None, deployed: pd.DataFrame = None) -> None:
     """One figure for an application with one panel per scenario (comps: scenario name -> the compositions at the
     scenario's arrival rate; plans: (app, scenario name) -> plan table). In a panel, one line per composition that
     provides the scenario's capabilities: the smallest Pegasus bound on the p95 end-to-end latency (ms, log scale) over
     its configurations within the scenario's worker limit (worker_budget if it has none) and its model constraint, at
     every data quality (x axis); a gap where no such configuration has a finite bound. Dashed lines: the scenario's
     latency and quality constraints. Star: the plan, labeled with its total workers (hollow: best effort, no configuration
-    meets the SLOs). name: file name in figures/tsc/experimental-results,
-    or None."""
+    meets the SLOs). measured, deployed (testbed requests and plans of an earlier deployment, see `measured_c2`): also a
+    diamond (the bound that the current models give that deployment's configuration) and a dot with a bar from the measured p95 to the measured p99 (ms), at its data
+    quality. name: file name in figures/tsc/experimental-results, or None."""
     import matplotlib.pyplot as plt
     from pegasus.figures import paper_style, save_figure
-    experiments = [c.experiment for c in next(iter(comps.values()))]
-    colors = dict(zip(experiments, plt.get_cmap("tab10").colors))
-    markers = dict(zip(experiments, "osD^v"))
+    colors, markers = _trade_colors(comps)
     with paper_style():
         fig, axes = plt.subplots(1, len(scenarios), figsize=(3.0 * len(scenarios), 3.3), sharey=True, layout="constrained")
         for ax, scenario in zip(axes, scenarios):
-            budget = scenario.max_workers if scenario.max_workers is not None else worker_budget
-            for comp in comps[scenario.name]:
-                if not provides(comp, scenario.requires):
-                    continue
-                metrics = grid_metrics(comp, all_grid_indices(comp))
-                within = (metrics["cost"] <= budget) & (metrics["model"] >= (scenario.min_model or 0))
-                best = np.array([np.min(metrics["latency"][within & (metrics["quality"] == q)], initial=np.inf) for q in comp.qualities])
-                ax.plot(comp.qualities, 1e3 * np.where(np.isfinite(best), best, np.nan), marker=markers[comp.experiment], markersize=3,
-                        linewidth=1.5, color=colors[comp.experiment], label=comp.label)
-            if scenario.max_latency is not None:
-                ax.axhline(1e3 * scenario.max_latency, color="black", linestyle="--", linewidth=1)
-            if scenario.min_quality is not None:
-                ax.axvline(scenario.min_quality, color="black", linestyle="--", linewidth=1)
-            chosen = plans[(app, scenario.name)].iloc[0]
-            if chosen["feasible"] or chosen.get("best_effort", False):   # hollow star: best effort, no configuration meets the SLOs
-                ax.plot(chosen["data_quality"], chosen["latency_ms"], marker="*", markersize=14, color=colors[chosen["composition"]],
-                        markerfacecolor=colors[chosen["composition"]] if chosen["feasible"] else "white",
-                        markeredgecolor="black", linestyle="none", zorder=5)
-                ax.annotate(f"{int(chosen['workers'])}w", (chosen["data_quality"], chosen["latency_ms"]), textcoords="offset points",
-                            xytext=(0, 9), ha="center", fontsize=10)
-            ax.set_title(f"{scenario.short}, {scenario.rate:g}/s, ≤ {budget} w", fontsize=11)
-            ax.set_yscale("log")
-            ax.set_xlabel(f"q, {QUALITY_UNITS[app]}", fontsize=10)
-            ax.grid(True, linestyle=":", alpha=0.6)
-            ax.legend(fontsize=8, loc="best", framealpha=0.95)
+            _tradeoff_panel(ax, scenario, comps[scenario.name], plans[(app, scenario.name)].iloc[0], app, worker_budget, colors, markers,
+                            None if measured is None else _measurement(scenario, comps[scenario.name], measured, deployed))
         axes[0].set_ylabel("p95 bound (ms)")
         if name is not None:
             save_figure(fig, name)
@@ -574,31 +638,15 @@ def testbed_figure(measured: dict, deployed: pd.DataFrame, scenarios: list, app:
     The bound is at least the measured p95 where the vertical line lies right of the crossing of the curve with 0.05.
     name: file name in figures/tsc/experimental-results, or None."""
     import matplotlib.pyplot as plt
-    from matplotlib.lines import Line2D
     from pegasus.figures import paper_style, save_figure
     with paper_style():
         fig, axes = plt.subplots(1, len(scenarios), figsize=(3.0 * len(scenarios), 3.3), sharey=True, layout="constrained")
         for ax, scenario in zip(axes, scenarios):
-            latency = np.sort(measured[scenario.name][0])
-            n = len(latency)
             bound = float(deployed.loc[deployed["scenario"] == scenario.name, "predicted_p95_ms"].iloc[0])
-            ax.step(latency[:-1], 1 - np.arange(1, n) / n, where="post", color="tab:blue", linewidth=1.5)   # P(latency > x)
-            ax.axhline(0.05, color="black", linewidth=1, linestyle=":")
-            ax.axvline(bound, color="tab:red", linewidth=1.5)
-            if scenario.max_latency is not None:
-                ax.axvline(1e3 * scenario.max_latency, color="black", linestyle="--", linewidth=1)
-            ax.set_xlim(0, 1.05 * max(bound, latency[-1], 1e3 * (scenario.max_latency or 0)))
-            ax.set_yscale("log")
-            ax.set_ylim(0.5 / n, 1)
+            _testbed_panel(ax, scenario, measured[scenario.name][0], bound)
             ax.set_title(f"{scenario.short}, {scenario.rate:g}/s", fontsize=11)
-            ax.set_xlabel("latency x (ms)", fontsize=10)
-            ax.grid(True, linestyle=":", alpha=0.6)
         axes[0].set_ylabel("share of requests slower than x")
-        axes[0].legend(handles=[Line2D([], [], color="tab:blue", linewidth=1.5, label="measured requests"),
-                                Line2D([], [], color="tab:red", linewidth=1.5, label="predicted p95 bound"),
-                                Line2D([], [], color="black", linewidth=1, linestyle="--", label="latency SLO"),
-                                Line2D([], [], color="black", linewidth=1, linestyle=":", label="0.05")],
-                       fontsize=8, loc="lower left", framealpha=0.95)
+        _testbed_legend(axes[0])
         if name is not None:
             save_figure(fig, name)
         plt.show()
