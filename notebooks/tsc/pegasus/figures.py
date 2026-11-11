@@ -184,15 +184,17 @@ def paper_figure():
     return _figure(FIGSIZE[0], MARGIN_LEFT)
 
 
-def fraction_figure(fraction: float):
+def fraction_figure(fraction: float, top: float = None):
     """Figure and axes of an evaluation figure `fraction` of the width of FIGSIZE (2/3 or 1/3), at the height of FIGSIZE, so
     that LaTeX prints it at that fraction of the width of a single figure with the same scale and the same font size. A
     third (fraction < 0.5) uses the tight margins of the third-width figures of C2 (THIRD_MARGINS; call fit_left_margin
-    once the vertical axis is complete); a larger fraction uses the margins of paper_figure."""
+    once the vertical axis is complete); a larger fraction uses the margins of paper_figure. top: the margin above the plot
+    area of a third (default THIRD_MARGINS), e.g. MARGIN_TOP when the top tick label of the vertical axis reaches above it."""
     width = FIGSIZE[0] * fraction
     if fraction >= 0.5:
         return _figure(width, MARGIN_LEFT)
-    bottom, top, right = THIRD_MARGINS
+    bottom, default_top, right = THIRD_MARGINS
+    top = default_top if top is None else top
     fig = plt.figure(figsize=(width, FIGSIZE[1]))
     ax = fig.add_axes((THIRD_LEFT / width, bottom / FIGSIZE[1], 1 - (THIRD_LEFT + right) / width, 1 - (bottom + top) / FIGSIZE[1]))
     return fig, ax
@@ -228,17 +230,18 @@ def fit_half_pair(axes: list) -> None:
         ax.set_position((left / width, MARGIN_BOTTOM / height, plot_width / width, 1 - (MARGIN_BOTTOM + MARGIN_TOP) / height))
 
 
-def fit_left_margin(ax, third: bool = False) -> None:
-    """Shrink the left margin of a single figure (paper_figure or half_figure) to the width of the labels of its vertical
-    axis, keeping the plot area exactly as wide and as high as before, so the figure becomes narrower by the empty strip.
-    third: the figure is a fraction_figure(1/3), with the margins THIRD_MARGINS. Call when the vertical axis is complete."""
+def fit_left_margin(ax) -> None:
+    """Shrink the left margin of a single figure (paper_figure, half_figure or fraction_figure) to the width of the labels of
+    its vertical axis, keeping the plot area exactly as wide and as high as before and the other margins as they are, so the
+    figure becomes narrower by the empty strip. Call when the vertical axis is complete."""
     fig = ax.figure
     fig.canvas.draw()
     labels = ax.yaxis.get_tightbbox(fig.canvas.get_renderer())   # tick labels and axis label, in pixels
     left = (ax.bbox.x0 - labels.x0) / fig.dpi + 0.02             # 0.02 in so that the axis label does not touch the border
     width, height = fig.get_size_inches()
     plot_width = ax.bbox.width / fig.dpi
-    bottom, top, right = THIRD_MARGINS if third else (MARGIN_BOTTOM, MARGIN_TOP, MARGIN_RIGHT)
+    position = ax.get_position()
+    bottom, top, right = position.y0 * height, (1 - position.y1) * height, width - position.x1 * width   # the margins as they are
     new_width = left + plot_width + right
     fig.set_size_inches(new_width, height)
     ax.set_position((left / new_width, bottom / height, plot_width / new_width, 1 - (bottom + top) / height))

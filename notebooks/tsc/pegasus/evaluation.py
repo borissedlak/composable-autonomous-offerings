@@ -547,7 +547,10 @@ def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xla
     with paper_style():
         fig, ax = paper_figure() if tightness_fraction == 1 else fraction_figure(tightness_fraction)
         _sweep_axis(ax, settings, xlabel, tick_labels, log_x)
-        _tightness_panel(ax, settings, statistics, level_label, wrap_text=tightness_fraction < 1)
+        if tightness_fraction < 1:
+            ax.xaxis.label.set_fontsize(10)   # the label is wider than the plot area of a narrower figure
+        # in a narrower figure without the text of the red zone: the caption explains the zone
+        _tightness_panel(ax, settings, statistics, level_label, failure_text=tightness_fraction == 1)
         extra_segments = []
         if overlay is not None:
             overlay_settings, overlay_statistics, overlay_label = overlay
@@ -563,7 +566,10 @@ def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xla
             ax.axvline(onset[0], color="0.25", linewidth=1.2, linestyle=(0, (1, 1.5)), zorder=1)
         if not log_x:
             fit_x_tick_labels(ax)
-        _tightness_legend(ax, settings, statistics, extra_segments=extra_segments, ncol=3 if tightness_fraction == 1 else 2)
+        # a narrower figure: two columns with shorter handles and gaps (the font stays), so that the legend is not wider than the plot
+        # area, and the top of the axis may double (up to 3 times) so that the legend covers no line
+        narrow = {} if tightness_fraction == 1 else dict(max_doublings=3, handlelength=1.5, columnspacing=0.5)
+        _tightness_legend(ax, settings, statistics, extra_segments=extra_segments, ncol=3 if tightness_fraction == 1 else 2, **narrow)
         # the labels of the dash-dot-dot and the vertical line next to their lines instead of in the legend, where they keep the
         # largest distance to every line, band, text and the legend
         drawn = [(settings, statistics[name]["tightness"]) for name in statistics if name in METHOD_COLORS]
@@ -609,11 +615,8 @@ def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xla
             if not log_x:
                 fit_x_tick_labels(ax)
             handles, labels = ax.get_legend_handles_labels()
-            # the times span the whole width at the top, so the log axis may grow upward to make room for the legend; the legend
-            # of the evaluation time in a half figure is too tall for that (one column, one row per method), so there the axis
-            # keeps the range of the data and the legend may cover the upper end of the lines of Pegasus
-            keep_range = time_halves and what == "evaluation"
-            legend_inside(ax, handles, labels, segments, max_doublings=0 if keep_range else 3, title="models trained for" if what == "training" else None,
+            # the times span the whole width at the top, so the log axis may grow upward to make room for the legend
+            legend_inside(ax, handles, labels, segments, max_doublings=5, title="models trained for" if what == "training" else None,
                           ncol=1 if time_halves else 2, fontsize=10, title_fontsize=10, framealpha=0.95, columnspacing=1.0, handletextpad=0.4)
             if name is not None:
                 save_figure(fig, f"{name}_{what}")
@@ -721,12 +724,14 @@ def overlay_line(ax, settings, values: np.ndarray, name: str, held: np.ndarray) 
                zorder=1.6)
 
 
-def _tightness_legend(ax, settings: list, statistics: dict, ncol: int = 3, half: str = None, extra_segments: list = (), **options) -> None:
+def _tightness_legend(ax, settings: list, statistics: dict, ncol: int = 3, half: str = None, extra_segments: list = (),
+                      max_doublings: int = 0, **options) -> None:
     """The legend of the methods and of the markers inside a tightness panel, where it hides the fewest points and
     bands (legend_inside); the axis keeps TIGHTNESS_RANGE, as in B.1. Call when the axes are complete. half: "left" lists the
     first half of the methods, "right" the rest and the markers, so that the two halves of a pair share one legend.
     extra_segments: points and bands drawn besides the methods of `statistics` (e.g. overlay_line), which the legend avoids too.
-    options: replace the legend options below (as for ax.legend), e.g. a smaller font for a narrow panel."""
+    max_doublings: how often the top of the axis may double to make room for the legend (as in legend_inside; the default
+    keeps TIGHTNESS_RANGE). options: replace the legend options below (as for ax.legend), e.g. a smaller font for a narrow panel."""
     from .figures import holds_handles, legend_inside
     handles, labels = ax.get_legend_handles_labels()
     # the versions of the proposed method first, in their order: a version drawn only as an overlay (tightness_and_time_figure)
@@ -741,7 +746,7 @@ def _tightness_legend(ax, settings: list, statistics: dict, ncol: int = 3, half:
         handles, labels = handles[first:], labels[first:]
     segments = [segment for name in statistics if name in METHOD_COLORS for segment in sweep_segments(settings, statistics[name]["tightness"])]
     segments += list(extra_segments)
-    legend_inside(ax, handles + marker_handles, labels + marker_labels, segments, max_doublings=0,
+    legend_inside(ax, handles + marker_handles, labels + marker_labels, segments, max_doublings=max_doublings,
                   **{**dict(ncol=ncol, fontsize=10, framealpha=0.95, columnspacing=1.0, handletextpad=0.4), **options})
 
 
@@ -852,7 +857,7 @@ SLOWDOWN_SERVICES = {
     "face-detector:v2": ("face detector (leaf)", "tab:brown", "D", "-"),
     "image-transformer:v1": ("transform (aggregator)", "tab:cyan", "P", "-"),
 }
-SLOWDOWN_SHORT = {"cv-analyzer:v2": "object det.", "face-detector:v2": "face det.", "image-transformer:v1": "transform"}   # legend of a third-width figure
+SLOWDOWN_SHORT = {"cv-analyzer:v2": "object (leaf)", "face-detector:v2": "face (leaf)", "image-transformer:v1": "transform (agg.)"}   # legend of a third-width figure
 CONCURRENCY_BINS = (0, 1, 2, 4, 8, 12, 16, 24, 32, 48)   # bins of the concurrency c for the medians of slowdown_figure
 
 
@@ -927,15 +932,16 @@ def slowdown_figure(slowdowns, height_marks: dict = None, name: str = None, mark
     Half width (half_figure "left", the size of the left panel of B.4), so that it fits one column beside another half figure.
     mark_prefix: written once, left of the first vertical line (e.g. "h=" before the labels "3", "4", ...), because the
     lines stand too close in the half-width panel for a prefix in every label. third: one third of the width of FIGSIZE
-    (fraction_figure), with short service names in the legend and fewer ticks."""
+    (fraction_figure), with shorter legend labels (SLOWDOWN_SHORT) and fewer ticks."""
     from matplotlib.lines import Line2D
     from matplotlib.ticker import MaxNLocator
-    from .figures import BAND_ALPHA, fit_left_margin, fraction_figure, half_figure, legend_inside, paper_style, save_figure
+    from .figures import BAND_ALPHA, MARGIN_TOP, fit_left_margin, fraction_figure, half_figure, legend_inside, paper_style, save_figure
     errors = slowdowns.assign(error=100 * np.abs(1 - 1 / slowdowns["slowdown"]))   # the error of B.2, in %
     table = slowdown_bins(errors, value="error")
     height_marks = height_marks or {}
     with paper_style():
-        fig, ax = fraction_figure(1 / 3) if third else half_figure("left")
+        # MARGIN_TOP: room for the top tick label of the vertical axis, which reaches above the plot area
+        fig, ax = fraction_figure(1 / 3, top=MARGIN_TOP) if third else half_figure("left")
         handles, labels, segments = [], [], []
         for service, (label, color, marker, style) in SLOWDOWN_SERVICES.items():
             rows = table[table["service"] == service].sort_values("concurrency")
@@ -971,9 +977,9 @@ def slowdown_figure(slowdowns, height_marks: dict = None, name: str = None, mark
         if third:
             ax.xaxis.set_major_locator(MaxNLocator(4, prune="upper"))
         legend_inside(ax, handles, labels, segments, locations=("upper left", "upper center"), max_doublings=0, ncol=1,
-                      fontsize=8 if third else 10, framealpha=0.95, handlelength=1.0 if third else 1.6, handletextpad=0.4,
+                      fontsize=10, framealpha=0.95, handlelength=1.0 if third else 1.6, handletextpad=0.4,
                       labelspacing=0.2 if third else 0.3, borderaxespad=0.3)
-        fit_left_margin(ax, third=third)   # short tick labels leave an empty strip in the fixed left margin
+        fit_left_margin(ax)   # short tick labels leave an empty strip in the fixed left margin
         if name is not None:
             save_figure(fig, name)
         plt.show()
