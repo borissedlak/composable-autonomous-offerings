@@ -524,7 +524,7 @@ def tightness_sweep_figure(settings: list, statistics: dict, xlabel: str, title:
 
 def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xlabel: str, title: str, level_label: str,
                               tick_labels: list = None, log_x: bool = True, name: str = None, time_halves: tuple = None,
-                              overlay: tuple = None, onset: tuple = None) -> None:
+                              overlay: tuple = None, onset: tuple = None, tightness_fraction: float = 1.0) -> None:
     """Three separate figures over a sweep. First: the tightness of every method, as in tightness_sweep_figure.
     Second: the training time (s), one line per set of trained models; methods that use the same models (same_models)
     share a line, and its legend names them. Third: the evaluation time (s) of every method. The lines of the time
@@ -537,14 +537,17 @@ def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xla
     overlay: (settings, statistics, label) of a second ground truth for some methods of the tightness figure, drawn as
     dash-dot-dot lines (OVERLAY_LINESTYLE in figures.py) in their colors behind the measured ones (overlay_line), with `label` written next to that line
     (place_line_label) instead of in the legend. onset: (x, label) of a vertical line in the tightness figure, e.g.
-    where the services start to slow down, with `label` written next to the line."""
-    from .figures import fit_half_pair, fit_x_tick_labels, half_figure, legend_inside, paper_figure, paper_style, plain_log_ticks, save_figure
+    where the services start to slow down, with `label` written next to the line. tightness_fraction: width of the tightness
+    figure as a fraction of FIGSIZE[0] (fraction_figure, e.g. 2/3 for a figure printed in two thirds of the width, with a
+    legend of two columns); the time figures keep their size."""
+    from .figures import (fit_half_pair, fit_x_tick_labels, fraction_figure, half_figure, legend_inside, paper_figure, paper_style,
+                          plain_log_ticks, save_figure)
     print(title)
     short = lambda method: method.replace(" (ours)", "")
     with paper_style():
-        fig, ax = paper_figure()
+        fig, ax = paper_figure() if tightness_fraction == 1 else fraction_figure(tightness_fraction)
         _sweep_axis(ax, settings, xlabel, tick_labels, log_x)
-        _tightness_panel(ax, settings, statistics, level_label)
+        _tightness_panel(ax, settings, statistics, level_label, wrap_text=tightness_fraction < 1)
         extra_segments = []
         if overlay is not None:
             overlay_settings, overlay_statistics, overlay_label = overlay
@@ -560,7 +563,7 @@ def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xla
             ax.axvline(onset[0], color="0.25", linewidth=1.2, linestyle=(0, (1, 1.5)), zorder=1)
         if not log_x:
             fit_x_tick_labels(ax)
-        _tightness_legend(ax, settings, statistics, extra_segments=extra_segments)
+        _tightness_legend(ax, settings, statistics, extra_segments=extra_segments, ncol=3 if tightness_fraction == 1 else 2)
         # the labels of the dash-dot-dot and the vertical line next to their lines instead of in the legend, where they keep the
         # largest distance to every line, band, text and the legend
         drawn = [(settings, statistics[name]["tightness"]) for name in statistics if name in METHOD_COLORS]
@@ -839,11 +842,17 @@ def uncertainty_figure(uncertainty: dict, chain_pegasus: dict, services: list, t
 # Slowdown of the services in a tree (B.3 diagnosis; here and not in real_data.py, so that it does not change the cache
 # key of the results: no method uses it)
 # ------------------------------------------------------------------------------
-SLOWDOWN_SERVICES = {   # service type -> (label, color, marker, line style); the services of the trees of B.3, distinct in grayscale
-    "cv-analyzer:v2": ("object detector (leaf)", "#4477AA", "o", "-"),
-    "face-detector:v2": ("face detector (leaf)", "#CC6677", "s", "--"),
-    "image-transformer:v1": ("transform (aggregator)", "#DDAA33", "^", "-."),
+# service type -> (label, color, marker, line style); the services of the trees of B.3. Services that B.2 also shows (the object
+# and the face detector of its chain) have their color and marker there (uncertainty_figure: colors and markers by position in
+# the chain: image denoiser blue square, cv-analyzer orange triangle, face detector brown diamond, image compressor pink triangle);
+# the image transformer is no service of B.2 and takes the next unused pair of its lists. The markers tell the lines apart in
+# grayscale, so every line is solid, as in B.2.
+SLOWDOWN_SERVICES = {
+    "cv-analyzer:v2": ("object detector (leaf)", "tab:orange", "^", "-"),
+    "face-detector:v2": ("face detector (leaf)", "tab:brown", "D", "-"),
+    "image-transformer:v1": ("transform (aggregator)", "tab:cyan", "P", "-"),
 }
+SLOWDOWN_SHORT = {"cv-analyzer:v2": "object det.", "face-detector:v2": "face det.", "image-transformer:v1": "transform"}   # legend of a third-width figure
 CONCURRENCY_BINS = (0, 1, 2, 4, 8, 12, 16, 24, 32, 48)   # bins of the concurrency c for the medians of slowdown_figure
 
 
@@ -897,62 +906,74 @@ def tree_slowdowns(experiments: dict):
     return pd.DataFrame(rows).dropna(subset=["slowdown", "concurrency"])
 
 
-def slowdown_bins(slowdowns, quantiles: tuple = (0.1, 0.5, 0.9), min_size: int = 10):
+def slowdown_bins(slowdowns, quantiles: tuple = (0.1, 0.5, 0.9), min_size: int = 10, value: str = "slowdown"):
     """Per service type and bin of CONCURRENCY_BINS with at least min_size rows of tree_slowdowns: the median concurrency
-    of the bin and the `quantiles` of the slowdown (columns q10, q50, q90), and the number of rows (size)."""
+    of the bin and the `quantiles` of the column `value` (default the slowdown; columns q10, q50, q90), and the number of rows (size)."""
     import pandas as pd
     binned = slowdowns.assign(bin=pd.cut(slowdowns["concurrency"], CONCURRENCY_BINS, include_lowest=True))
     grouped = binned.groupby(["service", "bin"], observed=True)
-    table = grouped["slowdown"].quantile(list(quantiles)).unstack().rename(columns=lambda q: f"q{round(100 * q)}")
+    table = grouped[value].quantile(list(quantiles)).unstack().rename(columns=lambda q: f"q{round(100 * q)}")
     table["concurrency"], table["size"] = grouped["concurrency"].median(), grouped.size()
     return table[table["size"] >= min_size].reset_index()
 
 
-def slowdown_figure(slowdowns, height_marks: dict = None, name: str = None, mark_prefix: str = "") -> None:
-    """Slowdown of the services in the trees against the concurrency they saw (tree_slowdowns): per service type the
-    median slowdown in every bin of the concurrency (slowdown_bins), at the median concurrency of the bin, with the band
-    from the 10th to the 90th percentile; the line at 1 is the speed of the benchmark. height_marks: label -> concurrency,
+def slowdown_figure(slowdowns, height_marks: dict = None, name: str = None, mark_prefix: str = "", third: bool = False) -> None:
+    """Error of the predicted mean of the services in the trees against the concurrency they saw (tree_slowdowns), as in B.2:
+    |m - measured| / measured in %, with m the mean processing time of the benchmark (what the models of the service
+    predict) and measured the mean in the tree, i.e. |1 - 1/s| for the slowdown s. Per service type the median error in
+    every bin of the concurrency (slowdown_bins), at the median concurrency of the bin, with the band from the 10th to
+    the 90th percentile; 0 is the speed of the benchmark. height_marks: label -> concurrency,
     drawn as thin vertical lines (e.g. the median concurrency of every height of a tree set). name: file in figures/tsc/experimental-results.
     Half width (half_figure "left", the size of the left panel of B.4), so that it fits one column beside another half figure.
     mark_prefix: written once, left of the first vertical line (e.g. "h=" before the labels "3", "4", ...), because the
-    lines stand too close in the half-width panel for a prefix in every label."""
+    lines stand too close in the half-width panel for a prefix in every label. third: one third of the width of FIGSIZE
+    (fraction_figure), with short service names in the legend and fewer ticks."""
     from matplotlib.lines import Line2D
-    from .figures import BAND_ALPHA, fit_left_margin, half_figure, legend_inside, paper_style, save_figure
-    table = slowdown_bins(slowdowns)
+    from matplotlib.ticker import MaxNLocator
+    from .figures import BAND_ALPHA, fit_left_margin, fraction_figure, half_figure, legend_inside, paper_style, save_figure
+    errors = slowdowns.assign(error=100 * np.abs(1 - 1 / slowdowns["slowdown"]))   # the error of B.2, in %
+    table = slowdown_bins(errors, value="error")
+    height_marks = height_marks or {}
     with paper_style():
-        fig, ax = half_figure("left")
+        fig, ax = fraction_figure(1 / 3) if third else half_figure("left")
         handles, labels, segments = [], [], []
         for service, (label, color, marker, style) in SLOWDOWN_SERVICES.items():
             rows = table[table["service"] == service].sort_values("concurrency")
             if rows.empty:
                 continue
             ax.fill_between(rows["concurrency"], rows["q10"], rows["q90"], color=color, alpha=BAND_ALPHA, linewidth=0)
-            ax.plot(rows["concurrency"], rows["q50"], color=color, marker=marker, linestyle=style, linewidth=2)
-            handles.append(Line2D([], [], color=color, marker=marker, linestyle=style, linewidth=2))
-            labels.append(label)
+            # line width and marker size as in the error lines of B.2 (uncertainty_figure)
+            ax.plot(rows["concurrency"], rows["q50"], color=color, marker=marker, linestyle=style, linewidth=1.5, markersize=6)
+            handles.append(Line2D([], [], color=color, marker=marker, linestyle=style, linewidth=1.5, markersize=6))
+            labels.append(SLOWDOWN_SHORT[service] if third else label)
             segments += list(zip(rows["concurrency"], rows["q10"], rows["q90"]))
-        # ax.axhline(1, color="black", linewidth=0.8)   # the speed of the benchmark, without a legend entry: the axis says "vs. benchmark"
+        # ax.axhline(0, color="black", linewidth=0.8)   # the speed of the benchmark (no error), without a legend entry
         # headroom above the highest band for the legend, which takes a larger share of the height in the half-width panel
-        top = max(2.0, float(table["q90"].max()) * 1.3)
-        ax.set_ylim(0.85, top)   # a strip below the line at 1 for the labels of height_marks, clear of the markers on that line
-        for mark, concurrency in (height_marks or {}).items():
+        top = float(table["q90"].max()) * 1.3
+        bottom = -0.1 * top   # a strip below 0 for the labels of height_marks, clear of the markers at small errors (errors are never negative)
+        ax.set_ylim(bottom, top)
+        for mark, concurrency in height_marks.items():
             ax.axvline(concurrency, color="0.5", linewidth=0.8, linestyle=":")
             # a small font and a fixed offset of 1 pt instead of a leading space, so that the labels of close lines do not overlap
-            ax.annotate(mark, (concurrency, 0.86), xytext=(1, 0), textcoords="offset points", color="0.35", fontsize=9, ha="left", va="bottom")
+            ax.annotate(mark, (concurrency, bottom), xytext=(1, 0), textcoords="offset points", color="0.35", fontsize=9, ha="left", va="bottom")
         if mark_prefix and height_marks:
-            ax.annotate(mark_prefix, (min(height_marks.values()), 0.86), xytext=(-1, 0), textcoords="offset points", color="0.35",
+            ax.annotate(mark_prefix, (min(height_marks.values()), bottom), xytext=(-1, 0), textcoords="offset points", color="0.35",
                         fontsize=9, ha="right", va="bottom")
         # up to the last point of the lines, not to the empty end of the last bin; the margins of 3% and 5% of the axis keep
         # the first and the last marker whole
         largest = float(table["concurrency"].max())
         ax.set_xlim(-0.03 * largest, 1.05 * largest)
-        ax.set_xlabel("concurrent services")
-        ax.set_ylabel("slowdown vs. benchmark")
+        # c, the mean number of the other services of the tree that process while the service processes an item (tree_slowdowns)
+        ax.set_xlabel("other active services", fontsize=10 if third else None)
+        ax.set_ylabel("error of predicted mean (%)")   # as in B.2
         ax.grid(True, linestyle=":", alpha=0.6)
         # a narrower legend (shorter handles, one column) for the half-width panel, in the font size of the full-width figures
-        legend_inside(ax, handles, labels, segments, locations=("upper left", "upper center"), max_doublings=0, ncol=1, fontsize=10,
-                      framealpha=0.95, handlelength=1.6, handletextpad=0.4, labelspacing=0.3, borderaxespad=0.3)
-        fit_left_margin(ax)   # short tick labels leave an empty strip in the fixed left margin
+        if third:
+            ax.xaxis.set_major_locator(MaxNLocator(4, prune="upper"))
+        legend_inside(ax, handles, labels, segments, locations=("upper left", "upper center"), max_doublings=0, ncol=1,
+                      fontsize=8 if third else 10, framealpha=0.95, handlelength=1.0 if third else 1.6, handletextpad=0.4,
+                      labelspacing=0.2 if third else 0.3, borderaxespad=0.3)
+        fit_left_margin(ax, third=third)   # short tick labels leave an empty strip in the fixed left margin
         if name is not None:
             save_figure(fig, name)
         plt.show()

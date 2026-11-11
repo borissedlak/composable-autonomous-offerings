@@ -34,6 +34,9 @@ FIGSIZE = (6.0, 3.3)                                          # (width, height) 
 # left margin of a right half figure, keeps the last tick label of the left half and the first of the right half apart.
 # MARGIN_TOP holds half a line of text, the part of a tick label at the top of the vertical axis that lies above it.
 MARGIN_LEFT, MARGIN_RIGHT, MARGIN_BOTTOM, MARGIN_TOP, HALF_GAP = 0.88, 0.1, 0.55, 0.09, 0.2
+# Margins (inches) of a third-width figure, the same as in the third-width figures of C2 (slo_planning.py): below (tick labels
+# and x label), above and right of the plot area, and the left margin before fit_left_margin shrinks it to the labels.
+THIRD_MARGINS, THIRD_LEFT = (0.50, 0.025, 0.04), 0.5
 
 
 def math_label(level_label: str) -> str:
@@ -181,6 +184,20 @@ def paper_figure():
     return _figure(FIGSIZE[0], MARGIN_LEFT)
 
 
+def fraction_figure(fraction: float):
+    """Figure and axes of an evaluation figure `fraction` of the width of FIGSIZE (2/3 or 1/3), at the height of FIGSIZE, so
+    that LaTeX prints it at that fraction of the width of a single figure with the same scale and the same font size. A
+    third (fraction < 0.5) uses the tight margins of the third-width figures of C2 (THIRD_MARGINS; call fit_left_margin
+    once the vertical axis is complete); a larger fraction uses the margins of paper_figure."""
+    width = FIGSIZE[0] * fraction
+    if fraction >= 0.5:
+        return _figure(width, MARGIN_LEFT)
+    bottom, top, right = THIRD_MARGINS
+    fig = plt.figure(figsize=(width, FIGSIZE[1]))
+    ax = fig.add_axes((THIRD_LEFT / width, bottom / FIGSIZE[1], 1 - (THIRD_LEFT + right) / width, 1 - (bottom + top) / FIGSIZE[1]))
+    return fig, ax
+
+
 def half_figure(side: str, shared_y: bool = True):
     """Figure and axes of one of two panels that sit side by side in the width of one FIGSIZE figure (side: "left" or
     "right"). Both have the height of FIGSIZE and a plot area of the same size at the same height as every other
@@ -211,19 +228,20 @@ def fit_half_pair(axes: list) -> None:
         ax.set_position((left / width, MARGIN_BOTTOM / height, plot_width / width, 1 - (MARGIN_BOTTOM + MARGIN_TOP) / height))
 
 
-def fit_left_margin(ax) -> None:
+def fit_left_margin(ax, third: bool = False) -> None:
     """Shrink the left margin of a single figure (paper_figure or half_figure) to the width of the labels of its vertical
     axis, keeping the plot area exactly as wide and as high as before, so the figure becomes narrower by the empty strip.
-    Call when the vertical axis is complete."""
+    third: the figure is a fraction_figure(1/3), with the margins THIRD_MARGINS. Call when the vertical axis is complete."""
     fig = ax.figure
     fig.canvas.draw()
     labels = ax.yaxis.get_tightbbox(fig.canvas.get_renderer())   # tick labels and axis label, in pixels
     left = (ax.bbox.x0 - labels.x0) / fig.dpi + 0.02             # 0.02 in so that the axis label does not touch the border
     width, height = fig.get_size_inches()
     plot_width = ax.bbox.width / fig.dpi
-    new_width = left + plot_width + MARGIN_RIGHT
+    bottom, top, right = THIRD_MARGINS if third else (MARGIN_BOTTOM, MARGIN_TOP, MARGIN_RIGHT)
+    new_width = left + plot_width + right
     fig.set_size_inches(new_width, height)
-    ax.set_position((left / new_width, MARGIN_BOTTOM / height, plot_width / new_width, 1 - (MARGIN_BOTTOM + MARGIN_TOP) / height))
+    ax.set_position((left / new_width, bottom / height, plot_width / new_width, 1 - (bottom + top) / height))
 
 
 def fit_x_tick_labels(ax) -> None:
