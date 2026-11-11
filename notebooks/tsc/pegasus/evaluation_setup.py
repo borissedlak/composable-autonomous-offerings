@@ -179,7 +179,7 @@ def base_case(bases: dict, base_models: dict, s: int) -> tuple:
         "union bound, Chernoff (SNC) nodes": ("proposed", sum(snc_latency_bound(*b, epsilon=alpha / K, workers=w, **workload) for b, w in zip(beliefs, workers))),
         "union bound, propagated Chernoff (SNC) nodes": ("proposed", propagated_node_bounds(beliefs, epsilon=alpha / K, path_lower_means=lower_means,
                                                                                             path_workers=workers, **workload).sum(axis=0)),
-        "union bound, martingale nodes = Pegasus Node": ("proposed", methods[PROPOSED][1]),
+        "union bound, martingale nodes = Pegasus": ("proposed", methods[PROPOSED][1]),
         "network service curve, independent services = Pegasus SNC": ("proposed", methods[PROPOSED_SNC][1]),
         "network service curve, Hölder (any dependence)": ("proposed", network_service_bound(beliefs, epsilon=alpha, path_workers=workers, **workload)),
     }

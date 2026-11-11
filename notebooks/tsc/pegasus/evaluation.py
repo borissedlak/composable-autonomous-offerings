@@ -20,7 +20,7 @@ from .data import model_inputs, path_workers
 from .model_cache import training_clock
 from .trees import leaf_to_root_paths, max_over_paths, max_path_sum
 
-PROPOSED = "Pegasus Node (ours)"   # union bound over the node bounds
+PROPOSED = "Pegasus (ours)"   # union bound over the node bounds
 PROPOSED_SNC = "Pegasus SNC (ours)"    # one bound for the whole chain from its network service curve
 GROUP_COLORS = {"proposed": "tab:green", "baseline": "tab:gray", "reference": "tab:purple"}
 METHOD_COLORS = {PROPOSED: "tab:green", PROPOSED_SNC: "tab:olive", "GP Sum": "tab:gray", "DNN Sum": "black", "GP Queue": "tab:blue",
@@ -84,7 +84,7 @@ def model_of(data) -> dict:
 
 
 def pegasus_bound(data, models: dict, alpha: float) -> np.ndarray:
-    """Pegasus Node: the union bound over the closed-form martingale node bounds, per held-out configuration (s). The
+    """Pegasus: the union bound over the closed-form martingale node bounds, per held-out configuration (s). The
     waiting time at a service is bounded by Kingman's martingale bound exp(-theta w); with a Gaussian execution time,
     the latency bound of the service follows from one formula. Every service is bounded with the external arrivals
     (the paper's assumption on internal arrivals). A service with several workers is bounded by cyclic assignment (bounds.py)."""
@@ -168,7 +168,7 @@ def compare_tree_methods(data, models: dict, alpha: float, confidence: float, n_
     extends from a chain to the tree through the P leaf-to-root paths (trees.py): the end-to-end latency of a frame is the
     maximum over the paths of its latency through the path run as a chain, so bounds of every path that each fail with
     probability at most alpha / P give, as their maximum, a bound of the tree at alpha (union bound over the paths).
-    - Pegasus Node: the union bound of every path over its node bounds, with every (path, service) pair at
+    - Pegasus: the union bound of every path over its node bounds, with every (path, service) pair at
       alpha / sum_p K_p (K_p services on path p), every service bounded with the external arrivals. The tree gets the
       largest sum over the paths.
     - Pegasus SNC: the network service curve of every path at alpha / P, maximum over the paths.
@@ -744,23 +744,23 @@ def _tightness_legend(ax, settings: list, statistics: dict, ncol: int = 3, half:
 
 def uncertainty_figure(uncertainty: dict, chain_pegasus: dict, services: list, title: str, confidence: float, name: str = None,
                        oracle: dict = None, level_label: str = None, execution_times: dict = None) -> None:
-    """What more training runs per service do to the service models and to the bound of Pegasus Node: two figures side
+    """What more training runs per service do to the service models and to the bound of Pegasus: two figures side
     by side in the width of one (half_figure, each with its own vertical axis), with the training runs per service on
     the horizontal axis (logarithmic). All services grow together; a service with fewer runs holds all of them.
     Left (accuracy of every service model, %, logarithmic): per service, in its color and marker, the error of the
     predicted mean execution time m against the measured mean of the held-out run, |m - measured| / measured, the
     median over the held-out configurations and then over the seeds. The margin of the pessimistic mean m-bar is not
     drawn: four margin lines next to four error lines made the figure unreadable; its effect on the chain is the gap
-    between Pegasus Node and the line with known means on the right, and its values are in the tables of the notebook. Right (Pegasus Node, as every tightness figure of B): its
+    between Pegasus and the line with known means on the right, and its values are in the tables of the notebook. Right (Pegasus, as every tightness figure of B): its
     tightness, the end-to-end bound / the measured quantile, the median over the held-out configurations per seed, as a
     line over the seeds with the band from the smallest to the largest seed, a filled marker where it holds (coverage of
     at least `confidence` under every seed) and a hollow one where it does not; the same bound with the predicted means
-    m in place of m-bar (dotted, in the color of Pegasus Node, without markers), whose distance to Pegasus Node is the
+    m in place of m-bar (dotted, in the color of Pegasus, without markers), whose distance to Pegasus is the
     price of the uncertainty of the models; and the Oracle, which uses no training data. Where the median over the
     seeds is infinite (the pessimistic mean overloads a service at half of the configurations or more), "∞" stands at
     the top edge. uncertainty: seed -> service -> array (levels, 6) of (training runs, median margin, uncertainty cost,
     median predicted mean, median node bound with it, median error of the predicted mean); chain_pegasus: seed ->
-    array (levels, 7) of (training runs per service, median bound of Pegasus Node (s), median bound with the predicted
+    array (levels, 7) of (training runs per service, median bound of Pegasus (s), median bound with the predicted
     means (s), median tightness of both, coverage of both); oracle: seed -> (median tightness, coverage) of the Oracle,
     or None. execution_times: service -> its measured mean execution time (s), written next to its name in the legend, so
     that the figure keeps how slow every service is; or None. The title is printed above the figures; name: file name in

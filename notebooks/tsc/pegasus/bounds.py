@@ -19,7 +19,7 @@ E[exp(-theta T)] becomes E[exp(-theta T)]^c for i.i.d. gaps. Every bound below a
 gives the single-server bounds unchanged). The bound is looser than the true multi-server wait, because a worker of
 the cyclic system may wait while another one is free.
 
-Which bounds are Pegasus. Pegasus Node (evaluation.pegasus_bound) is the union bound over
+Which bounds are Pegasus. Pegasus (evaluation.pegasus_bound) is the union bound over
 martingale_closed_form_node_bounds, which bounds every node with the external arrival process; Pegasus SNC
 (evaluation.pegasus_snc_bound) is network_service_bound. The propagated bounds (propagated_node_moments,
 propagated_node_bounds, martingale_propagated_node_bound(s), spacing_decay_rate) are explored variants and not part of
@@ -327,7 +327,7 @@ def spacing_decay_rate(mean, var, previous_lower_mean, previous_var, workers, pr
 def martingale_propagated_node_bound(mean, var, previous_lower_mean, previous_var, process, rate, epsilon, jitter=0.1,
                                      bins=4000, iterations=30, workers=1, previous_workers=1):
     """Martingale bound of a node that receives the departures of the node before it (previous_lower_mean None for the
-    first node); an explored variant, not part of Pegasus Node (module docstring). The waiting-time tail is the smaller of the martingale tail with external arrivals (waiting_time_tail)
+    first node); an explored variant, not part of Pegasus (module docstring). The waiting-time tail is the smaller of the martingale tail with external arrivals (waiting_time_tail)
     and Kingman's bound exp(-theta_s w) for the spacing that the node before gives (spacing_decay_rate).
     The node before enters with its lower (optimistic) mean, because a faster node spaces items less. epsilon may be a
     scalar or a sequence, as in martingale_node_bound. workers, previous_workers: workers of the node and of the node

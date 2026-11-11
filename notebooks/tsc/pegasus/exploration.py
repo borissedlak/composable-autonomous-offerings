@@ -226,7 +226,7 @@ def real_exploration_results(experiment: str, data, strategy: str, sizes: list, 
     pipelines of another topology) under the sampling strategy, and after n choices per service the models of the
     other experiments (fit_services) are fitted to the chosen runs, for every n in sizes. data: the chain data of the
     experiment (real_chain_data), of which the held-out runs and the ground truth are used. Returns n -> (end-to-end
-    latency of Pegasus Node at the held-out runs in s, relative error of the predicted mean execution time: the
+    latency of Pegasus at the held-out runs in s, relative error of the predicted mean execution time: the
     median over the held-out runs and the services of |predicted mean / true mean - 1|)."""
     chain = run_table(experiment)
     path, service_of, pipeline = chain_path(experiment)

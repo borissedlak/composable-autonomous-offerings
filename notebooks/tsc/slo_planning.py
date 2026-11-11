@@ -1,5 +1,5 @@
 """Experiment C.2 of `2f_optimization.ipynb`: choosing the service composition of an application, and its
-configuration, that meets the SLOs of a client, with a numerical solver on the predictions of Pegasus Node.
+configuration, that meets the SLOs of a client, with a numerical solver on the predictions of Pegasus.
 
 Setting. An application type (vision, audio, lidar) has five service compositions, the chains b1u-<application>-<i>
 of the second campaign. A configuration of a composition sets
@@ -11,7 +11,7 @@ The client of a scenario sends items at one fixed arrival rate (items/s, Poisson
 
 Three SLO dimensions, each one number per configuration:
 - cost: the total number of workers of the composition, sum_k w_k;
-- latency: the Pegasus Node bound (s) on the p95 of the end-to-end latency at the arrival rate of the scenario,
+- latency: the Pegasus bound (s) on the p95 of the end-to-end latency at the arrival rate of the scenario,
   with the load-aware models (load_aware_b4.py, the default of B.1);
 - quality: the data quality q, and, for vision, the smallest model size among the detectors of the composition.
 A scenario poses one or two of these as constraints (max workers, max latency, min quality). Every dimension that it
@@ -23,7 +23,7 @@ its queue grows without limit) is never feasible.
 
 Prediction. The models of every composition are those of B.1: every service is trained on its benchmarks with one to
 four workers (worker_benchmark_pool in pegasus/real_data.py), without any run of a chain, so that a composition is
-planned as if it had never run. Pegasus Node bounds every service on its own (with the external
+planned as if it had never run. Pegasus bounds every service on its own (with the external
 arrival rate and epsilon = alpha / K for K services), so the end-to-end bound is the sum of the node bounds. A node bound depends only on the knobs of its own service: `composition` computes it once on the grid
 of every service's knobs, and the bound of any configuration of the composition is a sum of table entries.
 

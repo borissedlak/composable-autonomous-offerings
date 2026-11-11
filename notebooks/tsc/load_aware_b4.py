@@ -1,5 +1,5 @@
-"""Load- and worker-aware execution-time models: the models of Pegasus Node in every experiment on real data except
-the trees of B.3 (B.1, B.2, B.4 to C.2; the notebooks show them under the name Pegasus Node). They train on the
+"""Load- and worker-aware execution-time models: the models of Pegasus in every experiment on real data except
+the trees of B.3 (B.1, B.2, B.4 to C.2; the notebooks show them under the name Pegasus). They train on the
 benchmarks of the services only (WORKER_BENCHMARKS), never on a run of a chain; the description below says B.4, where
 the variant was first evaluated, and calls the one-worker benchmark models "current Pegasus".
 
@@ -51,8 +51,8 @@ from pegasus.real_data import CAMPAIGN, b4_chain_data, run_table, worker_benchma
 from pegasus.service_gp import configurations_of, run_statistics_belief
 
 EXTENDED = "benchmark-workers"   # training_campaign of real_chain_data under extended_training: the worker benchmarks
-VARIANT = "Pegasus Node (load-aware)"
-ABLATION = "Pegasus Node, more data"
+VARIANT = "Pegasus (load-aware)"
+ABLATION = "Pegasus, more data"
 N_TRAIN = None   # every run of the worker benchmarks, in a random order (seed)
 CACHE = CAMPAIGN.parent / "load_aware_b4"   # statics/load_aware_b4/
 
@@ -176,8 +176,8 @@ def sweep_bounds(sweep: str, settings: list, seeds: list, seed: int, alpha: floa
 
 
 CURRENT = {"load": ("b4a_load", "load_methods", "load_truth"), "arrivals": ("b4b_arrivals", "arrival_methods", "arrival_truth")}
-# read from the cached results of 2c_load.ipynb; the Oracle uses no model. The benchmark-only Pegasus Node is no longer
-# there: 2c_load shows the load-aware models under the name Pegasus Node, so the comparison holds the variant and the ablation
+# read from the cached results of 2c_load.ipynb; the Oracle uses no model. The benchmark-only Pegasus is no longer
+# there: 2c_load shows the load-aware models under the name Pegasus, so the comparison holds the variant and the ablation
 FROM_CURRENT = ("Oracle",)
 
 

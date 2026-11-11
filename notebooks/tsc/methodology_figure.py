@@ -1,6 +1,6 @@
 """The methodology overview (Fig. 2 of the Pegasus paper, Section IV), structured like the
 three subsections: (1) learn one GP per service, (2) turn it into a pessimistic execution-time model and the load
-phi_i(theta) of every service, (3) compose: Pegasus Node bounds every service by Kingman's bound and adds the service
+phi_i(theta) of every service, (3) compose: Pegasus bounds every service by Kingman's bound and adds the service
 bounds d_i(epsilon / K); Pegasus SNC bounds the whole application in one step from the product of M_i / (1 - phi_i).
 Notation as in the paper: x_i = <r_i, kappa_i>, c_i workers, K services, m_i^+ = m_i + z_gamma sigma_ep,i, load
 phi_i(theta) = M_i(theta) E[exp(-theta T)]^c_i, decay rate theta_i^*, service bound d_i(epsilon), PPG d_S(x, epsilon, gamma).
@@ -92,14 +92,14 @@ log_gap = log_worker_gap_mgf(workload["process"], workload["rate"], np.array([wo
 log_load = [theta_grid * mean[0] + 0.5 * theta_grid ** 2 * var[0] + log_gap for mean, var in beliefs]          # ln phi_i(theta)
 
 # ------------------------------------------------------------------------------
-# Step 3: Pegasus Node (service bounds, added) and Pegasus SNC (one bound), and the simulated application for reference
+# Step 3: Pegasus (service bounds, added) and Pegasus SNC (one bound), and the simulated application for reference
 # ------------------------------------------------------------------------------
 node_bounds = martingale_closed_form_node_bounds(beliefs, epsilon=alpha / K, path_workers=path_workers, **workload)[:, 0]   # d_i(epsilon / K), s
 per_node_bound = node_bounds.sum()
 snc_bound = network_service_bound(beliefs, epsilon=alpha, holder_exponents=[1] * K, path_workers=path_workers, **workload)[0]
 true_means = np.array([[true_demand(configurations(quality_target), specs[s])[0] for s in path]])
 noise = [specs[s]["noise"] for s in path]
-# the first service alone under the external arrivals, for the tail panel of Pegasus Node
+# the first service alone under the external arrivals, for the tail panel of Pegasus
 first_latency = simulate_chain(true_means[:, :1], noise[:1], n_items=200_000, item_correlation=0.0, rng=np.random.default_rng([seed, 1]),
                                workers=np.full((1, 1), workers), **workload)[0][0, :, 0]
 end_to_end = simulate_chain(true_means, noise, n_items=200_000, item_correlation=0.0, rng=np.random.default_rng([seed, 2]),
@@ -113,7 +113,7 @@ slack = latency_grid - mean_1
 tail_bound = np.minimum(1.0, norm.sf(slack / np.sqrt(var_1))
                         + np.exp(-theta_star[0] * slack + 0.5 * theta_star[0] ** 2 * var_1 + norm.logcdf((slack - theta_star[0] * var_1) / np.sqrt(var_1))))
 print(f"decay rates theta_i^* (1/s): {np.round(theta_star, 1)}; service bounds at epsilon/K (ms): {np.round(1e3 * node_bounds, 1)}; "
-      f"Pegasus Node {1e3 * per_node_bound:.0f} ms, Pegasus SNC {1e3 * snc_bound:.0f} ms, simulated p{100 * (1 - alpha):g} {1e3 * measured:.0f} ms; "
+      f"Pegasus {1e3 * per_node_bound:.0f} ms, Pegasus SNC {1e3 * snc_bound:.0f} ms, simulated p{100 * (1 - alpha):g} {1e3 * measured:.0f} ms; "
       f"utilization of the services {np.round(workload['rate'] * true_means[0] / workers, 2)}")
 
 # ------------------------------------------------------------------------------
@@ -276,7 +276,7 @@ ax_chain.text(0.5, 0.06, "target application: never executed", ha="center", va="
 # below the application, with room for the title of the Node panel
 compose_grid = fig.add_gridspec(1, 2, left=columns[2].x0, right=columns[2].x1, top=from_top(Y_PANELS + CHAIN_HEIGHT + 0.4),
                                 bottom=from_top(Y_BOTTOM), width_ratios=[1.1, 1.15], wspace=0.12)
-# Pegasus Node, per service: Kingman's bound on the tail of the latency of s1 gives its service bound d_1(epsilon / K)
+# Pegasus, per service: Kingman's bound on the tail of the latency of s1 gives its service bound d_1(epsilon / K)
 ax_tail = fig.add_subplot(compose_grid[0, 0])
 # shifted right, so that its tick labels and y label keep clear of the divider to step 2
 position = ax_tail.get_position()
@@ -315,7 +315,7 @@ ax_compose.set_xlabel("end-to-end latency (ms)")
 ax_compose.set_title("Node vs. SNC: PPG", fontsize=12)   # a header like the one of the Node panel
 ax_compose.grid(True, axis="x", linestyle=":", alpha=0.6)
 ax_compose.legend(loc="lower right", fontsize=10.5, framealpha=0.95)
-# the service bound of s1 is the first part of the sum of Pegasus Node
+# the service bound of s1 is the first part of the sum of Pegasus
 fig.add_artist(ConnectionPatch(xyA=(1e3 * node_bounds[0], alpha / K), coordsA=ax_tail.transData, xyB=(0.0, 1.0),
                                coordsB=ax_compose.transData, arrowstyle="-|>", mutation_scale=14, color="darkgreen", linewidth=1.3,
                                connectionstyle="arc3,rad=-0.2"))

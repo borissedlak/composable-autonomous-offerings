@@ -3,14 +3,14 @@ with a few training runs, and one service after the other moves up to its next n
 *schedule* decides which service moves next:
 
 - ALL_TOGETHER: the services in turn, in the order of the chain, so that all of them grow alike (the reference).
-- MOST_UNCERTAIN: the service whose uncertainty costs the bound of Pegasus Node the most (uncertainty_cost), computed
+- MOST_UNCERTAIN: the service whose uncertainty costs the bound of Pegasus the most (uncertainty_cost), computed
   from the models and the held-out configurations only, before any run of the chain: a rule that a user can follow.
 - LEAST_UNCERTAIN: the service whose uncertainty costs the least, the control.
 
 The training runs of every service come in one fixed random order per seed (n_train=None in real_chain_data), and a
 training set of n runs is the first n of them (training_prefix), so that a step only adds runs.
 
-load_aware_pegasus (real data): Pegasus Node uses load-aware execution-time models (load_aware in data.py: the inputs
+load_aware_pegasus (real data): Pegasus uses load-aware execution-time models (load_aware in data.py: the inputs
 with the number of workers and the arrival rate, as in load_aware_b4.py), fitted on the same training runs as the
 models of the baselines, which keep the inputs without workers and rate. The cost of uncertainty of a service is then
 read from the load-aware models.
@@ -48,7 +48,7 @@ def training_prefix(data, n_by_service: dict):
 
 
 def uncertainty_cost(data, models: dict, alpha: float, model_data=None) -> dict:
-    """service -> how much the bound of Pegasus Node at that service would shrink if the model knew the mean execution
+    """service -> how much the bound of Pegasus at that service would shrink if the model knew the mean execution
     time: the median over the held-out configurations of the node bound (at alpha / K, as in pegasus_bound) with the
     pessimistic mean of the belief minus the node bound with the predicted mean, in s; inf where only the pessimistic
     mean overloads the service. Uses the models and the held-out configurations and arrival rates only, no measured
@@ -80,12 +80,12 @@ def incremental_training(data, schedule: str, levels: list, alpha: float, confid
     service_levels and moves up one level per step, one service per step, until every service has all its runs.
     Conformal sets aside the share calibration_share of the runs of the smallest service for calibration, and at least
     19, and is left out where too few runs remain (compare_methods).
-    load_aware_pegasus: Pegasus Node with load-aware models (module docstring).
+    load_aware_pegasus: Pegasus with load-aware models (module docstring).
     Returns one entry per state, in order: (runs per service, name -> (group, latency per held-out configuration),
     name -> (training time, evaluation time), the service that moves up next or None)."""
     steps = service_levels(data, levels)
     level, states, turn = {s: 0 for s in data.path}, [], 0
-    # with load-aware models, compare_methods computes the baselines only, and Pegasus Node is added below
+    # with load-aware models, compare_methods computes the baselines only, and Pegasus is added below
     leave = leave_out + ((PROPOSED,) if load_aware_pegasus else ())
     while True:
         n = {s: steps[s][level[s]] for s in data.path}
@@ -119,7 +119,7 @@ def incremental_training(data, schedule: str, levels: list, alpha: float, confid
 
 
 def schedule_figure(totals: dict, statistics: dict, title: str, level_label: str, name: str = None) -> None:
-    """The tightness of Pegasus Node under every schedule over the total number of training runs of the chain (all
+    """The tightness of Pegasus under every schedule over the total number of training runs of the chain (all
     services together, logarithmic). statistics: from sweep_statistics over the steps of the schedule, with the
     schedules in place of the methods; totals: schedule -> total runs at every step, the median over the seeds; per
     step the median over the seeds, the band from the smallest to the largest seed, a filled marker where the bound
