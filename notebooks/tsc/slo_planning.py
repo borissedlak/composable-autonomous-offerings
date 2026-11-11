@@ -485,10 +485,11 @@ def solver_agreement(slsqp: dict, exhaustive: dict, seconds: dict) -> pd.DataFra
 def _tradeoff_panel(ax, scenario: Scenario, comps: list, chosen: pd.Series, app: str, worker_budget: int, colors: dict, markers: dict,
                     measurement: tuple = None, single: bool = False, third: bool = False) -> None:
     """One panel of `tradeoff_figure`: scenario, its compositions `comps` at its rate, its plan row `chosen`. measurement:
-    (data quality, predicted bound, measured p95, measured p99), all of one earlier deployment, drawn at its data quality (ms)
-    or None; with a predicted bound of None only the measurement. single: the panel is a figure of its own (larger fonts, no
+    (data quality, predicted bound, end-to-end latencies of all its requests in ms), all of one earlier deployment, drawn at its
+    data quality as a box plot of the requests (box: 25th to 75th percentile with the median, whiskers: 1.5 interquartile ranges,
+    points beyond; bar: 95th percentile, the quantile that the bound is about) or None; with a predicted bound of None only the box plot. single: the panel is a figure of its own (larger fonts, no
     title, which the caption gives). third: for a figure one third of the usual width: short x label, a legend of the compositions
-    only (the measurement and the extrapolated stretch are explained in the text)."""
+    only (the measurement and the extrapolated stretch are explained in the text); `_third_legend` draws it."""
     small, big = (9, 12) if single else (8, 10)
     budget = scenario.max_workers if scenario.max_workers is not None else worker_budget
     extrapolated_q = False
@@ -517,29 +518,47 @@ def _tradeoff_panel(ax, scenario: Scenario, comps: list, chosen: pd.Series, app:
     if chosen["feasible"] or chosen.get("best_effort", False):   # hollow star: best effort, no configuration meets the SLOs
         ax.plot(chosen["data_quality"], chosen["latency_ms"], marker="*", markersize=14, color=colors[chosen["composition"]],
                 markerfacecolor=colors[chosen["composition"]] if chosen["feasible"] else "white",
-                markeredgecolor="black", linestyle="none", zorder=5)
+                markeredgecolor="black", linestyle="none", zorder=9)   # above the box plot (zorder 6 and 7) and the bound
         note = ax.annotate(f"{int(chosen['workers'])}w", (chosen["data_quality"], chosen["latency_ms"]), textcoords="offset points",
-                           xytext=(0, 9), ha="center", fontsize=big)
+                           xytext=(0, 9), ha="center", fontsize=big, zorder=10)
         low, high = ax.get_xlim()
         if single and chosen["data_quality"] > high - 0.08 * (high - low):
             note.set_ha("right")   # a star near the right edge: its label would reach beyond the figure
             note.xyann = (5, 9)
     if measurement is not None:
-        q, bound, p95, p99 = measurement
+        q, bound, latency = measurement
         if bound is not None:
             ax.plot(q, bound, marker="D", markersize=6, markerfacecolor="white", markeredgecolor="black", linestyle="none", zorder=6,
                     label=None if third else "bound, current models")
-        ax.plot([q, q], [p95, p99], color="black", linewidth=1.5, marker="_", markersize=6, zorder=6)   # not errorbar: its 0 lower error stretches a log axis
-        ax.plot(q, p95, marker="o", markersize=5, color="black", linestyle="none", zorder=6, label=None if third else "measured p95 (bar to p99)")
+        p95 = np.percentile(latency, 95)
+        # the box is 7% of the width of the x axis wide, so that it keeps its look in a narrow and in a wide panel
+        xmin, xmax = ax.get_xlim()
+        half = 0.035 * (xmax - xmin)
+        black = dict(color="black", linewidth=1.5)
+        # the textbook box plot: box from the 25th to the 75th percentile with the median, whiskers to the most extreme request within
+        # 1.5 interquartile ranges of the box, the requests beyond them as points
+        ax.boxplot([latency], positions=[q], widths=2 * half, whis=1.5, manage_ticks=False, patch_artist=True,
+                   boxprops=dict(facecolor="white", edgecolor="black", linewidth=1.5, zorder=6), medianprops=dict(color="black", linewidth=1.5, zorder=7),
+                   whiskerprops=dict(**black, zorder=6), capprops=dict(**black, zorder=6),
+                   flierprops=dict(marker=".", markersize=2, markeredgecolor="0.3", markerfacecolor="0.3", alpha=0.5, zorder=5))
+        # the p95, which the bound is about: twice as wide as the box and in a color that no composition and no other mark has
+        xlim = ax.get_xlim()   # with the box
+        ax.plot([q - 2 * half, q + 2 * half], [p95, p95], color="magenta", linewidth=2.5, solid_capstyle="butt", zorder=8)
+        ax.set_xlim(xlim)   # the bar, wider than the box, does not stretch the axis (that would change its ticks)
+        if not third:
+            ax.plot([], [], marker="s", markersize=8, markerfacecolor="white", markeredgecolor="black", linestyle="none",
+                    label="measured requests: box quartiles, whiskers 1.5 IQR, bar p95")
     if extrapolated_q and not third:
         ax.plot([], [], color="gray", linestyle="--", marker="o", markersize=3, markerfacecolor="white", label="extrapolated")
     if not single:
         ax.set_title(f"{scenario.short}, {scenario.rate:g}/s, ≤ {budget} w", fontsize=11)
     ax.set_yscale("log")
-    ax.set_xlabel(QUALITY_UNITS[app], fontsize=big)   # the meaning and the unit of q, also in the narrow figures
+    ax.set_xlabel(QUALITY_UNITS[app], fontsize=10 if third else big)   # the meaning and the unit of q, also in the narrow figures (10 pt: the longest label must fit a third)
     ax.grid(True, linestyle=":", alpha=0.6)
-    ax.legend(fontsize=small if single else 8, loc="best", framealpha=0.95,
-              **(dict(handlelength=1.0, labelspacing=0.2, borderpad=0.3, borderaxespad=0.3) if third else {}))
+    _violation_zone(ax, scenario)
+    if third:
+        return   # its legend: `_third_legend`, once the size of the figure is final, because where it fits depends on it
+    ax.legend(fontsize=small if single else 8, loc="best", framealpha=0.95)
 
 
 def _testbed_panel(ax, scenario: Scenario, latency: np.ndarray, bound: float) -> None:
@@ -577,13 +596,13 @@ def bound_of_knobs(comp: Composition, knobs: dict) -> float:
 
 
 def _measurement(scenario: Scenario, comps: list, measured: dict, deployed: pd.DataFrame) -> tuple:
-    """(data quality, bound, measured p95, measured p99) of the deployed plan of a scenario: the bound (ms) is the one that
-    the current models give its configuration, not the one that it was planned with."""
+    """(data quality, bound, latencies) of the deployed plan of a scenario: the bound (ms) is the one that the current models
+    give its configuration, not the one that it was planned with; latencies: the end-to-end latency (ms) of all its requests."""
     row = deployed[deployed["scenario"] == scenario.name].iloc[0]
     knobs = json.loads(row["knobs"])
     comp = next(c for c in comps if c.experiment == row["experiment"])
     latency = measured[scenario.name][0]
-    return knobs["shared.data_quality"], bound_of_knobs(comp, knobs), np.percentile(latency, 95), np.percentile(latency, 99)
+    return knobs["shared.data_quality"], bound_of_knobs(comp, knobs), latency
 
 
 def _trade_colors(comps: dict) -> tuple:
@@ -602,8 +621,8 @@ def tradeoff_figure(comps: dict, plans: dict, scenarios: list, app: str, worker_
     data quality lies outside the training runs of a service of the composition (`Composition.q_range`). Dashed lines: the scenario's
     latency and quality constraints. Star: the plan, labeled with its total workers (hollow: best effort, no configuration
     meets the SLOs). measured, deployed (testbed requests and plans of an earlier deployment, see `measured_c2`): also a
-    diamond (the bound that the current models give that deployment's configuration) and a dot with a bar from the measured p95 to the measured p99 (ms), at its data
-    quality. name: file name in figures/tsc/experimental-results, or None."""
+    diamond (the bound that the current models give that deployment's configuration) and a box plot of the measured end-to-end latencies (ms) of its requests
+    (box: 25th to 75th percentile with the median, whiskers: 1.5 interquartile ranges, points beyond; bar: 95th percentile), at its data quality. name: file name in figures/tsc/experimental-results, or None."""
     import matplotlib.pyplot as plt
     from pegasus.figures import paper_style, save_figure
     colors, markers = _trade_colors(comps)
@@ -629,26 +648,27 @@ def _short_log_ticks(axis) -> None:
                 return ""
             return f"{x / 1000:g}k" if x >= 1000 else f"{x:g}"
     axis.set_major_formatter(Short())
-    axis.set_minor_formatter(Short(labelOnlyBase=False, minor_thresholds=(1, 0.4)))
+    axis.set_minor_formatter(Short(labelOnlyBase=False, minor_thresholds=(2, 0.4)))   # labels at 2 and 5 below two decades
 
 
 def tradeoff_panel_figure(comps: list, plan: pd.Series, scenario: Scenario, app: str, worker_budget: int, measured: dict = None,
                           deployed: pd.DataFrame = None, show_bound: bool = True, third: bool = False, ylabel: bool = True,
-                          name: str = None) -> None:
+                          name: str = None, extras: list = None, finish: bool = True):
     """One panel of `tradeoff_figure` as a figure of its own, at the size of every evaluation figure (comps: the five
     compositions at the scenario's rate; plan: its plan row). measured, deployed: the measurement of the deployed plan as in
     `tradeoff_figure`; show_bound False: without the diamond, for a deployed configuration that is the plan (the star is then
     its bound). third: exactly one third of the width of an evaluation figure and its height, so that three of them stand side
     by side in the width of one (the left margin shrinks to the labels of the vertical axis, whose ticks are short: 1k).
     ylabel False: without the axis label, which the first of the figures gives for all. name: file name in
-    figures/tsc/experimental-results, or None."""
+    figures/tsc/experimental-results, or None. extras: further legend entries (see `_tradeoff_panel`). finish False: return
+    (figure, axes) without saving and showing, for `tradeoff_third_figures`, which sizes several figures together."""
     import matplotlib.pyplot as plt
     from matplotlib.ticker import MaxNLocator
     from pegasus.figures import FIGSIZE, paper_figure, paper_style, plain_log_ticks, save_figure
     colors, markers = _trade_colors({scenario.name: comps})
     measurement = None if measured is None else _measurement(scenario, comps, measured, deployed)
     if measurement is not None and not show_bound:
-        measurement = (measurement[0], None, measurement[2], measurement[3])
+        measurement = (measurement[0], None, measurement[2])
     with paper_style():
         if third:
             width, height = FIGSIZE[0] / 3, FIGSIZE[1]
@@ -666,8 +686,131 @@ def tradeoff_panel_figure(comps: list, plan: pd.Series, scenario: Scenario, app:
             fig.canvas.draw()
             left = (ax.bbox.x0 - ax.yaxis.get_tightbbox(fig.canvas.get_renderer()).x0) / fig.dpi + 0.005   # the labels of the vertical axis, no more
             ax.set_position((left / width, bottom / height, 1 - (left + right) / width, 1 - (bottom + top) / height))
+        if not finish:
+            return fig, ax
+        if third:
+            _third_legend(ax, extras)
         if name is not None:
             save_figure(fig, name)
+        plt.show()
+
+
+def _violation_zone(ax, scenario: Scenario) -> None:
+    """The zone of the panel where the SLOs of the scenario would be violated, in the color of the failure zone of the other
+    figures (pegasus.figures.FAILURE_COLOR): above its latency limit, left of its quality limit. Call when everything is drawn:
+    the limits of the axes are then fixed, so that the zone, which reaches far beyond them, does not stretch the axes."""
+    from pegasus.figures import FAILURE_COLOR
+    if scenario.max_latency is not None:
+        ylim = ax.get_ylim()
+        ax.axhspan(1e3 * scenario.max_latency, 1e12, color=FAILURE_COLOR, linewidth=0, zorder=0)
+        ax.set_ylim(ylim)   # only the axis that the zone would stretch is fixed, the other keeps its ticks
+    if scenario.min_quality is not None:
+        xlim = ax.get_xlim()
+        ax.axvspan(-1e12, scenario.min_quality, color=FAILURE_COLOR, linewidth=0, zorder=0)
+        ax.set_xlim(xlim)
+
+
+def _drawn_segments(ax) -> list:
+    """(x, y_low, y_high) of everything drawn in a trade-off panel, sampled along its lines and the box of the box plot (not
+    the dashed limits), for `legend_inside`, which counts the samples that a legend would hide."""
+    ax.figure.canvas.draw()
+    xmin, xmax = ax.get_xlim()
+    ymin, ymax = ax.get_ylim()
+    points = []   # (x, y) in data coordinates
+    def along(xs, ys):
+        xs, ys = np.asarray(xs, dtype=float), np.asarray(ys, dtype=float)
+        for (x0, y0), (x1, y1) in zip(zip(xs[:-1], ys[:-1]), zip(xs[1:], ys[1:])):
+            if np.isfinite([x0, y0, x1, y1]).all():
+                points.extend(zip(np.linspace(x0, x1, 12), np.linspace(y0, y1, 12)))
+        points.extend((x, y) for x, y in zip(xs, ys) if np.isfinite(x) and np.isfinite(y))
+    for line in ax.lines:
+        xs, ys = line.get_xdata(), line.get_ydata()
+        if len(xs) == 0:
+            continue   # a handle for the legend
+        if line.get_transform() != ax.transData:
+            continue   # the dashed limits (axhline, axvline): reference lines, which a legend may cover where no data lies
+        along(xs, ys)
+    renderer = ax.figure.canvas.get_renderer()
+    for text in ax.texts:   # the number of workers at the star
+        box = text.get_window_extent(renderer)
+        corners = ax.transData.inverted().transform([[box.x0, box.y0], [box.x1, box.y1]])
+        low, high = np.sort(corners[:, 1])
+        # a margin of 15% of the height of the text on the logarithmic axis, so that the legend does not touch the text either
+        points.extend((x, y) for x in np.linspace(corners[0, 0], corners[1, 0], 6) for y in np.geomspace(low / 1.1, high * 1.1, 5))
+    for patch in ax.patches:   # the box of the box plot, not the zone of the violated SLO (zorder 0), which reaches beyond the axes
+        if patch.get_zorder() <= 0:
+            continue
+        corners = patch.get_path().vertices
+        corners = ax.transData.inverted().transform(patch.get_transform().transform(corners))
+        along(corners[:, 0], corners[:, 1])
+    return [(x, y, y) for x, y in points]
+
+
+def _third_legend(ax, extras: list = None) -> None:
+    """The legend of a third-width trade-off panel: the compositions, then `extras` ((handle, label) entries, see
+    `_panel_notes`). It goes where it hides the fewest lines and the box plot (`legend_inside`), and the top of the logarithmic
+    axis may double (at most 3 times) to make room; the font is that of the other legends, 10 pt."""
+    from pegasus.figures import legend_inside
+    handles, labels = ax.get_legend_handles_labels()
+    for handle, label in extras or []:
+        handles.append(handle)
+        labels.append(label)
+    legend_inside(ax, handles, labels, _drawn_segments(ax), locations=("upper left", "lower left", "lower right", "upper right"),
+                  max_doublings=3, fontsize=10, framealpha=0.95, handlelength=1.0, labelspacing=0.2, borderpad=0.3, borderaxespad=0.3)
+
+
+# the descriptions of what a trade-off panel draws, as legend entries (handle, label) of `tradeoff_third_figures`
+def _panel_notes() -> dict:
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch
+    from pegasus.figures import math_label
+    return dict(slo=(Line2D([], [], color="black", linestyle="--", linewidth=1), "SLO limit"),
+                plan=(Line2D([], [], marker="*", markersize=12, markerfacecolor="0.75", markeredgecolor="black", linestyle="none"), "target config."),
+                box=(Patch(facecolor="white", edgecolor="black", linewidth=1.5), "latency"),
+                bar=(Line2D([], [], color="magenta", linewidth=2.5), f"latency {math_label('p95')}"))
+
+
+def tradeoff_third_figures(selected: dict, compositions: dict, plans: dict, scenarios: dict, worker_budget: int, measured: dict,
+                           deployed: pd.DataFrame, notes: dict) -> None:
+    """The selected panels as third-width figures that stand side by side in the width of one evaluation figure
+    (`tradeoff_panel_figure`, third=True), the first with the label of the vertical axis. Their plot areas are equally wide:
+    every file is as wide as its own axis labels need and the rest of FIGSIZE[0] goes equally to the three plot areas.
+    selected: application -> scenario name, in the order of the figures; compositions: scenario name -> compositions; plans:
+    (application, scenario name) -> plan table; scenarios: scenario name -> Scenario; notes: application -> keys of
+    _panel_notes ("slo": the dashed limits, "plan": the star, "box": the box plot, "bar": the p95 bar) that its legend describes.
+    measured, deployed: see `measured_c2`. File names: c2_tradeoff_<scenario id>."""
+    import matplotlib.pyplot as plt
+    from pegasus.figures import FIGSIZE, MARGIN_TOP, paper_style, save_figure
+    available = _panel_notes()
+    app_of = {name: app for app, name in selected.items()}
+    bottom, top, right = THIRD_MARGINS
+    top = max(top, MARGIN_TOP)   # room for the top tick label of a logarithmic axis that the legend extended (e.g. 100k)
+    with paper_style():
+        panels = []
+        for k, (app, name) in enumerate(selected.items()):
+            fig, ax = tradeoff_panel_figure(compositions[name], plans[(app, name)].iloc[0], scenarios[name], app, worker_budget,
+                                            measured=measured, deployed=deployed, show_bound=False, third=True, ylabel=(k == 0),
+                                            finish=False)
+            panels.append((name, fig, ax))
+        ylims = [ax.get_ylim() for _, _, ax in panels]
+        # two passes: the legend of a panel may extend its logarithmic axis (a label like 100k), which widens the left margin, and the
+        # legend depends on the size of the plot area, which the margins set
+        for _ in range(2):
+            lefts = []
+            for _, fig, ax in panels:
+                fig.canvas.draw()
+                lefts.append((ax.bbox.x0 - ax.yaxis.get_tightbbox(fig.canvas.get_renderer()).x0) / fig.dpi + 0.005)   # the labels of the vertical axis, no more
+            plot_width = (FIGSIZE[0] - sum(lefts) - len(panels) * right) / len(panels)
+            for (name, fig, ax), left, ylim in zip(panels, lefts, ylims):
+                width, height = left + plot_width + right, FIGSIZE[1]
+                fig.set_size_inches(width, height)
+                ax.set_position((left / width, bottom / height, plot_width / width, 1 - (bottom + top) / height))
+                if ax.get_legend() is not None:
+                    ax.get_legend().remove()
+                ax.set_ylim(*ylim)
+                _third_legend(ax, [available[key] for key in notes.get(app_of[name], [])])
+        for name, fig, ax in panels:
+            save_figure(fig, f"c2_tradeoff_{name.split()[0].lower().replace('-', '_')}")
         plt.show()
 
 
