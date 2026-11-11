@@ -83,6 +83,46 @@ def model_of(data) -> dict:
     return dict(zip(data.path, getattr(data, "services", None) or data.path))
 
 
+def training_seconds_per_service(data) -> dict:
+    """Service type -> the time (s) that training its GP took (with its spread GP, real data), on the training runs of `data` as
+    in fit_services, but for every type on its own: the time of the first training of the fit, also when it is read from the model
+    cache (cached_model). For the cost of a tree whose nodes would not share the models of their service type: the sum over its
+    nodes of the time of their type."""
+    model = model_of(data)
+    x_train = model_inputs(data.x_train, data.workers_column)
+    seconds = {}
+    for s in sorted(set(model.values())):
+        x_s = configurations_of(x_train, s)
+        with training_clock() as clock:
+            if data.y_train_spread is not None:
+                train_run_statistics_models({s: x_s}, {s: data.y_train[s]}, {s: data.y_train_spread[s]}, [s])
+            else:
+                train_gp_models({s: x_s}, {s: data.y_train[s]}, [s])
+        seconds[s] = clock.seconds
+    return seconds
+
+
+def baseline_training_seconds_per_service(data, alpha: float, confidence: float, n_calibration: int, model_seed: int) -> dict:
+    """The same as training_seconds_per_service for the two baselines that train their own models per service type on the
+    monitored latencies (compare_tree_methods): method ("Quantile Union", "Conformal") -> service type -> the time (s) that
+    training its model took (for Conformal also its calibration), at the quantile level of this tree (alpha / its number of
+    services), so that every tree has its own times; the first training of a fit, also when it is read from the model cache."""
+    model = model_of(data)
+    n_services = len(data.path)
+    log_target = data.y_train_spread is not None
+    x_load, x_test_load = model_inputs(data.x_train_load, data.workers_column), model_inputs(data.x_test_load, data.workers_column)
+    seconds = {"Quantile Union": {}, "Conformal": {}}
+    for s in sorted(set(model.values())):
+        key = next(k for k in sorted(model) if model[k] == s)
+        x = {s: configurations_of(x_test_load, key)[:1]}   # one configuration: only the training time is wanted
+        seconds["Quantile Union"][s] = summed_service_quantiles(x_load, data.monitored_latencies, [s], alpha / n_services, x,
+                                                                return_seconds=True, log_target=log_target)[1]
+        seconds["Conformal"][s] = conformal_service_bounds(x_load, data.monitored_latencies, [s], alpha / n_services, x,
+                                                           miscoverage=1 - confidence, n_calibration=n_calibration, seed=model_seed,
+                                                           return_seconds=True, log_target=log_target)[1]
+    return seconds
+
+
 def pegasus_bound(data, models: dict, alpha: float) -> np.ndarray:
     """Pegasus: the union bound over the closed-form martingale node bounds, per held-out configuration (s). The
     waiting time at a service is bounded by Kingman's martingale bound exp(-theta w); with a Gaussian execution time,
@@ -175,7 +215,8 @@ def compare_tree_methods(data, models: dict, alpha: float, confidence: float, n_
     - GP Sum: the joint Gaussian quantile of every path at alpha, maximum over the paths (a point prediction per path).
     - GP Queue: the quantile of every service at alpha, added along every path, maximum over the paths.
     - Quantile Union, Conformal: the latency of every service at alpha / N (N services in the tree, the union bound over
-      the services), added along every path, maximum over the paths.
+      the services), added along every path, maximum over the paths. Predicted for every node on its own, and the training
+      time is that of one model per node, as for the other methods.
     - Oracle: the measured node quantiles of data.node_quantiles, added along every path, maximum over the paths.
     Every node bound and every path is computed on its own, also where two have the same service types, so that the
     evaluation time is that of a tree of different services. Returns the two dictionaries of compare_methods.
@@ -195,13 +236,12 @@ def compare_tree_methods(data, models: dict, alpha: float, confidence: float, n_
 
     def per_service(latency_of):
         # a baseline that trains its own models per service: latency_of(s, x) gives (latency per configuration of x, training
-        # time), where x holds the held-out inputs of every key of the service type s one after the other
+        # time) of the model of service type s at the held-out inputs x of one node. Every node on its own, as for the GPs above
+        # (a prediction per node, and the training time of a model per node, as if the nodes did not share their models)
         outputs, training_seconds = {}, 0.0
-        for s in services:
-            of_type = [key for key in keys if model[key] == s]
-            inputs = [configurations_of(x_test_load, key) for key in of_type]
-            latency, seconds = latency_of(s, {s: np.vstack(inputs)})
-            outputs.update(zip(of_type, np.split(latency, np.cumsum([len(x) for x in inputs])[:-1])))
+        for key in keys:
+            latency, seconds = latency_of(model[key], {model[key]: configurations_of(x_test_load, key)})
+            outputs[key] = latency
             training_seconds += seconds
         return max_path_sum(paths, lambda k, previous: outputs[data.path[k]]), training_seconds
 
@@ -524,7 +564,8 @@ def tightness_sweep_figure(settings: list, statistics: dict, xlabel: str, title:
 
 def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xlabel: str, title: str, level_label: str,
                               tick_labels: list = None, log_x: bool = True, name: str = None, time_halves: tuple = None,
-                              overlay: tuple = None, onset: tuple = None, tightness_fraction: float = 1.0) -> None:
+                              overlay: tuple = None, onset: tuple = None, tightness_fraction: float = 1.0,
+                              ) -> None:
     """Three separate figures over a sweep. First: the tightness of every method, as in tightness_sweep_figure.
     Second: the training time (s), one line per set of trained models; methods that use the same models (same_models)
     share a line, and its legend names them. Third: the evaluation time (s) of every method. The lines of the time
@@ -593,6 +634,8 @@ def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xla
         for what, side in (("training", "left"), ("evaluation", "right")):
             fig, ax = half_figure(side, shared_y=False) if time_halves else paper_figure()
             _sweep_axis(ax, settings, *(time_halves or (xlabel, tick_labels)), log_x)
+            if time_halves:
+                ax.xaxis.label.set_fontsize(10)   # the label is as wide as the plot area of a half figure
             segments = []
             # training: one line per set of shared models, whose names a half figure writes one per line; evaluation: one line per method
             group_label = lambda group: (",\n" if time_halves else ", ").join(short(method) for method in group)
@@ -602,8 +645,11 @@ def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xla
             # median carries the trend; the legend then avoids the medians only
             band = what != "evaluation"
             for method, label in lines:
-                sweep_line(ax, settings, times[method][what], method, label=label, band=band)
-                segments += sweep_segments(settings, times[method][what]) if band else [(x, y, y) for x, y in _median_points(settings, times[method][what])]
+                values = times[method][what]
+                sweep_line(ax, settings, values, method, label=label, band=band)
+                segments += sweep_segments(settings, values) if band else _along([(x, y, y) for x, y in _median_points(settings, values)])
+                if band:   # the line rises steeply where the models are not shared: its stretches between the points must stay clear of the legend too
+                    segments += _along([(x, y, y) for x, y in _median_points(settings, values)])
             ax.set_yscale("log")
             plain_log_ticks(ax.yaxis)
             ax.set_ylabel(f"{what} time (s, log scale)")
@@ -616,11 +662,24 @@ def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xla
                 fit_x_tick_labels(ax)
             handles, labels = ax.get_legend_handles_labels()
             # the times span the whole width at the top, so the log axis may grow upward to make room for the legend
-            legend_inside(ax, handles, labels, segments, max_doublings=5, title="models trained for" if what == "training" else None,
+            legend_inside(ax, handles, labels, segments, max_doublings=10, title="models trained for" if what == "training" else None,
                           ncol=1 if time_halves else 2, fontsize=10, title_fontsize=10, framealpha=0.95, columnspacing=1.0, handletextpad=0.4)
+        if time_halves:
+            # again: a legend that made the axis grow upward (labels like 1000) needs wider tick labels
+            fit_half_pair([ax for _, _, ax, _ in panels])
+        for what, fig, ax, segments in panels:
             if name is not None:
                 save_figure(fig, f"{name}_{what}")
         plt.show()
+
+
+def _along(points: list) -> list:
+    """(x, y, y) points of a line on a logarithmic vertical axis with the points sampled between each two neighbors too, for
+    legend_inside: the legend must stay clear of the stretches between the points of a steeply rising line as well."""
+    dense = list(points)
+    for (x0, y0, _), (x1, y1, _) in zip(points[:-1], points[1:]):
+        dense += [(x, y, y) for x, y in zip(np.linspace(x0, x1, 15), np.geomspace(y0, y1, 15))]
+    return dense
 
 
 def _sweep_axis(ax, settings: list, xlabel: str, tick_labels: list, log_x: bool) -> None:
