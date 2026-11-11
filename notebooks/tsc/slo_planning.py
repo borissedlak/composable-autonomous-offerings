@@ -492,6 +492,10 @@ def _tradeoff_panel(ax, scenario: Scenario, comps: list, chosen: pd.Series, app:
     only (the measurement and the extrapolated stretch are explained in the text); `_third_legend` draws it."""
     small, big = (9, 12) if single else (8, 10)
     budget = scenario.max_workers if scenario.max_workers is not None else worker_budget
+    if chosen["feasible"]:
+        # every line shows its best bound with the workers of the plan (c, the total number of workers), so that the star lies on the
+        # line of its composition; a best-effort plan (hollow star) keeps the limit of the scenario
+        budget = int(chosen["workers"])
     extrapolated_q = False
     for comp in comps:
         if not provides(comp, scenario.requires):
@@ -502,6 +506,8 @@ def _tradeoff_panel(ax, scenario: Scenario, comps: list, chosen: pd.Series, app:
         y = 1e3 * np.where(np.isfinite(best), best, np.nan)
         # a quality outside the training runs of any service of the composition: its GP extrapolates the quality input
         outside = np.array([any(not lo <= q <= hi for lo, hi in comp.q_range.values()) for q in comp.qualities])
+        if not np.isfinite(y).any():
+            continue   # no configuration with the workers of the plan: no line and no legend entry
         near = outside.copy()   # the dashed stretch also reaches the neighboring trained point, so that it joins the solid line
         near[1:] |= outside[:-1]
         near[:-1] |= outside[1:]
@@ -519,7 +525,7 @@ def _tradeoff_panel(ax, scenario: Scenario, comps: list, chosen: pd.Series, app:
         ax.plot(chosen["data_quality"], chosen["latency_ms"], marker="*", markersize=14, color=colors[chosen["composition"]],
                 markerfacecolor=colors[chosen["composition"]] if chosen["feasible"] else "white",
                 markeredgecolor="black", linestyle="none", zorder=9)   # above the box plot (zorder 6 and 7) and the bound
-        note = ax.annotate(f"{int(chosen['workers'])}w", (chosen["data_quality"], chosen["latency_ms"]), textcoords="offset points",
+        note = ax.annotate(f"c={int(chosen['workers'])}", (chosen["data_quality"], chosen["latency_ms"]), textcoords="offset points",
                            xytext=(0, 9), ha="center", fontsize=big, zorder=10)
         low, high = ax.get_xlim()
         if single and chosen["data_quality"] > high - 0.08 * (high - low):
@@ -551,7 +557,7 @@ def _tradeoff_panel(ax, scenario: Scenario, comps: list, chosen: pd.Series, app:
     if extrapolated_q and not third:
         ax.plot([], [], color="gray", linestyle="--", marker="o", markersize=3, markerfacecolor="white", label="extrapolated")
     if not single:
-        ax.set_title(f"{scenario.short}, {scenario.rate:g}/s, ≤ {budget} w", fontsize=11)
+        ax.set_title(f"{scenario.short}, {scenario.rate:g}/s, c ≤ {budget}", fontsize=11)
     ax.set_yscale("log")
     ax.set_xlabel(QUALITY_UNITS[app], fontsize=10 if third else big)   # the meaning and the unit of q, also in the narrow figures (10 pt: the longest label must fit a third)
     ax.grid(True, linestyle=":", alpha=0.6)
@@ -616,7 +622,8 @@ def tradeoff_figure(comps: dict, plans: dict, scenarios: list, app: str, worker_
     """One figure for an application with one panel per scenario (comps: scenario name -> the compositions at the
     scenario's arrival rate; plans: (app, scenario name) -> plan table). In a panel, one line per composition that
     provides the scenario's capabilities: the smallest Pegasus bound on the p95 end-to-end latency (ms, log scale) over
-    its configurations within the scenario's worker limit (worker_budget if it has none) and its model constraint, at
+    its configurations within the workers c of the scenario's plan (the scenario's worker limit, or worker_budget if it has none, for a
+    best-effort plan) and its model constraint, at
     every data quality (x axis); a gap where no such configuration has a finite bound; dashed with hollow markers where the
     data quality lies outside the training runs of a service of the composition (`Composition.q_range`). Dashed lines: the scenario's
     latency and quality constraints. Star: the plan, labeled with its total workers (hollow: best effort, no configuration
@@ -773,8 +780,9 @@ def _panel_notes() -> dict:
 def tradeoff_third_figures(selected: dict, compositions: dict, plans: dict, scenarios: dict, worker_budget: int, measured: dict,
                            deployed: pd.DataFrame, notes: dict) -> None:
     """The selected panels as third-width figures that stand side by side in the width of one evaluation figure
-    (`tradeoff_panel_figure`, third=True), the first with the label of the vertical axis. Their plot areas are equally wide:
-    every file is as wide as its own axis labels need and the rest of FIGSIZE[0] goes equally to the three plot areas.
+    (`tradeoff_panel_figure`, third=True), the first with the label of the vertical axis. All files have exactly the same size,
+    FIGSIZE[0] / 3 wide and FIGSIZE[1] high, so that LaTeX prints them at the same scale, and the same plot area: its left margin is
+    that of the widest axis labels (the first figure's), the others leave that strip empty.
     selected: application -> scenario name, in the order of the figures; compositions: scenario name -> compositions; plans:
     (application, scenario name) -> plan table; scenarios: scenario name -> Scenario; notes: application -> keys of
     _panel_notes ("slo": the dashed limits, "plan": the star, "box": the box plot, "bar": the p95 bar) that its legend describes.
@@ -800,9 +808,10 @@ def tradeoff_third_figures(selected: dict, compositions: dict, plans: dict, scen
             for _, fig, ax in panels:
                 fig.canvas.draw()
                 lefts.append((ax.bbox.x0 - ax.yaxis.get_tightbbox(fig.canvas.get_renderer()).x0) / fig.dpi + 0.005)   # the labels of the vertical axis, no more
-            plot_width = (FIGSIZE[0] - sum(lefts) - len(panels) * right) / len(panels)
-            for (name, fig, ax), left, ylim in zip(panels, lefts, ylims):
-                width, height = left + plot_width + right, FIGSIZE[1]
+            left = max(lefts)
+            width, height = FIGSIZE[0] / len(panels), FIGSIZE[1]
+            plot_width = width - left - right
+            for (name, fig, ax), ylim in zip(panels, ylims):
                 fig.set_size_inches(width, height)
                 ax.set_position((left / width, bottom / height, plot_width / width, 1 - (bottom + top) / height))
                 if ax.get_legend() is not None:
