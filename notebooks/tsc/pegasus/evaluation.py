@@ -535,7 +535,7 @@ def sweep_segments(settings, values: np.ndarray) -> list:
 
 
 def tightness_sweep_figure(settings: list, statistics: dict, xlabel: str, title: str, level_label: str, tick_labels: list = None,
-                           log_x: bool = True, name: str = None, half: str = None) -> None:
+                           log_x: bool = True, name: str = None, half: str = None, marked: dict = None) -> None:
     """Tightness of every method over a sweep, one panel: per method the median over the seeds with the band from the
     smallest to the largest seed (sweep_line), a filled marker where the method holds and a hollow one where it does
     not. statistics: from sweep_statistics; tick_labels: text of every setting on the horizontal axis (default: its
@@ -544,19 +544,29 @@ def tightness_sweep_figure(settings: list, statistics: dict, xlabel: str, title:
     the figure instead of drawn into it (no title in a paper figure); name: file name in figures/tsc/experimental-results, or None.
     half: "left" or "right" for one of two figures side by side in the width of one (half_figure), with the same
     methods. The left one has the labels of the vertical axis and the first half of the legend; the right one shares
-    the vertical axis and has the rest of the legend and the text of the red zone."""
+    the vertical axis and has the rest of the legend and the text of the red zone.
+    marked: one more setting right of the sweep, evaluated on other held-out runs than the sweep, which the lines continue
+    to (_infinite_marks adds the "∞" of a method without a finite value there and the infinite share of the proposed
+    method); a dict with x (its position), tick (its tick label), statistics (as sweep_statistics, for the one setting) and
+    methods (setting, seed -> name -> (group, latency per held-out run), for the share of infinite latencies)."""
     from .figures import fit_x_tick_labels, half_figure, paper_figure, paper_style, save_figure
     print(title)
     with paper_style():
         fig, ax = half_figure(half) if half else paper_figure()
+        if marked:   # the lines of the sweep continue to the marked setting
+            statistics = {name: dict(values, tightness=np.vstack([values["tightness"], marked["statistics"][name]["tightness"]]),
+                                     holds=np.append(values["holds"], marked["statistics"][name]["holds"])) if name in marked["statistics"] else values
+                          for name, values in statistics.items()}
+            settings, tick_labels = settings + [marked["x"]], (tick_labels or [f"{v:g}" for v in settings]) + [marked["tick"]]
         _sweep_axis(ax, settings, xlabel, tick_labels, log_x)
         _tightness_panel(ax, settings, statistics, level_label, failure_text=half != "left", wrap_text=bool(half))
+        marked_segments = _infinite_marks(ax, marked, statistics) if marked else []
         if half == "right":
             ax.set_ylabel("")
             ax.tick_params(labelleft=False)
         if not log_x:
             fit_x_tick_labels(ax)
-        _tightness_legend(ax, settings, statistics, ncol=1 if half else 3, half=half)
+        _tightness_legend(ax, settings, statistics, extra_segments=marked_segments, ncol=1 if half else 3, half=half)
         if name is not None:
             save_figure(fig, name)
         plt.show()
@@ -711,6 +721,32 @@ def _tightness_panel(ax, settings: list, statistics: dict, level_label: str, fai
     ax.set_yticks(TIGHTNESS_TICKS, [tightness_tick(tick) for tick in TIGHTNESS_TICKS])
     ax.yaxis.set_minor_locator(plt.NullLocator())
     ax.set_ylabel(tightness_label(level_label))
+
+
+def _infinite_marks(ax, marked: dict, statistics: dict) -> list:
+    """What the line of a method cannot show at the marked setting of a tightness panel (tightness_sweep_figure,
+    `marked`), which is evaluated on other held-out runs than the rest of the sweep: a method without a finite median
+    there (half of its held-out runs or more have no finite latency) gets an "∞" in its color at the top of the axis, and
+    the proposed method the share of its infinite latencies (median over the seeds) above its marker. Returns the
+    (x, y_low, y_high) of that text, which the legend avoids."""
+    from .figures import METHOD_STYLES
+    x, segments = marked["x"], []
+    for k, name in enumerate(name for name in METHOD_COLORS if name in marked["statistics"]):
+        values = marked["statistics"][name]["tightness"][0]
+        typical = np.median(np.where(np.isnan(values), np.inf, values))
+        if not np.isfinite(typical):
+            ax.text(x, TIGHTNESS_RANGE[1] * 0.45 / 1.3 ** k, "∞", color=METHOD_COLORS[name], ha="center", va="center", fontsize=22, fontweight="bold")
+        elif name == PROPOSED:
+            share = 1 - float(np.median([np.mean(np.isfinite(marked["methods"][(setting, seed)][name][1])) for (setting, seed) in marked["methods"]
+                                         if setting == x]))
+            if share > 0:
+                # the share in the size of the other labels, and the symbol large and bold so that it is seen at once
+                ax.annotate("∞", (x, np.nanmax(values)), xytext=(8, 16), textcoords="offset points", ha="right", va="center",
+                            color=METHOD_COLORS[name], fontsize=19, fontweight="bold")
+                ax.annotate(f"{share:.0%}", (x, np.nanmax(values)), xytext=(-9, 16), textcoords="offset points", ha="right", va="center",
+                            color=METHOD_COLORS[name], fontsize=11.5)
+                segments += [(x - d, np.nanmax(values), np.nanmax(values) * 2.2) for d in np.linspace(0, 0.2, 8)]
+    return segments
 
 
 def _median_points(settings, values: np.ndarray) -> list:

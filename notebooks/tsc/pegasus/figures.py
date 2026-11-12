@@ -299,18 +299,29 @@ def save_figure(fig, name: str) -> None:
 # ------------------------------------------------------------------------------
 # Result tables (here and not in evaluation.py, so that they do not change the cache key of the results)
 # ------------------------------------------------------------------------------
-def sweep_table(settings: list, statistics: dict, names: list, label, truth: dict = None, seeds: list = None) -> pd.DataFrame:
+def sweep_table(settings: list, statistics: dict, names: list, label, truth: dict = None, seeds: list = None, results: dict = None) -> pd.DataFrame:
     """Result table of a sweep: one row per method of `names`, one column per setting. A cell is the tightness, the
     median over the seeds (a seed without a finite tightness counts as infinitely loose), marked ● where the method
     holds and ○ where it does not; "–" where the method is not computed. statistics: from sweep_statistics;
     label(setting): the column name. With truth and seeds (as in sweep_statistics), a last row gives the measured
-    quantile in s, the median over the held-out configurations and then over the seeds."""
+    quantile in s, the median over the held-out configurations and then over the seeds.
+    With results (as in sweep_statistics) and seeds, a cell of a method with infinite latencies (no bound exists there:
+    the method expects a service to be overloaded) ends in "(∞ x%)", x the share of the held-out configurations without
+    a finite latency, median over the seeds; the tightness is the median over all configurations, so it is
+    finite only while fewer than half of them are infinite."""
+    def infinite_note(name, setting):
+        if results is None or not any(name in results[(setting, s)] for s in seeds):
+            return ""
+        share = float(np.median([np.mean(~np.isfinite(results[(setting, s)][name][1])) for s in seeds]))
+        return f" (∞ {share:.0%})" if share > 0 else ""
+
     rows = {}
     for name in [name for name in names if name in statistics]:
         tightness = statistics[name]["tightness"]
         typical = np.median(np.where(np.isnan(tightness), np.inf, tightness), axis=1)
         rows[name] = [("–" if not computed else f"{value:.2f}×" if np.isfinite(value) else "∞") + ("" if not computed else " ●" if ok else " ○")
-                      for value, ok, computed in zip(typical, statistics[name]["holds"], statistics[name]["computed"])]
+                      + ("" if not computed else infinite_note(name, setting))
+                      for setting, value, ok, computed in zip(settings, typical, statistics[name]["holds"], statistics[name]["computed"])]
     if truth is not None:
         rows["measured (s)"] = [f"{np.median([np.median(truth[(value, s)][0]) for s in seeds]):.3g}" for value in settings]
     return pd.DataFrame(rows, index=[label(value) for value in settings]).T
