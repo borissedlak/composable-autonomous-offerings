@@ -585,9 +585,10 @@ def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xla
     <name>_training and <name>_evaluation, or None. time_halves: (xlabel, tick_labels) of the two time figures as
     half figures side by side in the width of one (half_figure, each with its own vertical axis), which need a shorter
     horizontal axis; None: full figures with the axis of the tightness figure.
-    overlay: (settings, statistics, label) of a second ground truth for some methods of the tightness figure, drawn as
+    overlay: (settings, statistics, label) or (settings, statistics, label, start_setting) of a second ground truth for some methods of the tightness figure, drawn as
     dash-dot-dot lines (OVERLAY_LINESTYLE in figures.py) in their colors behind the measured ones (overlay_line), with `label` written next to that line
-    (place_line_label) instead of in the legend. onset: (x, label) of a vertical line in the tightness figure, e.g.
+    (place_line_label) instead of in the legend; start_setting: a setting of `settings` before the first of the overlay, where
+    each dash-dot-dot line begins at the measured point of its method, without a point of its own. onset: (x, label) of a vertical line in the tightness figure, e.g.
     where the services start to slow down, with `label` written next to the line. tightness_fraction: width of the tightness
     figure as a fraction of FIGSIZE[0] (fraction_figure, e.g. 2/3 for a figure printed in two thirds of the width, with a
     legend of two columns); the time figures keep their size."""
@@ -604,11 +605,18 @@ def tightness_and_time_figure(settings: list, statistics: dict, times: dict, xla
         _tightness_panel(ax, settings, statistics, level_label, failure_text=tightness_fraction == 1)
         extra_segments = []
         if overlay is not None:
-            overlay_settings, overlay_statistics, overlay_label = overlay
+            overlay_settings, overlay_statistics, overlay_label, *rest = overlay
+            start_setting = rest[0] if rest else None
             from .figures import METHOD_STYLES, OVERLAY_LINESTYLE
             for method in METHOD_COLORS:
                 if method in overlay_statistics:
-                    overlay_line(ax, overlay_settings, overlay_statistics[method]["tightness"], method, overlay_statistics[method]["holds"])
+                    # the line begins at the measured point of the method at start_setting, where that point is drawn
+                    start = None
+                    if start_setting is not None and method in statistics:
+                        measured = statistics[method]["tightness"][list(settings).index(start_setting)]
+                        start = (start_setting, np.median(np.where(np.isnan(measured), np.inf, measured)))
+                    overlay_line(ax, overlay_settings, overlay_statistics[method]["tightness"], method, overlay_statistics[method]["holds"],
+                                 start if start is not None and np.isfinite(start[1]) else None)
                     extra_segments += sweep_segments(overlay_settings, overlay_statistics[method]["tightness"])
                     if method not in statistics:   # only the dash-dot-dot line: its own legend entry, in its color and marker
                         ax.plot([], [], color=METHOD_COLORS[method], linestyle=OVERLAY_LINESTYLE, linewidth=1.5, marker=METHOD_STYLES.get(method, ("o",))[0],
@@ -805,16 +813,18 @@ def place_line_label(ax, text: str, anchors: list, drawn: list, offset: float = 
     return [(x, corners[0, 1], corners[1, 1]) for x in np.linspace(corners[0, 0], corners[1, 0], 8)]
 
 
-def overlay_line(ax, settings, values: np.ndarray, name: str, held: np.ndarray) -> None:
+def overlay_line(ax, settings, values: np.ndarray, name: str, held: np.ndarray, start: tuple = None) -> None:
     """A second ground truth for the method `name` in a tightness panel: the median over the seeds as a dash-dot-dot line (OVERLAY_LINESTYLE) in the
     color of the method, behind its measured line (sweep_line) and without a band, markers filled where it holds and
-    hollow where it does not. values: (settings, seeds)."""
+    hollow where it does not. values: (settings, seeds). start: (x, y) of a point the line begins at without a marker
+    (e.g. the measured point before the first setting), or None."""
     from .figures import METHOD_STYLES, OVERLAY_LINESTYLE
     typical = np.median(np.where(np.isnan(values), np.inf, values), axis=1)
     shown = np.isfinite(typical)
     settings, typical, held = np.asarray(settings)[shown], typical[shown], np.asarray(held)[shown]
     color, marker = METHOD_COLORS[name], METHOD_STYLES.get(name, ("o", "-"))[0]
-    ax.plot(settings, typical, color=color, linestyle=OVERLAY_LINESTYLE, linewidth=1.5, zorder=1.5)
+    line_x, line_y = (settings, typical) if start is None else (np.r_[start[0], settings], np.r_[start[1], typical])
+    ax.plot(line_x, line_y, color=color, linestyle=OVERLAY_LINESTYLE, linewidth=1.5, zorder=1.5)
     ax.scatter(settings, typical, s=28, marker=marker, facecolors=[color if h else "white" for h in held], edgecolors=color, linewidths=1.2,
                zorder=1.6)
 
