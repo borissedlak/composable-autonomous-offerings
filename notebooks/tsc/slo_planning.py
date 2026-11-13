@@ -3,7 +3,7 @@ configuration, that meets the SLOs of a client, with a numerical solver on the p
 
 Setting. An application type (vision, audio, lidar) has five service compositions, the chains b1u-<application>-<i>
 of the second campaign. A configuration of a composition sets
-- q, the data quality that every service of the composition processes (knob data_quality; the image width in pixels
+- q, the data quality that every service of the composition processes (knob data_quality; the image height in pixels
   for vision, the clip length in seconds for audio, the radius of the point cloud in meters for lidar),
 - w_k, the number of workers of service k (knob parallelism, 1 to 4), and
 - m_k, the model size of every detector that has one (knob model_size, 1 or 2; vision only).
@@ -57,7 +57,7 @@ from pegasus.evaluation_setup import alpha, confidence, coverage_check, seed
 from pegasus.service_gp import run_statistics_belief
 
 APPLICATIONS = {app: [f"b1u-{app}-{i}" for i in range(1, 6)] for app in ("vision", "audio", "lidar")}
-QUALITY_UNITS = dict(vision="image width (px)", audio="clip length (s)", lidar="point cloud rad. (m)")   # meaning of q
+QUALITY_UNITS = dict(vision="image height (px)", audio="clip length (s)", lidar="point cloud rad. (m)")   # meaning of q
 QUALITY_SHORT = dict(vision="px", audio="s", lidar="m")   # its unit
 THIRD_MARGINS = (0.50, 0.025, 0.04)   # inches: below (tick labels and x label), above and right of the plot area of a third-width figure
 CORE_HEADROOM = 0.5        # cores per service = workers + CORE_HEADROOM, the rule of the campaign runs (knob <node>.cores)
