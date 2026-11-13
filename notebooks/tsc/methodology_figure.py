@@ -1,12 +1,13 @@
 """The methodology overview (Fig. 2 of the Pegasus paper, Section IV), structured like the
 three subsections: (1) learn one GP per service, (2) turn it into a pessimistic execution-time model and the load
 phi_i(theta) of every service, (3) compose: Pegasus bounds every service by Kingman's bound and adds the service
-bounds d_i(epsilon / K); Pegasus SNC bounds the whole application in one step from the product of M_i / (1 - phi_i).
+bounds d_i(epsilon / K). Below the sum, every service bound is annotated with its decay rate theta_i^* (from step 2)
+and its value, so that the reader sees that a smaller decay rate gives a larger service bound.
 Notation as in the paper: x_i = <r_i, kappa_i>, c_i workers, K services, m_i^+ = m_i + z_gamma sigma_ep,i, load
 phi_i(theta) = M_i(theta) E[exp(-theta T)]^c_i, decay rate theta_i^*, service bound d_i(epsilon), PPG d_S(x, epsilon, gamma).
 
 Claim of the figure: only step 1 needs measurements, and only of the individual services; steps 2 and 3 are analytic,
-and both versions of Pegasus build on the same execution-time models and loads of step 2.
+and build on the execution-time models and loads of step 2.
 
 Run from `notebooks/tsc/` with the venv:  ../../venv/Scripts/python methodology_figure.py
 Writes figures/tsc/methodology_overview.pdf and .jpg (an earlier draft, draft_methodology_figure.py, is kept).
@@ -15,9 +16,7 @@ Source of the data: the synthetic service types s1, s2, s3 of pegasus/data.py (s
 quality, a software knob kappa_i) varied and the other two fixed, so that a model can be drawn as a curve. Everything
 shown is computed: the GP fits, the loads, the simulated latency of the first service, the bounds and the simulated
 end-to-end latency. It is an illustration on a setting chosen for readability, not a result of the evaluation.
-As in the first version, every service has two workers, to show how c_i enters the load. Section IV-C requires one
-worker per service for Pegasus SNC (items must leave every service in the order of arrival); its bar is computed with
-cyclic assignment like the node bounds, as an illustration of the composition, not as a guarantee for this setting.
+As in the first version, every service has two workers, to show how c_i enters the load.
 """
 from pathlib import Path
 
@@ -27,7 +26,7 @@ from matplotlib.patches import ConnectionPatch, Ellipse, FancyArrowPatch, FancyB
 from matplotlib.transforms import Bbox
 from scipy.stats import norm
 
-from pegasus.bounds import log_worker_gap_mgf, martingale_closed_form_node_bounds, martingale_theta, network_service_bound
+from pegasus.bounds import log_worker_gap_mgf, martingale_closed_form_node_bounds, martingale_theta
 from pegasus.data import synthetic_service, true_demand
 from pegasus.service_gp import execution_time_belief, train_gp_models
 from pegasus.simulation import simulate_chain
@@ -52,7 +51,7 @@ noisy_share, noisy_factor = 0.4, 2.0      # share of the training samples whose 
 K = len(path)
 
 # One fixed color per quantity, reused in every panel; the line styles and markers also separate them in grayscale
-C_MEAN, C_EPISTEMIC, C_ALEATORIC, C_BOUND, C_SNC, C_MEASURED = "black", "tab:blue", "tab:orange", "tab:green", "tab:olive", "tab:purple"
+C_MEAN, C_EPISTEMIC, C_ALEATORIC, C_BOUND, C_MEASURED = "black", "tab:blue", "tab:orange", "tab:green", "tab:purple"
 SERVICE_STYLES = [("0.1", "-"), ("0.4", "--"), ("0.6", ":")]   # (gray level, line style) of s1, s2, s3 in the load panel
 
 
@@ -92,11 +91,10 @@ log_gap = log_worker_gap_mgf(workload["process"], workload["rate"], np.array([wo
 log_load = [theta_grid * mean[0] + 0.5 * theta_grid ** 2 * var[0] + log_gap for mean, var in beliefs]          # ln phi_i(theta)
 
 # ------------------------------------------------------------------------------
-# Step 3: Pegasus (service bounds, added) and Pegasus SNC (one bound), and the simulated application for reference
+# Step 3: Pegasus (service bounds, added), and the simulated application for reference
 # ------------------------------------------------------------------------------
 node_bounds = martingale_closed_form_node_bounds(beliefs, epsilon=alpha / K, path_workers=path_workers, **workload)[:, 0]   # d_i(epsilon / K), s
 per_node_bound = node_bounds.sum()
-snc_bound = network_service_bound(beliefs, epsilon=alpha, holder_exponents=[1] * K, path_workers=path_workers, **workload)[0]
 true_means = np.array([[true_demand(configurations(quality_target), specs[s])[0] for s in path]])
 noise = [specs[s]["noise"] for s in path]
 # the first service alone under the external arrivals, for the tail panel of Pegasus
@@ -113,7 +111,7 @@ slack = latency_grid - mean_1
 tail_bound = np.minimum(1.0, norm.sf(slack / np.sqrt(var_1))
                         + np.exp(-theta_star[0] * slack + 0.5 * theta_star[0] ** 2 * var_1 + norm.logcdf((slack - theta_star[0] * var_1) / np.sqrt(var_1))))
 print(f"decay rates theta_i^* (1/s): {np.round(theta_star, 1)}; service bounds at epsilon/K (ms): {np.round(1e3 * node_bounds, 1)}; "
-      f"Pegasus {1e3 * per_node_bound:.0f} ms, Pegasus SNC {1e3 * snc_bound:.0f} ms, simulated p{100 * (1 - alpha):g} {1e3 * measured:.0f} ms; "
+      f"Pegasus {1e3 * per_node_bound:.0f} ms, simulated p{100 * (1 - alpha):g} {1e3 * measured:.0f} ms; "
       f"utilization of the services {np.round(workload['rate'] * true_means[0] / workers, 2)}")
 
 # ------------------------------------------------------------------------------
@@ -258,7 +256,7 @@ ax_load.set_ylabel(r"service load $\phi_i(\theta)$", labelpad=4)   # the tick va
 ax_load.grid(True, linestyle=":", alpha=0.6)
 ax_load.legend(loc="upper left", fontsize=10.5, framealpha=0.95, borderaxespad=0.3)
 
-# --- Step 3: the target application and the two compositions ---------------------------
+# --- Step 3: the target application and the composition ---------------------------
 ax_chain = fig.add_subplot(grid[0, 2])
 ax_chain.set_axis_off()
 CHAIN_RAISE = 0.12   # in; the sketch starts above the other panels, so that it sits close under the header of step 3
@@ -273,7 +271,7 @@ for j, s in enumerate(path):
         arrow(ax_chain, (0.10 + 0.30 * (j - 1) + 0.18, 0.53), (0.10 + 0.30 * j - 0.01, 0.53))
 ax_chain.text(0.5, 0.06, "target application: never executed", ha="center", va="center", style="italic")
 
-# below the application, with room for the title of the Node panel
+# below the application, with room for the title of the tail panel
 compose_grid = fig.add_gridspec(1, 2, left=columns[2].x0, right=columns[2].x1, top=from_top(Y_PANELS + CHAIN_HEIGHT + 0.4),
                                 bottom=from_top(Y_BOTTOM), width_ratios=[1.1, 1.15], wspace=0.12)
 # Pegasus, per service: Kingman's bound on the tail of the latency of s1 gives its service bound d_1(epsilon / K)
@@ -293,30 +291,37 @@ ax_tail.set_xlabel(r"latency $d$ at s1 (ms)")
 ax_tail.set_ylabel(r"P(latency $> d$)", labelpad=6)
 ax_tail.grid(True, linestyle=":", alpha=0.6)
 ax_tail.legend(loc="lower left", fontsize=10.5, framealpha=0.95, handlelength=0.9, handletextpad=0.3, borderaxespad=0.2, borderpad=0.25)
-ax_tail.set_title("Node: bound $d_1$ of s1", fontsize=12)
+ax_tail.set_title("Bound $d_1$ of s1", fontsize=12)
 
-# both compositions as bars against the true end-to-end quantile
+# the PPG as the sum of the service bounds, against the true end-to-end quantile
 ax_compose = fig.add_subplot(compose_grid[0, 1])
+BAR_Y = 1.3   # high in the panel, so that the annotations below the bar and the legend fit underneath
+# the annotations sit on white, so that the line of the true p95 does not cross their text
+annotation_box = dict(facecolor="white", edgecolor="none", pad=1.0)
 left = 0.0
 for j, (bound, hatch) in enumerate(zip(node_bounds, ("", "//", ".."))):
-    ax_compose.barh(1, 1e3 * bound, left=left, height=0.5, color=C_BOUND, alpha=0.55 + 0.15 * j, edgecolor="black", hatch=hatch, linewidth=1.2)
-    ax_compose.text(left + 1e3 * bound / 2, 1, rf"$d_{j + 1}$", ha="center", va="center", fontsize=13,
+    ax_compose.barh(BAR_Y, 1e3 * bound, left=left, height=0.5, color=C_BOUND, alpha=0.55 + 0.15 * j, edgecolor="black", hatch=hatch, linewidth=1.2)
+    center = left + 1e3 * bound / 2
+    ax_compose.text(center, BAR_Y, rf"$d_{j + 1}$", ha="center", va="center", fontsize=13,
                     bbox=dict(facecolor="white", edgecolor="none", pad=1.5, alpha=0.85))
+    # below every segment, the decay rate of its service (the green dot of step 2) and its value: a smaller theta_i^*
+    # means a slower-decaying tail, hence a wider segment
+    ax_compose.text(center, BAR_Y - 0.42, rf"$\theta^*_{j + 1}$" + f"\n{theta_star[j]:.0f}/s", ha="center", va="top", fontsize=10.5,
+                    linespacing=1.15, bbox=annotation_box, zorder=3)
+    # a "+" before the later services: their bounds are added to the ones before them
+    ax_compose.text(center, BAR_Y - 1.32, f"{'+' if j else ''}{1e3 * bound:.0f}\nms", ha="center", va="top", fontsize=10.5, linespacing=1.15,
+                    bbox=annotation_box, zorder=3)
     left += 1e3 * bound
-ax_compose.barh(0, 1e3 * snc_bound, height=0.5, color=C_SNC, alpha=0.75, edgecolor="black", linewidth=1.2)
 ax_compose.axvline(1e3 * measured, color=C_MEASURED, linewidth=1.8, linestyle="--", label=f"true end-to-end p{100 * (1 - alpha):g}")
 ax_compose.set_yticks([])
-label_box = dict(facecolor="white", edgecolor="none", pad=1.0, alpha=0.85)
-ax_compose.text(0, 1.29, r" Node: sum of the $d_i$", ha="left", va="bottom", bbox=label_box)
-ax_compose.text(0, 0.29, " SNC: one bound", ha="left", va="bottom", bbox=label_box)
-ax_compose.set_ylim(-1.15, 1.75)
-ax_compose.set_xlim(0, 1e3 * max(per_node_bound, snc_bound) * 1.12)
+ax_compose.set_ylim(-1.75, 1.75)
+ax_compose.set_xlim(0, 1e3 * per_node_bound * 1.08)
 ax_compose.set_xlabel("end-to-end latency (ms)")
-ax_compose.set_title("Node vs. SNC: PPG", fontsize=12)   # a header like the one of the Node panel
+ax_compose.set_title("PPG: sum of the $d_i$", fontsize=12)   # a header like the one of the tail panel
 ax_compose.grid(True, axis="x", linestyle=":", alpha=0.6)
 ax_compose.legend(loc="lower right", fontsize=10.5, framealpha=0.95)
 # the service bound of s1 is the first part of the sum of Pegasus
-fig.add_artist(ConnectionPatch(xyA=(1e3 * node_bounds[0], alpha / K), coordsA=ax_tail.transData, xyB=(0.0, 1.0),
+fig.add_artist(ConnectionPatch(xyA=(1e3 * node_bounds[0], alpha / K), coordsA=ax_tail.transData, xyB=(0.0, BAR_Y),
                                coordsB=ax_compose.transData, arrowstyle="-|>", mutation_scale=14, color="darkgreen", linewidth=1.3,
                                connectionstyle="arc3,rad=-0.2"))
 
