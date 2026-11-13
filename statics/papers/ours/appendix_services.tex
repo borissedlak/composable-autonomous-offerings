@@ -16,7 +16,7 @@
 \label{apx:services}
 \begin{center}
     \def\@captype{table}
-    \caption{Services per application. \textit{Fixed knobs} stay at their default in all runs; \textit{Data Q.}\ is the data quality range covered by the benchmarks, \textit{Proc.}\ the range of the median processing time of an item over the benchmarked configurations (one worker), and \textit{Runs} the number of valid benchmark runs.}
+    \caption{Services per application. \textit{Fixed knobs} stay at their default in all runs; \textit{Data Q.}\ is the data quality range covered by the benchmarks, \textit{Proc.}\ the range of the median processing time of an item over the benchmarked configurations with one worker, and \textit{Runs} the number of valid benchmark runs with 1--4 workers.}
     \label{tab:apx-services}
     \scriptsize
     \setlength{\tabcolsep}{4pt}
@@ -25,32 +25,32 @@
         {Service} & {Function} & {Output} & {Built on} & {Fixed knobs} & {Data Q.} & {Proc.\ [ms]} & {Runs} \\
         \midrule
         \multicolumn{8}{@{}l}{\textit{Audio} (data quality: clip length, seconds)} \\
-        \textbf{resample} & resamples a clip, removes its offset, normalizes loudness & audio & NumPy, SciPy & target rate & 2--12 & 0.6--3.9 & 50 \\
-        \textbf{denoise} & suppresses background noise in the spectrum & audio & NumPy & FFT size & 2--12 & 6.4--35 & 49 \\
-        \textbf{MFCC} & computes a mel spectrogram and its MFCC features & features & NumPy & mel bands, frame & 2--12 & 0.9--4.7 & 50 \\
-        \textbf{voicedetect} & returns the start and end times of speech segments & JSON & NumPy & frame length & 3--12 & 4.3--16 & 50 \\
-        \textbf{pitch} & estimates the pitch of the voice per frame & pitch & NumPy & hop length & 2--12 & 7.6--31 & 50 \\
-        \textbf{transcribe} & transcribes speech to text (small model) & text & Vosk & model size & 2--12 & 337--983 & 40 \\
-        \textbf{encode} & encodes a clip as a compressed audio file & bytes & NumPy, soundfile & format & 2--12 & 1.6--9.1 & 50 \\
+        \textbf{resample} & resamples a clip, removes its offset, normalizes loudness & audio & NumPy, SciPy & target rate & 2--12 & 0.6--3.9 & 200 \\
+        \textbf{denoise} & suppresses background noise in the spectrum & audio & NumPy & FFT size & 2--12 & 6.4--35 & 194 \\
+        \textbf{MFCC} & computes a mel spectrogram and its MFCC features & features & NumPy & mel bands, frame & 2--12 & 0.9--4.7 & 200 \\
+        \textbf{voicedetect} & returns the start and end times of speech segments & JSON & NumPy & frame length & 3--12 & 4.3--16 & 200 \\
+        \textbf{pitch} & estimates the pitch of the voice per frame & pitch & NumPy & hop length & 2--12 & 7.6--31 & 187 \\
+        \textbf{transcribe} & transcribes speech to text (small model) & text & Vosk & model size & 2--12 & 337--983 & 164 \\
+        \textbf{encode} & encodes a clip as a compressed audio file & bytes & NumPy, soundfile & format & 2--12 & 1.6--9.1 & 200 \\
         \midrule
         \multicolumn{8}{@{}l}{\textit{Lidar} (data quality: max.\ distance, meters)} \\
-        \textbf{voxel} & downsamples a scan to one point per voxel & points & NumPy & voxel size & 8--40 & 1.9--9.0 & 48 \\
-        \textbf{ground} & fits the ground plane by random trials, removes it & points & NumPy & attempts & 8--40 & 17--47 & 50 \\
-        \textbf{cluster} & clusters the points, returns one box per object & JSON & NumPy, SciPy & voxel size, distance & 6--40 & 0.2--16 & 50 \\
-        \textbf{normals} & estimates the surface normal of every point & normals & NumPy, SciPy & neighbors & 6--40 & 1.8--46 & 49 \\
-        \textbf{register} & aligns a scan with the previous one (rotation, translation) & JSON & NumPy, SciPy & iterations & 6--38 & 1.0--45 & 46 \\
-        \textbf{birdview} & renders a bird's-eye-view image of the scan & image & NumPy & -- & 6--40 & 1.1--3.2 & 47 \\
-        \textbf{encode} & quantizes and packs the point coordinates & bytes & NumPy & precision & 6--38 & 3.2--18 & 50 \\
+        \textbf{voxel} & downsamples a scan to one point per voxel & points & NumPy & voxel size & 8--40 & 1.9--9.0 & 197 \\
+        \textbf{ground} & fits the ground plane by random trials, removes it & points & NumPy & attempts & 8--40 & 17--47 & 194 \\
+        \textbf{cluster} & clusters the points, returns one box per object & JSON & NumPy, SciPy & voxel size, distance & 6--40 & 0.2--16 & 199 \\
+        \textbf{normals} & estimates the surface normal of every point & normals & NumPy, SciPy & neighbors & 6--40 & 1.8--46 & 198 \\
+        \textbf{register} & aligns a scan with the previous one (rotation, translation) & JSON & NumPy, SciPy & iterations & 6--38 & 1.0--45 & 189 \\
+        \textbf{birdview} & renders a bird's-eye-view image of the scan & image & NumPy & -- & 6--40 & 1.1--3.2 & 197 \\
+        \textbf{encode} & quantizes and packs the point coordinates & bytes & NumPy & precision & 6--38 & 3.2--18 & 200 \\
         \midrule
         \multicolumn{8}{@{}l}{\textit{Vision} (data quality: frame height, pixels; for object and face also the model size)} \\
-        \textbf{object} & detects objects (YOLOv10): boxes, classes, scores & JSON & ONNX Runtime & -- & 160--640; 1--2 & 13--320 & 48 \\
-        \textbf{face} & detects faces (YuNet): boxes and scores & JSON & OpenCV & -- & 256--640; 1--2 & 7.6--195 & 46 \\
-        \textbf{edge} & finds edges (bilateral filter, Canny) and their contours & JSON & OpenCV & smoothing & 160--640 & 0.9--6.2 & 50 \\
-        \textbf{motion} & returns the regions moved since the previous frame & JSON & OpenCV & method & 160--640 & 0.8--6.0 & 50 \\
-        \textbf{QR} & finds and decodes QR codes, draws them onto the frame & image & OpenCV, pyzbar & -- & 192--608 & 1.5--9.1 & 50 \\
-        \textbf{transform} & resizes a frame, corrects its colors and geometry & image & OpenCV & correction & 192--640 & 7.1--41 & 50 \\
-        \textbf{compress} & encodes a frame as a compressed image & bytes & OpenCV, Pillow & quality, format & 256--608 & 0.2--1.0 & 36 \\
-        \textbf{denoise} & removes noise, keeps edges (bilateral filter) & image & OpenCV & strength & 160--640 & 1.4--22 & 48 \\
+        \textbf{object} & detects objects (YOLOv10): boxes, classes, scores & JSON & ONNX Runtime & -- & 160--640; 1--2 & 13--320 & 182 \\
+        \textbf{face} & detects faces (YuNet): boxes and scores & JSON & OpenCV & -- & 256--640; 1--2 & 7.6--195 & 171 \\
+        \textbf{edge} & finds edges (bilateral filter, Canny) and their contours & JSON & OpenCV & smoothing & 160--640 & 0.9--6.2 & 200 \\
+        \textbf{motion} & returns the regions moved since the previous frame & JSON & OpenCV & method & 160--640 & 0.8--6.0 & 200 \\
+        \textbf{QR} & finds and decodes QR codes, draws them onto the frame & image & OpenCV, pyzbar & -- & 192--608 & 1.5--9.1 & 200 \\
+        \textbf{transform} & resizes a frame, corrects its colors and geometry & image & OpenCV & correction & 192--640 & 7.1--41 & 200 \\
+        \textbf{compress} & encodes a frame as a compressed image & bytes & OpenCV, Pillow & quality, format & 160--608 & 0.2--1.0 & 181 \\
+        \textbf{denoise} & removes noise, keeps edges (bilateral filter) & image & OpenCV & strength & 160--640 & 1.4--22 & 198 \\
         \bottomrule
     \end{tabular}
 \end{center}
@@ -67,7 +67,7 @@ Items are LibriSpeech \textit{dev-clean} clips of at least 12\,s\footnote{\url{h
 \noindent
 \textbf{Benchmarks.}
 %
-Every service runs alone with one worker in 10 configurations, each at the utilizations 0.1, 0.4, 0.6, 0.8, and 1.0. A run has the CPU need of its configuration, measured in an 8\,s probe, plus 15\% as cores, and measures 30\,s or 400 items (at most 180\,s) after a 10\,s warm-up. Invalid runs, in which the service fell behind its arrivals or needed more cores than the 8 of the probe, are dropped (\textit{Runs}). Where a benchmark covers less data quality than the compositions (e.g., face from 256\,px), the models extrapolate.
+Every service runs alone with $c = 1, \dots, 4$ workers in the same 10 configurations, each at the utilizations 0.1, 0.4, 0.6, 0.8, and 1.0 per worker. A run has the CPU need of its configuration, measured in an 8\,s probe, plus 15\% as cores, and measures 30\,s or 400 items (at most 180\,s) after a 10\,s warm-up. Invalid runs, in which the service fell behind its arrivals or needed more cores than its probe had, are dropped (\textit{Runs}). The GPs of a service take as inputs its data quality (and model size), its workers $c$, and the logarithm of its arrival rate in items/s; the cores are no input, since no used run is throttled. Where a benchmark covers less data quality than the compositions (e.g., face from 256\,px), the models extrapolate.
 
 \vspace{3pt}
 \noindent
