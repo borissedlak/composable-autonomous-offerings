@@ -154,7 +154,7 @@ def pegasus_snc_bound(data, models: dict, alpha: float) -> np.ndarray:
 
 
 def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alpha: float, confidence: float,
-                    n_calibration: int, model_seed: int, leave_out: tuple = (), x_train_load=None) -> tuple:
+                    n_calibration: int, model_seed: int, leave_out: tuple = (), x_train_load=None, load_aware_models: bool = False) -> tuple:
     """Both versions of Pegasus, every baseline and the reference for the chain of `data` at its held-out configurations. Returns two
     dictionaries: name -> (group, end-to-end latency per configuration in s), and name -> (training time, evaluation
     time) in seconds; the reference has no time. The training time is the time to train the models the method uses:
@@ -169,13 +169,22 @@ def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alph
     With real data (data.y_train_spread is given), the GPs of Quantile Union and Conformal are fitted on the logarithm
     of the latency quantile, like the GP of the mean execution time (fit_services): the latency of a real service
     differs by orders of magnitude between its configurations. No model receives the number of workers of a
-    configuration (model_inputs in data.py); GP Queue and both versions of Pegasus get it from path_workers."""
+    configuration (model_inputs in data.py); GP Queue and both versions of Pegasus get it from path_workers.
+    load_aware_models: every method on the same information (real data, same_information_latencies in load_aware_b4.py):
+    `models` were fitted on load_aware(data), so every model receives the knobs, the number of workers and log10 of the
+    arrival rate. GP Sum, DNN Sum and GP Queue predict at data.x_test_load, Quantile Union and Conformal keep the
+    workers in their inputs (x_train_load, data.x_test_load), and the queueing parts still read the workers of every
+    held-out configuration from `data` (path_workers)."""
     K, workload = len(data.path), data.workload
     workers_by_position = path_workers(data) or [1] * K
     log_target = data.y_train_spread is not None
     x_load, x_test_load = (x_train, data.x_test) if x_train_load is None else (x_train_load, data.x_test_load)
-    x_load, x_test_load = model_inputs(x_load, data.workers_column), model_inputs(x_test_load, data.workers_column)   # the rate stays the last column
-    x_test = model_inputs(data.x_test, data.workers_column)
+    if load_aware_models:   # the workers stay an input of every model
+        assert x_train_load is not None, "the load-aware models need the inputs with the arrival rate (x_train_load)"
+        x_test = data.x_test_load
+    else:
+        x_load, x_test_load = model_inputs(x_load, data.workers_column), model_inputs(x_test_load, data.workers_column)   # the rate stays the last column
+        x_test = model_inputs(data.x_test, data.workers_column)
     predictions = lambda fitted: [fitted[s].predict(configurations_of(x_test, s), return_std=True) for s in data.path]
     gp_seconds, dnn_seconds = models["seconds"]["gp"], models["seconds"]["dnn"]
     # name, group, time to train the models the method shares with others, function that computes its latencies
@@ -217,7 +226,7 @@ def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alph
 
 
 def compare_tree_methods(data, models: dict, alpha: float, confidence: float, n_calibration: int, model_seed: int,
-                         leave_out: tuple = ()) -> tuple:
+                         leave_out: tuple = (), load_aware_models: bool = False) -> tuple:
     """compare_methods for a fork-join tree (TreeData in data.py) whose services have one worker each. Every method
     extends from a chain to the tree through the P leaf-to-root paths (trees.py): the end-to-end latency of a frame is the
     maximum over the paths of its latency through the path run as a chain, so bounds of every path that each fail with
@@ -237,13 +246,18 @@ def compare_tree_methods(data, models: dict, alpha: float, confidence: float, n_
     A real tree (TreeData with services, real_tree_data in real_data.py) has its held-out configurations per node: every
     model is trained once per service type and predicts at the configurations of every node of that type (model_of),
     and, as in compare_methods with real data, the GPs of Quantile Union and Conformal are fitted on the logarithm of
-    the latency quantile."""
+    the latency quantile.
+    load_aware_models: every method on the same information, as in compare_methods: `models` were fitted on
+    load_aware(data), and every model receives the knobs, the number of workers and log10 of the arrival rate."""
     paths, n_services, workload = leaf_to_root_paths(data.children), len(data.path), data.workload
     model = model_of(data)
     services, keys = sorted(set(model.values())), sorted(model)
     log_target = data.y_train_spread is not None
-    x_test = model_inputs(data.x_test, data.workers_column)
-    x_load, x_test_load = model_inputs(data.x_train_load, data.workers_column), model_inputs(data.x_test_load, data.workers_column)   # the rate stays the last column
+    if load_aware_models:   # the workers stay an input of every model
+        x_test, x_load, x_test_load = data.x_test_load, data.x_train_load, data.x_test_load
+    else:
+        x_test = model_inputs(data.x_test, data.workers_column)
+        x_load, x_test_load = model_inputs(data.x_train_load, data.workers_column), model_inputs(data.x_test_load, data.workers_column)   # the rate stays the last column
     beliefs, gp_seconds = models["beliefs"], models["seconds"]["gp"]
     predictions = lambda: {key: models["gp"][model[key]].predict(configurations_of(x_test, key), return_std=True) for key in keys}
     epsilon_node = alpha / sum(len(path) for path in paths)

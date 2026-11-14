@@ -10,21 +10,19 @@ with a few training runs, and one service after the other moves up to its next n
 The training runs of every service come in one fixed random order per seed (n_train=None in real_chain_data), and a
 training set of n runs is the first n of them (training_prefix), so that a step only adds runs.
 
-load_aware_pegasus (real data): Pegasus uses load-aware execution-time models (load_aware in data.py: the inputs
-with the number of workers and the arrival rate, as in load_aware_b4.py), fitted on the same training runs as the
-models of the baselines, which keep the inputs without workers and rate. The cost of uncertainty of a service is then
-read from the load-aware models.
+load_aware_models (real data): every method on the same information, as in B.1 (same_information_latencies in
+load_aware_b4.py): the models of Pegasus and of every baseline receive the knobs, the number of workers and log10 of
+the arrival rate (load_aware in data.py; compare_methods with load_aware_models). The cost of uncertainty of a service
+is then read from the load-aware models.
 """
 from dataclasses import replace
-
-import time
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from .bounds import martingale_closed_form_node_bounds
 from .data import load_aware, model_inputs, path_workers
-from .evaluation import PROPOSED, TIGHTNESS_RANGE, TIGHTNESS_TICKS, compare_methods, fit_services, pegasus_bound, sweep_line, sweep_segments
+from .evaluation import TIGHTNESS_RANGE, TIGHTNESS_TICKS, compare_methods, fit_services, sweep_line, sweep_segments
 from .figures import FAILURE_COLOR, FAILURE_TEXT_COLOR, holds_handles, legend_inside, paper_figure, paper_style, save_figure
 from .service_gp import configurations_of, execution_time_belief, run_statistics_belief
 
@@ -74,36 +72,26 @@ def service_levels(data, levels: list) -> dict:
 
 
 def incremental_training(data, schedule: str, levels: list, alpha: float, confidence: float, calibration_share: float,
-                         model_seed: int, leave_out: tuple, load_aware_pegasus: bool = False) -> list:
+                         model_seed: int, leave_out: tuple, load_aware_models: bool = False) -> list:
     """Every method on the chain of `data` while the training runs grow under `schedule` (module docstring). `data`
     holds every training run of every service in a fixed random order; every service starts at its first level of
     service_levels and moves up one level per step, one service per step, until every service has all its runs.
     Conformal sets aside the share calibration_share of the runs of the smallest service for calibration, and at least
     19, and is left out where too few runs remain (compare_methods).
-    load_aware_pegasus: Pegasus with load-aware models (module docstring).
+    load_aware_models: every method with load-aware models (module docstring).
     Returns one entry per state, in order: (runs per service, name -> (group, latency per held-out configuration),
     name -> (training time, evaluation time), the service that moves up next or None)."""
     steps = service_levels(data, levels)
     level, states, turn = {s: 0 for s in data.path}, [], 0
-    # with load-aware models, compare_methods computes the baselines only, and Pegasus is added below
-    leave = leave_out + ((PROPOSED,) if load_aware_pegasus else ())
     while True:
         n = {s: steps[s][level[s]] for s in data.path}
         part = training_prefix(data, n)
-        models = fit_services(part, part.x_train, part.y_train, model_seed=model_seed, confidence=confidence, with_dnn=False)
-        methods, seconds = compare_methods(part, models, part.x_train, part.monitored_latencies, alpha, confidence,
+        # the models see the inputs with the workers and the arrival rate (load_aware_models) or the knobs only
+        pegasus_part = load_aware(part) if load_aware_models else part
+        pegasus_models = fit_services(pegasus_part, pegasus_part.x_train, part.y_train, model_seed=model_seed, confidence=confidence, with_dnn=False)
+        methods, seconds = compare_methods(part, pegasus_models, part.x_train, part.monitored_latencies, alpha, confidence,
                                            n_calibration=max(19, round(calibration_share * min(n.values()))), model_seed=model_seed,
-                                           leave_out=leave, x_train_load=part.x_train_load)
-        pegasus_part, pegasus_models = part, models
-        if load_aware_pegasus:
-            pegasus_part = load_aware(part)
-            pegasus_models = fit_services(pegasus_part, pegasus_part.x_train, part.y_train, model_seed=model_seed, confidence=confidence, with_dnn=False)
-            started = time.perf_counter()
-            latency = pegasus_bound(part, pegasus_models, alpha)   # the workers of the queueing part from `part`
-            elapsed = time.perf_counter() - started
-            # as in compare_methods: training time of the GPs, evaluation time including the beliefs
-            methods = {PROPOSED: ("proposed", latency), **methods}
-            seconds = {PROPOSED: (pegasus_models["seconds"]["gp"], elapsed + pegasus_models["seconds"]["beliefs"]), **seconds}
+                                           leave_out=leave_out, x_train_load=part.x_train_load, load_aware_models=load_aware_models)
         growing = [s for s in data.path if level[s] < len(steps[s]) - 1]
         if not growing:
             states.append((n, methods, seconds, None))

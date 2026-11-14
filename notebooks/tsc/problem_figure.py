@@ -11,8 +11,9 @@ Run from `notebooks/tsc/` with the venv:  ../../venv/Scripts/python problem_figu
 Writes figures/tsc/problem_queueing.pdf and .jpg for (a), and figures/tsc/problem_prediction.pdf and .jpg for (b).
 
 Source of the data: the second testbed campaign in statics/results_milos_v2, loaded with pegasus/real_data.py as in
-the base case of B.1 (`2a_base_case.ipynb`): every service is trained on its benchmark runs (the service alone), no
-run of the chain is used for training. The campaign ran every run of the chain at one load (the slowest service busy
+the base case of B.1 (`2a_base_case.ipynb`): every service is trained on its benchmark runs with one to four workers
+(the service alone; load_aware_b4.py), no run of the chain is used for training, and every model receives the knobs,
+the number of workers and log10 of the arrival rate (the same information for every method). The campaign ran every run of the chain at one load (the slowest service busy
 about half of the time), so:
  (a) the end-to-end latencies at the swept loads are emulated: the measured processing times of every held-out run
      are replayed through a chain of FIFO queues under Poisson arrivals (emulate_runs in pegasus/real_data.py);
@@ -27,17 +28,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.exceptions import ConvergenceWarning
 
-from pegasus.data import load_chain_data
+from load_aware_b4 import EXTENDED, N_TRAIN, extended_training
+from pegasus.data import load_aware, load_chain_data
 from pegasus.evaluation import METHOD_COLORS, compare_methods, fit_services
 from pegasus.figures import METHOD_STYLES
-from pegasus.real_data import BENCHMARKS_V2, chain_run_execution_times, chain_run_workers, emulate_runs, unthrottled_runs
+from pegasus.real_data import chain_run_execution_times, chain_run_workers, emulate_runs, unthrottled_runs
 
 plt.style.use('default')
 plt.rcParams.update({'font.size': 12})
 
 OUTPUT = Path(__file__).resolve().parents[2] / "figures" / "tsc"
 experiment = "b1-vision-1-single"                     # the chain of B.1, as in pegasus/evaluation_setup.py
-n_train = 25                                           # benchmark runs per service, as in B.1 (pegasus/evaluation_setup.py)
 n_items = 5000                                         # panel (a): items per emulated run, as in real_chain_data
 alpha, confidence = 0.05, 0.95                         # violation probability epsilon (the bounded quantile is $P_{95}$) and confidence, as in pegasus/evaluation_setup.py
 coverage_check = dict(n_batches=10, confidence=0.95)
@@ -52,11 +53,13 @@ FIGSIZE = (6, 2.5)                                      # (width, height) in inc
 def load(s):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", ConvergenceWarning)   # GP hyperparameters at their bounds, as in pegasus/evaluation_setup.py
-        data = load_chain_data("real", experiment=experiment, level=1 - alpha, coverage_check=coverage_check, seed=[seed, s], n_train=n_train,
-                               training_campaign=BENCHMARKS_V2)
-        models = fit_services(data, data.x_train, data.y_train, model_seed=seed + s, confidence=confidence, with_dnn=False)
+        with extended_training():   # the training runs of B.1: every benchmark run with one to four workers
+            data = load_chain_data("real", experiment=experiment, level=1 - alpha, coverage_check=coverage_check, seed=[seed, s], n_train=N_TRAIN,
+                                   training_campaign=EXTENDED)
+        view = load_aware(data)       # the inputs of every model: the knobs, the workers and the arrival rate, as in B.1
+        models = fit_services(view, view.x_train, data.y_train, model_seed=seed + s, confidence=confidence, with_dnn=False)
         methods, _ = compare_methods(data, models, data.x_train, data.monitored_latencies, alpha, confidence, n_calibration, model_seed=seed + s,
-                                     leave_out=("DNN Sum",), x_train_load=data.x_train_load)
+                                     leave_out=("DNN Sum",), x_train_load=data.x_train_load, load_aware_models=True)
     return data, methods
 
 

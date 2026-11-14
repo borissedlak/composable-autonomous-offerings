@@ -57,9 +57,12 @@ def finetuned_bound(bound: np.ndarray, measured: np.ndarray, samples: np.ndarray
 
 
 def _chain_inputs(data, service: str) -> np.ndarray:
-    """Inputs of a model of one service inside the chain at all held-out configurations: its configuration, and with
-    real data also the arrival rate of the run (ChainData.x_test_load); without the number of workers (model_inputs)."""
-    return configurations_of(model_inputs(data.x_test if data.x_test_load is None else data.x_test_load, data.workers_column), service)
+    """Inputs of a model of one service inside the chain at all held-out configurations: with real data the inputs of
+    every model of B.1 (same information): its configuration with the number of workers and log10 of the arrival rate of
+    the run (ChainData.x_test_load); with synthetic data its configuration without the number of workers (model_inputs)."""
+    if data.x_test_load is not None:
+        return configurations_of(data.x_test_load, service)
+    return configurations_of(model_inputs(data.x_test, data.workers_column), service)
 
 
 def quantile_sum(data, samples: np.ndarray, test: np.ndarray, alpha: float) -> np.ndarray:
