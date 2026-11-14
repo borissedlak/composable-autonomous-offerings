@@ -42,9 +42,11 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
+from scipy.stats import norm
 
 import pegasus.real_data as real_data
-from pegasus.data import load_aware, model_inputs
+from pegasus.baselines import conformal_service_bounds, joint_gaussian_quantile, queueing_formula_latency, summed_service_quantiles, union_bound_oracle
+from pegasus.data import load_aware, model_inputs, path_workers
 from pegasus.evaluation import METHOD_COLORS, fit_services, pegasus_bound
 from pegasus.figures import METHOD_STYLES
 from pegasus.real_data import CAMPAIGN, b4_chain_data, run_table, worker_benchmark_pool
@@ -127,6 +129,33 @@ def variant_latency(data, fits: dict, s: int, model_seed: int, alpha: float, con
     y_train, models = fits[s]
     assert all(np.array_equal(data.y_train[node], y_train[node]) for node in data.path), "the training data differs between the settings"
     return pegasus_bound(data, beliefs_at(models, aware, confidence), alpha)
+
+
+def same_information_latencies(data, s: int, model_seed: int, alpha: float, confidence: float, n_calibration: int) -> dict:
+    """End-to-end latency (s) per held-out run of every method of B.1 on the same information: the data of `data` must come
+    from real_chain_data with training_campaign=EXTENDED and n_train=N_TRAIN (inside extended_training), so that every method
+    trains on the same runs, the worker benchmarks, and every model receives the same inputs: the knobs, the number of workers
+    and log10 of the arrival rate (load_aware). Name -> latency; Pegasus under VARIANT, as variant_latency stores it.
+    - Pegasus, GP Sum, DNN Sum, GP Queue: the GPs (and the DNN) of fit_services on the inputs of load_aware(data), which has the
+      workers column kept; the bounds read the workers of every held-out run from `data` (path_workers), as everywhere.
+    - Quantile Union, Conformal: the GPs of the latency quantile on data.x_train_load and data.x_test_load (workers kept, rate last);
+      model_inputs is not applied, which would drop the workers.
+    - Oracle: the union bound over the measured node latencies (no model).
+    model_seed: seed of the DNN and of the calibration split of Conformal (seed + s, as in B.1)."""
+    K, workload = len(data.path), data.workload
+    view = load_aware(data)
+    models = fit_services(view, view.x_train, data.y_train, model_seed=model_seed, confidence=confidence)
+    x_test = model_inputs(view.x_test, view.workers_column)   # the workers column is kept in this view: nothing is dropped
+    predicted = {kind: [models[kind][node].predict(configurations_of(x_test, node), return_std=True) for node in data.path] for kind in ("gp", "dnn")}
+    workers = path_workers(data) or [1] * K
+    return {VARIANT: pegasus_bound(data, models, alpha),
+            "GP Sum": joint_gaussian_quantile(*zip(*predicted["gp"]), norm.ppf(1 - alpha)),
+            "DNN Sum": joint_gaussian_quantile(*zip(*predicted["dnn"]), norm.ppf(1 - alpha)),
+            "GP Queue": sum(queueing_formula_latency(mean, std ** 2, epsilon=alpha, workers=w, **workload) for (mean, std), w in zip(predicted["gp"], workers)),
+            "Quantile Union": summed_service_quantiles(data.x_train_load, data.monitored_latencies, data.path, alpha / K, data.x_test_load, log_target=True),
+            "Conformal": conformal_service_bounds(data.x_train_load, data.monitored_latencies, data.path, alpha, data.x_test_load,
+                                                  miscoverage=1 - confidence, n_calibration=n_calibration, seed=model_seed, log_target=True),
+            "Oracle": union_bound_oracle(data.node_latencies, alpha)}
 
 
 def code_fingerprint() -> str:
