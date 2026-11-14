@@ -124,22 +124,33 @@ def baseline_training_seconds_per_service(data, alpha: float, confidence: float,
     return seconds
 
 
+def hop_time(data) -> float:
+    """Time (s) that a request of the chain of `data` spends between its services: the handover per hop
+    (ChainData.handover) times the K - 1 hops of a chain of K services. The measured end-to-end latency contains it, but
+    no service's latency does (neither a bound of a service nor a latency monitored at a service), so every method of a
+    chain adds it once; 0 for synthetic data and for trees, whose handover grows with the fan-out of the tree and is no
+    constant per hop."""
+    return getattr(data, "handover", 0.0) * (len(data.path) - 1)
+
+
 def pegasus_bound(data, models: dict, alpha: float) -> np.ndarray:
     """Pegasus: the union bound over the closed-form martingale node bounds, per held-out configuration (s). The
     waiting time at a service is bounded by Kingman's martingale bound exp(-theta w); with a Gaussian execution time,
     the latency bound of the service follows from one formula. Every service is bounded with the external arrivals
-    (the paper's assumption on internal arrivals). A service with several workers is bounded by cyclic assignment (bounds.py)."""
+    (the paper's assumption on internal arrivals). A service with several workers is bounded by cyclic assignment (bounds.py).
+    The handover between the services is added (hop_time)."""
     K = len(data.path)
-    return martingale_closed_form_node_bounds(models["beliefs"], epsilon=alpha / K, path_workers=path_workers(data), **data.workload).sum(axis=0)
+    return martingale_closed_form_node_bounds(models["beliefs"], epsilon=alpha / K, path_workers=path_workers(data), **data.workload).sum(axis=0) + hop_time(data)
 
 
 def pegasus_snc_bound(data, models: dict, alpha: float) -> np.ndarray:
     """Pegasus SNC: one bound for the whole chain from its network service curve, per held-out configuration (s). One
     Chernoff step on the product of the services' latency moments bounds the end-to-end latency at the full violation
     probability alpha, instead of alpha / K per service. Multiplying the moments requires that the execution times of
-    an item are independent between the services, so no Hoelder step is applied (all exponents 1)."""
+    an item are independent between the services, so no Hoelder step is applied (all exponents 1). The handover between
+    the services is added (hop_time)."""
     return network_service_bound(models["beliefs"], epsilon=alpha, holder_exponents=[1] * len(data.path), path_workers=path_workers(data),
-                                 **data.workload)
+                                 **data.workload) + hop_time(data)
 
 
 def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alpha: float, confidence: float,
@@ -196,10 +207,12 @@ def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alph
         if training_seconds is None:   # the method trained its own models: elapsed minus its training as it ran (fits loaded from the cache)
             latency, training_seconds = latency
             elapsed -= training_seconds - clock.seconds + clock.wall
+        if name not in (PROPOSED, PROPOSED_SNC):   # both versions of Pegasus add the handover themselves (pegasus_bound)
+            latency = latency + hop_time(data)
         methods[name] = (group, latency)
         seconds[name] = (training_seconds, elapsed + earlier_seconds.get(name, 0.0))
     if data.node_latencies is not None:         # reference: what a union bound reaches with measured instead of predicted nodes
-        methods["Oracle"] = ("reference", union_bound_oracle(data.node_latencies, alpha))
+        methods["Oracle"] = ("reference", union_bound_oracle(data.node_latencies, alpha) + hop_time(data))
     return methods, seconds
 
 

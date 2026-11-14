@@ -559,6 +559,38 @@ def unthrottled_runs(experiment: str, below: float = None) -> list:
     return [run_id for run_id in chain_runs(experiment) if (throttled[run_id] == 0 if below is None else throttled[run_id] < below)]
 
 
+# ------------------------------------------------------------------------------
+# Handover between services (second campaign)
+# ------------------------------------------------------------------------------
+HANDOVER_LEVEL = 0.95   # the handover quantile of a hop within a run that platform_handover summarizes
+
+
+@disk_cached(files=lambda experiment, run_id: [experiment_folder(experiment) / "runs" / run_id / "trace_steps.csv"])
+def run_handovers(experiment: str, run_id: str) -> np.ndarray:
+    """The HANDOVER_LEVEL quantile (s) of the handover of every hop of one run of a chain: the time from the moment the
+    sending service finished a request until the receiving service had it (trace_steps.csv, handover_ms), over the
+    completed requests. One value per hop; the first service has no handover, its requests come from the arrivals."""
+    steps = pd.read_csv(experiment_folder(experiment) / "runs" / run_id / "trace_steps.csv", usecols=["node", "outcome", "handed_over_by", "handover_ms"])
+    steps = steps[(steps["outcome"] == "completed") & steps["handed_over_by"].notna()]
+    return steps.groupby(["handed_over_by", "node"])["handover_ms"].quantile(HANDOVER_LEVEL).to_numpy() / 1e3
+
+
+@lru_cache(maxsize=None)
+def platform_handover(experiment: str) -> float:
+    """Handover (s) per hop between two services of the testbed, estimated without the chain `experiment`: the median
+    over the hops of every unthrottled run of every other chain of B1 (CAMPAIGN_V2 and CHAINS_UNTHROTTLED_V2, the checks
+    left out) of the HANDOVER_LEVEL quantile of the hop in its run (run_handovers). "Other" means another topology, so
+    that the chain's runs in the other folder (its twin, b1u2-...) are left out too. The handover hardly depends on the
+    services, the data or the workers, so it is a property of the platform that a new composition can use without
+    running; the median keeps single broken runs (seconds of handover) from moving it. A combined chain uses the
+    topology of its chain of CAMPAIGN_V2."""
+    topology = chain_path(experiment)[2]
+    values = [run_handovers(other, run_id)
+              for campaign in (CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2) for other in chain_experiments(campaign)
+              if not other.startswith(".") and chain_path(other)[2] != topology for run_id in unthrottled_runs(other)]
+    return float(np.median(np.concatenate(values)))
+
+
 def unthrottled_pool(pool: pd.DataFrame, below: float = TRAINING_THROTTLE_LIMIT) -> pd.DataFrame:
     """The rows of a table of training_pool whose run is in unthrottled_runs(experiment, below) of its experiment: no
     container of the run (in a chain, no service of the chain) was throttled for `below` or more of its CPU periods
@@ -896,8 +928,11 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
             monitored_latencies[node][monitored_rates * mean_per_worker >= 0.95] = np.nan
         x_train_load[node] = np.column_stack([x_train[node], np.log10(monitored_rates)])
         x_test_load[node] = np.column_stack([x_test[node], np.log10(rates)])
+    # the measured end-to-end latency contains the handover between the services, the emulated one of the first campaign does not
+    handover = platform_handover(experiment) if measured_campaign else 0.0
     return ChainData(path, workload, x_train, y_train, x_test, measured, measured_low, node_latencies, monitored_latencies=monitored_latencies,
-                     y_train_spread=y_train_spread, x_train_load=x_train_load, x_test_load=x_test_load, workers_column=workers_column)
+                     y_train_spread=y_train_spread, x_train_load=x_train_load, x_test_load=x_test_load, workers_column=workers_column,
+                     handover=handover)
 
 
 def join_chain_data(first: ChainData, second: ChainData) -> ChainData:
@@ -905,6 +940,7 @@ def join_chain_data(first: ChainData, second: ChainData) -> ChainData:
     (combined_chain): the same chain, the same training data (checked) and one arrival rate per run. node_latencies
     keeps as many requests per run as the shortest run of both parts has."""
     assert first.path == second.path and first.workers_column == second.workers_column, "the parts are not the same chain"
+    assert first.handover == second.handover, "the parts have different handovers (platform_handover left out different chains)"
     for name in ("x_train", "y_train", "y_train_spread", "x_train_load", "monitored_latencies"):
         a, b = getattr(first, name), getattr(second, name)
         assert all(np.array_equal(a[node], b[node], equal_nan=True) for node in first.path), f"the parts have different {name}"

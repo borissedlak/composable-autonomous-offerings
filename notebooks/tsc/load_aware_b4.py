@@ -47,7 +47,7 @@ from scipy.stats import norm
 import pegasus.real_data as real_data
 from pegasus.baselines import conformal_service_bounds, joint_gaussian_quantile, queueing_formula_latency, summed_service_quantiles, union_bound_oracle
 from pegasus.data import load_aware, model_inputs, path_workers
-from pegasus.evaluation import METHOD_COLORS, PROPOSED, fit_services, pegasus_bound
+from pegasus.evaluation import METHOD_COLORS, PROPOSED, fit_services, hop_time, pegasus_bound
 from pegasus.figures import METHOD_STYLES
 from pegasus.real_data import CAMPAIGN, b4_chain_data, run_table, worker_benchmark_pool
 from pegasus.service_gp import configurations_of, run_statistics_belief
@@ -141,6 +141,7 @@ def same_information_latencies(data, s: int, model_seed: int, alpha: float, conf
     - Quantile Union, Conformal: the GPs of the latency quantile on data.x_train_load and data.x_test_load (workers kept, rate last);
       model_inputs is not applied, which would drop the workers.
     - Oracle: the union bound over the measured node latencies (no model).
+    Every method includes the handover between the services (hop_time in pegasus/evaluation.py).
     model_seed: seed of the DNN and of the calibration split of Conformal (seed + s, as in B.1). with_dnn=False leaves out DNN Sum
     (the experiments after B.1)."""
     K, workload = len(data.path), data.workload
@@ -159,7 +160,8 @@ def same_information_latencies(data, s: int, model_seed: int, alpha: float, conf
     latencies["Conformal"] = conformal_service_bounds(data.x_train_load, data.monitored_latencies, data.path, alpha, data.x_test_load,
                                                       miscoverage=1 - confidence, n_calibration=n_calibration, seed=model_seed, log_target=True)
     latencies["Oracle"] = union_bound_oracle(data.node_latencies, alpha)
-    return latencies
+    # the handover between the services (hop_time): pegasus_bound adds it itself, every other method here gets it added
+    return {name: latency if name == VARIANT else latency + hop_time(data) for name, latency in latencies.items()}
 
 
 def same_information_methods(data, s: int, model_seed: int, alpha: float, confidence: float, n_calibration: int, with_dnn: bool = False) -> dict:

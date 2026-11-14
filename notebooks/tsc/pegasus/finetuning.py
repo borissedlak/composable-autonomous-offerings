@@ -14,7 +14,7 @@ from matplotlib.lines import Line2D
 
 from .baselines import summed_service_quantiles
 from .baselines_chain import fluxion_training_rows, train_fluxion_chain
-from .evaluation import METHOD_COLORS, PROPOSED, PROPOSED_SNC
+from .evaluation import METHOD_COLORS, PROPOSED, PROPOSED_SNC, hop_time
 from .data import model_inputs
 from .service_gp import configurations_of
 
@@ -92,8 +92,10 @@ def finetuning_methods(data, methods: dict, samples: np.ndarray, test: np.ndarra
     results = {name: ("proposed", finetuned_bound(methods[name][1], data.measured, samples, test, miscoverage)) for name in (PROPOSED, PROPOSED_SNC)}
     if len(samples) == 0:
         return results
-    results[QUANTILE_SUM] = ("baseline", quantile_sum(data, samples, test, alpha))
-    results[FLUXION] = ("baseline", fluxion_style(data, samples, test, alpha))
+    # both baselines learn from the latencies at the services, which do not contain the handover between them (hop_time);
+    # the fine-tuned versions of Pegasus start from the bounds of B.1, which do
+    results[QUANTILE_SUM] = ("baseline", quantile_sum(data, samples, test, alpha) + hop_time(data))
+    results[FLUXION] = ("baseline", fluxion_style(data, samples, test, alpha) + hop_time(data))
     return results
 
 

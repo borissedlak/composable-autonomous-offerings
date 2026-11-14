@@ -31,7 +31,7 @@ from .data import (assert_unseen, busiest_utilization, load_chain_data, model_in
                    synthetic_tree_data, with_training_data)
 from .evaluation import (METHOD_COLORS, PROPOSED, PROPOSED_SNC, TIGHTNESS_RANGE, TIGHTNESS_TICKS, arrival_text, compare_methods,
                          compare_tree_methods, coverage,
-                         finite_share, fit_services, ground_truth_conclusion, sweep_conclusion, sweep_seconds, sweep_statistics,
+                         finite_share, fit_services, ground_truth_conclusion, hop_time, sweep_conclusion, sweep_seconds, sweep_statistics,
                          tightness_and_time_figure, tightness_figure, tightness_sweep_figure, time_conclusion)
 from .real_data import (BENCHMARKS_V2, CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, b4_chain_data, b4_utilization, campaign_nodes, chain_experiments,
                         chain_path, chain_tail_ratios, real_tree_data, training_pool, tree_structure, unthrottled_pool, unthrottled_runs,
@@ -174,14 +174,17 @@ def base_case(bases: dict, base_models: dict, s: int) -> tuple:
                                  x_train_load=data.x_train_load)
     workload = data.workload
     beliefs, lower_means, workers = models["beliefs"], models["lower_means"], path_workers(data)   # workers of every service per configuration
-    # Ablation: the other ways to bound the nodes and to compose them, all on the same GP beliefs
+    # Ablation: the other ways to bound the nodes and to compose them, all on the same GP beliefs, each with the handover
+    # between the services (hop_time), as every method of compare_methods
     compositions = {
-        "union bound, Chernoff (SNC) nodes": ("proposed", sum(snc_latency_bound(*b, epsilon=alpha / K, workers=w, **workload) for b, w in zip(beliefs, workers))),
+        "union bound, Chernoff (SNC) nodes": ("proposed", sum(snc_latency_bound(*b, epsilon=alpha / K, workers=w, **workload) for b, w in zip(beliefs, workers))
+                                              + hop_time(data)),
         "union bound, propagated Chernoff (SNC) nodes": ("proposed", propagated_node_bounds(beliefs, epsilon=alpha / K, path_lower_means=lower_means,
-                                                                                            path_workers=workers, **workload).sum(axis=0)),
+                                                                                            path_workers=workers, **workload).sum(axis=0) + hop_time(data)),
         "union bound, martingale nodes = Pegasus": ("proposed", methods[PROPOSED][1]),
         "network service curve, independent services = Pegasus SNC": ("proposed", methods[PROPOSED_SNC][1]),
-        "network service curve, Hölder (any dependence)": ("proposed", network_service_bound(beliefs, epsilon=alpha, path_workers=workers, **workload)),
+        "network service curve, Hölder (any dependence)": ("proposed", network_service_bound(beliefs, epsilon=alpha, path_workers=workers, **workload)
+                                                           + hop_time(data)),
     }
     return methods, compositions
 

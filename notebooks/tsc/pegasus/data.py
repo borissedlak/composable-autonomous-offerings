@@ -67,6 +67,11 @@ class ChainData:
     x_test_load: dict = None                  # the configuration and the arrival rate, if the rate differs between configurations
     workers_column: object = None             # column of x_test that holds the number of workers of a service (an int, or a
                                               # dictionary service -> int or None like x_test); None: one worker
+    handover: float = 0.0                     # time (s) that a request needs to get from one service to the next, outside both
+                                              # services, per hop: part of the measured end-to-end latency but of no service's
+                                              # latency, so every method adds it once per hop (hop_time in evaluation.py); a
+                                              # platform constant measured on other chains (platform_handover in real_data.py),
+                                              # 0 for synthetic data, whose simulator has no handover
 
 
 @dataclass

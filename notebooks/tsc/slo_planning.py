@@ -145,6 +145,7 @@ class Composition:
     tables: dict = field(repr=False)   # node -> node bound (s), shape (qualities, workers[, models]); inf if overloaded
     extrapolated: list = field(default_factory=list)   # nodes whose training runs never had the arrival rate `rate`
     q_range: dict = field(default_factory=dict)        # node -> (smallest, largest) data quality of its training runs, any model size
+    handover: float = 0.0              # handover (s) per hop between two services (platform_handover), added once per hop
 
     @property
     def label(self) -> str:
@@ -168,7 +169,7 @@ class Composition:
                 total = total + table[q_index, w_index[:, k], m_index[:, self.model_nodes.index(node)]]
             else:
                 total = total + table[q_index, w_index[:, k]]
-        return total
+        return total + self.handover * (len(self.path) - 1)   # the handover between the services, as hop_time in pegasus/evaluation.py
 
 
 def chain_space(experiment: str) -> dict:
@@ -232,7 +233,8 @@ def composition(experiment: str, rate: float, model_seed: int = seed, refresh: b
         bound = martingale_closed_form_node_bound(mean, var, "poisson", rate, epsilon, workers=grid[:, 1].astype(int))
         tables[node] = np.asarray(bound, dtype=float).reshape([len(a) for a in axes])
     q_range = {node: (lambda q: (q.min(), q.max()))(la.extended_pool(fitted["services"][node])["data_quality"]) for node in path}
-    return Composition(experiment, path, fitted["services"], rate, qualities, workers, model_nodes, models, tables, extrapolated, q_range)
+    return Composition(experiment, path, fitted["services"], rate, qualities, workers, model_nodes, models, tables, extrapolated, q_range,
+                       handover=real_data.platform_handover(experiment))
 
 
 # ------------------------------------------------------------------------------
@@ -318,7 +320,7 @@ def _relaxation(comp: Composition):
         for k, node in enumerate(comp.path):
             point = [x[0], x[1 + k]] + ([x[1 + len(comp.path) + comp.model_nodes.index(node)]] if node in comp.model_nodes else [])
             total += float(interpolators[node](point)[0])
-        return total
+        return total + comp.handover * (len(comp.path) - 1)
 
     return latency
 
