@@ -47,7 +47,7 @@ from scipy.stats import norm
 import pegasus.real_data as real_data
 from pegasus.baselines import conformal_service_bounds, joint_gaussian_quantile, queueing_formula_latency, summed_service_quantiles, union_bound_oracle
 from pegasus.data import load_aware, model_inputs, path_workers
-from pegasus.evaluation import METHOD_COLORS, fit_services, pegasus_bound
+from pegasus.evaluation import METHOD_COLORS, PROPOSED, fit_services, pegasus_bound
 from pegasus.figures import METHOD_STYLES
 from pegasus.real_data import CAMPAIGN, b4_chain_data, run_table, worker_benchmark_pool
 from pegasus.service_gp import configurations_of, run_statistics_belief
@@ -131,7 +131,7 @@ def variant_latency(data, fits: dict, s: int, model_seed: int, alpha: float, con
     return pegasus_bound(data, beliefs_at(models, aware, confidence), alpha)
 
 
-def same_information_latencies(data, s: int, model_seed: int, alpha: float, confidence: float, n_calibration: int) -> dict:
+def same_information_latencies(data, s: int, model_seed: int, alpha: float, confidence: float, n_calibration: int, with_dnn: bool = True) -> dict:
     """End-to-end latency (s) per held-out run of every method of B.1 on the same information: the data of `data` must come
     from real_chain_data with training_campaign=EXTENDED and n_train=N_TRAIN (inside extended_training), so that every method
     trains on the same runs, the worker benchmarks, and every model receives the same inputs: the knobs, the number of workers
@@ -141,21 +141,33 @@ def same_information_latencies(data, s: int, model_seed: int, alpha: float, conf
     - Quantile Union, Conformal: the GPs of the latency quantile on data.x_train_load and data.x_test_load (workers kept, rate last);
       model_inputs is not applied, which would drop the workers.
     - Oracle: the union bound over the measured node latencies (no model).
-    model_seed: seed of the DNN and of the calibration split of Conformal (seed + s, as in B.1)."""
+    model_seed: seed of the DNN and of the calibration split of Conformal (seed + s, as in B.1). with_dnn=False leaves out DNN Sum
+    (the experiments after B.1)."""
     K, workload = len(data.path), data.workload
     view = load_aware(data)
-    models = fit_services(view, view.x_train, data.y_train, model_seed=model_seed, confidence=confidence)
+    models = fit_services(view, view.x_train, data.y_train, model_seed=model_seed, confidence=confidence, with_dnn=with_dnn)
     x_test = model_inputs(view.x_test, view.workers_column)   # the workers column is kept in this view: nothing is dropped
-    predicted = {kind: [models[kind][node].predict(configurations_of(x_test, node), return_std=True) for node in data.path] for kind in ("gp", "dnn")}
+    predicted = {kind: [models[kind][node].predict(configurations_of(x_test, node), return_std=True) for node in data.path]
+                 for kind in (("gp", "dnn") if with_dnn else ("gp",))}
     workers = path_workers(data) or [1] * K
-    return {VARIANT: pegasus_bound(data, models, alpha),
-            "GP Sum": joint_gaussian_quantile(*zip(*predicted["gp"]), norm.ppf(1 - alpha)),
-            "DNN Sum": joint_gaussian_quantile(*zip(*predicted["dnn"]), norm.ppf(1 - alpha)),
-            "GP Queue": sum(queueing_formula_latency(mean, std ** 2, epsilon=alpha, workers=w, **workload) for (mean, std), w in zip(predicted["gp"], workers)),
-            "Quantile Union": summed_service_quantiles(data.x_train_load, data.monitored_latencies, data.path, alpha / K, data.x_test_load, log_target=True),
-            "Conformal": conformal_service_bounds(data.x_train_load, data.monitored_latencies, data.path, alpha, data.x_test_load,
-                                                  miscoverage=1 - confidence, n_calibration=n_calibration, seed=model_seed, log_target=True),
-            "Oracle": union_bound_oracle(data.node_latencies, alpha)}
+    latencies = {VARIANT: pegasus_bound(data, models, alpha),
+                 "GP Sum": joint_gaussian_quantile(*zip(*predicted["gp"]), norm.ppf(1 - alpha))}
+    if with_dnn:
+        latencies["DNN Sum"] = joint_gaussian_quantile(*zip(*predicted["dnn"]), norm.ppf(1 - alpha))
+    latencies["GP Queue"] = sum(queueing_formula_latency(mean, std ** 2, epsilon=alpha, workers=w, **workload) for (mean, std), w in zip(predicted["gp"], workers))
+    latencies["Quantile Union"] = summed_service_quantiles(data.x_train_load, data.monitored_latencies, data.path, alpha / K, data.x_test_load, log_target=True)
+    latencies["Conformal"] = conformal_service_bounds(data.x_train_load, data.monitored_latencies, data.path, alpha, data.x_test_load,
+                                                      miscoverage=1 - confidence, n_calibration=n_calibration, seed=model_seed, log_target=True)
+    latencies["Oracle"] = union_bound_oracle(data.node_latencies, alpha)
+    return latencies
+
+
+def same_information_methods(data, s: int, model_seed: int, alpha: float, confidence: float, n_calibration: int, with_dnn: bool = False) -> dict:
+    """same_information_latencies in the form of the experiments after B.1 (compare_methods): name -> (group, latency), with
+    Pegasus under PROPOSED, and without DNN Sum unless with_dnn."""
+    latencies = same_information_latencies(data, s, model_seed, alpha, confidence, n_calibration, with_dnn)
+    group = lambda name: "proposed" if name == VARIANT else "reference" if name == "Oracle" else "baseline"
+    return {(PROPOSED if name == VARIANT else name): (group(name), latency) for name, latency in latencies.items()}
 
 
 def code_fingerprint() -> str:

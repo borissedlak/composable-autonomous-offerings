@@ -505,14 +505,16 @@ def tightness_figure(results: dict, data, title: str, level_label: str, seeds_re
     plt.show()
 
 
-def sweep_line(ax, settings, values: np.ndarray, name: str, held: np.ndarray = None, label: str = None, band: bool = True) -> None:
+def sweep_line(ax, settings, values: np.ndarray, name: str, held: np.ndarray = None, label: str = None, band: bool = True,
+               zorder: float = None) -> None:
     """One method in a figure over a sweep, in the style of the paper figures (pegasus/figures.py): its color, marker
     and line style. settings: the values of the horizontal axis; values: (settings, seeds), nan where the method has
     no value. The line is the median over the seeds, in which a seed without a value counts as infinitely large, so that
     a setting has no point if half of the seeds or more have no value. The band reaches from the smallest to the
     largest seed with a value. held: per setting, whether the method holds there (see holds); its marker is then
     filled, otherwise hollow. Without `held` every marker is filled. label: legend entry (default: name). band=False:
-    the median line only, without the band."""
+    the median line only, without the band. zorder: the layer of the method (its line 0.01 and its markers 0.02 above its band),
+    so that methods on layers at least 0.1 apart do not interleave; by default matplotlib's, band 1, line 2, markers 3."""
     from .figures import BAND_ALPHA, METHOD_STYLES, method_linewidth
     typical = np.median(np.where(np.isnan(values), np.inf, values), axis=1)
     shown = np.isfinite(typical)
@@ -520,11 +522,12 @@ def sweep_line(ax, settings, values: np.ndarray, name: str, held: np.ndarray = N
     color = METHOD_COLORS[name]
     marker, linestyle = METHOD_STYLES.get(name, ("o", "-"))
     filled = np.ones(len(settings), dtype=bool) if held is None else np.asarray(held)[shown]
-    ax.plot(settings, typical, linestyle=linestyle, color=color, linewidth=method_linewidth(name))
+    layers = dict(band=1, line=2, markers=3) if zorder is None else dict(band=zorder, line=zorder + 0.01, markers=zorder + 0.02)
+    ax.plot(settings, typical, linestyle=linestyle, color=color, linewidth=method_linewidth(name), zorder=layers["line"])
     if band:
-        ax.fill_between(settings, np.nanmin(values, axis=1), np.nanmax(values, axis=1), color=color, alpha=BAND_ALPHA, linewidth=0)
+        ax.fill_between(settings, np.nanmin(values, axis=1), np.nanmax(values, axis=1), color=color, alpha=BAND_ALPHA, linewidth=0, zorder=layers["band"])
     ax.scatter(settings, typical, s=40, marker=marker, facecolors=[color if f else "white" for f in filled], edgecolors=color, linewidths=1.5,
-               zorder=3)
+               zorder=layers["markers"])
     # the legend entry carries the line and the marker, as in the legends of figures.py
     ax.plot([], [], linestyle=linestyle, marker=marker, color=color, linewidth=method_linewidth(name), markersize=7, label=label or name)
 
@@ -536,7 +539,7 @@ def sweep_segments(settings, values: np.ndarray) -> list:
 
 
 def tightness_sweep_figure(settings: list, statistics: dict, xlabel: str, title: str, level_label: str, tick_labels: list = None,
-                           log_x: bool = True, name: str = None, half: str = None, marked: dict = None) -> None:
+                           log_x: bool = True, name: str = None, half: str = None, marked: dict = None, front: tuple = ()) -> None:
     """Tightness of every method over a sweep, one panel: per method the median over the seeds with the band from the
     smallest to the largest seed (sweep_line), a filled marker where the method holds and a hollow one where it does
     not. statistics: from sweep_statistics; tick_labels: text of every setting on the horizontal axis (default: its
@@ -549,7 +552,9 @@ def tightness_sweep_figure(settings: list, statistics: dict, xlabel: str, title:
     marked: one more setting right of the sweep, evaluated on other held-out runs than the sweep, which the lines continue
     to (_infinite_marks adds the "∞" of a method without a finite value there and the infinite share of the proposed
     method); a dict with x (its position), tick (its tick label), statistics (as sweep_statistics, for the one setting) and
-    methods (setting, seed -> name -> (group, latency per held-out run), for the share of infinite latencies)."""
+    methods (setting, seed -> name -> (group, latency per held-out run), for the share of infinite latencies).
+    front: names of methods that are drawn in front of all others (their band, line and markers), e.g. a method that
+    should stay visible where other methods overlap it; the last name is the frontmost."""
     from .figures import fit_x_tick_labels, half_figure, paper_figure, paper_style, save_figure
     print(title)
     with paper_style():
@@ -560,7 +565,7 @@ def tightness_sweep_figure(settings: list, statistics: dict, xlabel: str, title:
                           for name, values in statistics.items()}
             settings, tick_labels = settings + [marked["x"]], (tick_labels or [f"{v:g}" for v in settings]) + [marked["tick"]]
         _sweep_axis(ax, settings, xlabel, tick_labels, log_x)
-        _tightness_panel(ax, settings, statistics, level_label, failure_text=half != "left", wrap_text=bool(half))
+        _tightness_panel(ax, settings, statistics, level_label, failure_text=half != "left", wrap_text=bool(half), front=front)
         marked_segments = _infinite_marks(ax, marked, statistics) if marked else []
         if half == "right":
             ax.set_ylabel("")
@@ -711,16 +716,19 @@ def _sweep_axis(ax, settings: list, xlabel: str, tick_labels: list, log_x: bool)
     ax.grid(True, linestyle=":", alpha=0.6)
 
 
-def _tightness_panel(ax, settings: list, statistics: dict, level_label: str, failure_text: bool = True, wrap_text: bool = False) -> None:
+def _tightness_panel(ax, settings: list, statistics: dict, level_label: str, failure_text: bool = True, wrap_text: bool = False,
+                     front: tuple = ()) -> None:
     """Tightness of every method over a sweep on `ax`, with the line at 1x (the measured quantile) and the red zone
     below it, where a method underestimates the quantile (SLO violated). The axis shows TIGHTNESS_RANGE; a line leaves the panel where a method lies
-    outside."""
+    outside. front: methods drawn in front of all others (tightness_sweep_figure)."""
     from .figures import FAILURE_COLOR, FAILURE_TEXT_COLOR, tightness_label, tightness_tick
     ax.axhspan(TIGHTNESS_RANGE[0], 1.0, color=FAILURE_COLOR, linewidth=0)
     ax.axhline(1.0, color="black", linewidth=1)
-    for name in METHOD_COLORS:
-        if name in statistics:
-            sweep_line(ax, settings, statistics[name]["tightness"], name, held=statistics[name]["holds"])
+    # every method on its own layer, those of `front` the highest ones, so that no element of one lies between the elements of another
+    drawn = [name for name in METHOD_COLORS if name in statistics]
+    drawn = [name for name in drawn if name not in front] + [name for name in front if name in drawn]
+    for rank, name in enumerate(drawn):
+        sweep_line(ax, settings, statistics[name]["tightness"], name, held=statistics[name]["holds"], zorder=2.2 + 0.1 * rank if front else None)
     if failure_text:
         # wrap_text: in two lines, for a panel of half the width
         ax.text(0.99, 0.03, f"underestimated:{chr(10) if wrap_text else ' '}SLO violated", transform=ax.transAxes, ha="right",
