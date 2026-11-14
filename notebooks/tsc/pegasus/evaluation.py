@@ -8,6 +8,7 @@ probability with which the pessimistic mean of a bound lies above the true mean.
 import time
 
 import matplotlib.pyplot as plt
+from matplotlib.ticker import LogLocator, NullFormatter
 import numpy as np
 from scipy.stats import norm
 
@@ -856,7 +857,8 @@ def _tightness_legend(ax, settings: list, statistics: dict, ncol: int = 3, half:
 
 
 def uncertainty_figure(uncertainty: dict, chain_pegasus: dict, services: list, title: str, confidence: float, name: str = None,
-                       oracle: dict = None, level_label: str = None, execution_times: dict = None) -> None:
+                       oracle: dict = None, level_label: str = None, execution_times: dict = None,
+                       display_names: dict = None) -> None:
     """What more training runs per service do to the service models and to the bound of Pegasus: two figures side
     by side in the width of one (half_figure, each with its own vertical axis), with the training runs per service on
     the horizontal axis (logarithmic). All services grow together; a service with fewer runs holds all of them.
@@ -876,7 +878,7 @@ def uncertainty_figure(uncertainty: dict, chain_pegasus: dict, services: list, t
     array (levels, 7) of (training runs per service, median bound of Pegasus (s), median bound with the predicted
     means (s), median tightness of both, coverage of both); oracle: seed -> (median tightness, coverage) of the Oracle,
     or None. execution_times: service -> its measured mean execution time (s), written next to its name in the legend, so
-    that the figure keeps how slow every service is; or None. The title is printed above the figures; name: file name in
+    that the figure keeps how slow every service is; or None. display_names: service -> its name in the legend (default: the service name). The title is printed above the figures; name: file name in
     figures/tsc/experimental-results, saved as <name>_execution (left)
     and <name>_cost (right), the names they had before, so that references to the files stay valid, or None."""
     from .figures import fit_half_pair, half_figure, legend_inside, paper_style, plain_log_ticks, save_figure
@@ -895,7 +897,7 @@ def uncertainty_figure(uncertainty: dict, chain_pegasus: dict, services: list, t
             error = 100 * median(service, 5)
             time = "" if execution_times is None else (f" ({execution_times[service]:.2g} s)" if execution_times[service] >= 1
                                                        else f" ({execution_times[service] * 1e3:.2g} ms)")
-            left.plot(runs[service], error, linestyle="-", marker=marker, color=color, linewidth=1.5, markersize=6, label=service + time)
+            left.plot(runs[service], error, linestyle="-", marker=marker, color=color, linewidth=1.5, markersize=6, label=(display_names or {}).get(service, service) + time)
             segments += [(x, e, e) for x, e in zip(runs[service], error)]
         values = [value for segment in segments for value in segment[1:] if value > 0]
         # little room above the data: the errors are largest with few runs, at the left, and the legend fits upper right
@@ -919,7 +921,7 @@ def uncertainty_figure(uncertainty: dict, chain_pegasus: dict, services: list, t
         _tightness_panel(ax, chain_runs, statistics, level_label or "p95", wrap_text=True)
         known = np.median(np.where(np.isnan(finite(per_seed(4))), np.inf, per_seed(4)), axis=1)
         ax.plot(chain_runs[np.isfinite(known)], known[np.isfinite(known)], linestyle=":", color=METHOD_COLORS[PROPOSED], linewidth=1.5,
-                label="known means")
+                label="predicted means")
         typical = np.median(np.where(np.isnan(statistics[PROPOSED]["tightness"]), np.inf, statistics[PROPOSED]["tightness"]), axis=1)
         infinite = []   # (x, y_low, y_high) of every "∞", which the legend must leave visible
         for x in chain_runs[~np.isfinite(typical)]:   # no finite bound under half of the seeds or more
@@ -932,12 +934,16 @@ def uncertainty_figure(uncertainty: dict, chain_pegasus: dict, services: list, t
         _tightness_legend(ax, chain_runs, statistics, ncol=1, extra_segments=infinite, fontsize=9, handlelength=1.6, borderaxespad=0.3)
         figures.append((fig, "cost"))
 
-        left.set_xscale("log")
         left.set_yscale("log")
-        plain_log_ticks(left.xaxis)
         plain_log_ticks(left.yaxis)
-        left.set_xlabel("runs of the service")
-        left.grid(True, linestyle=":", alpha=0.6)
+        # the same horizontal axis as the right panel (label, ticks, limits), so that the two read against each other
+        _sweep_axis(left, chain_runs, "runs per service", ticks, log_x=True)   # also switches the minor ticks off
+        # the logarithmic error axis keeps its minor ticks (2 to 9 of every decade), without numbers
+        left.yaxis.set_minor_locator(LogLocator(base=10, subs=np.arange(2, 10), numticks=20))
+        left.yaxis.set_minor_formatter(NullFormatter())
+        low, high = (min(a.get_xlim()[0] for a in (left, ax)), max(a.get_xlim()[1] for a in (left, ax)))
+        left.set_xlim(low, high)
+        ax.set_xlim(low, high)
         # one column: the names with their execution times are too wide for two columns in a half figure
         legend_inside(left, handles, labels, segments, locations=("upper right", "upper center"),
                       max_doublings=0, ncol=1, fontsize=9, framealpha=0.95, handletextpad=0.4, labelspacing=0.3)
