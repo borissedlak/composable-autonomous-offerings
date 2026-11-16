@@ -12,17 +12,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
 
-from .baselines import summed_service_quantiles
 from .baselines_chain import fluxion_training_rows, train_fluxion_chain
 from .evaluation import METHOD_COLORS, PROPOSED, PROPOSED_SNC, hop_time
 from .data import model_inputs
 from .service_gp import configurations_of
 
-QUANTILE_SUM, FLUXION = "Quantile Sum", "Fluxion-style"
-# Colors of the two baselines of C.1, to be added to METHOD_COLORS of evaluation.py by the notebook
-COLORS = {QUANTILE_SUM: "tab:pink", FLUXION: "tab:brown"}
+FLUXION = "Fluxion-style"
+# Color of the baseline of C.1, to be added to METHOD_COLORS of evaluation.py by the notebook
+COLORS = {FLUXION: "tab:brown"}
 # Marker and line style of every method of C.1, so that the figure also reads in grayscale (as draft_problem_figure.py)
-STYLES = {PROPOSED: "o-", PROPOSED_SNC: "D-", QUANTILE_SUM: "^-.", FLUXION: "s--"}
+STYLES = {PROPOSED: "o-", PROPOSED_SNC: "D-", FLUXION: "s--"}
 
 
 def split_samples(n_configurations: int, n_samples_max: int, rng: np.random.Generator) -> tuple:
@@ -65,17 +64,6 @@ def _chain_inputs(data, service: str) -> np.ndarray:
     return configurations_of(model_inputs(data.x_test, data.workers_column), service)
 
 
-def quantile_sum(data, samples: np.ndarray, test: np.ndarray, alpha: float) -> np.ndarray:
-    """Quantile Sum at the test configurations: one GP per service predicts the (1 - alpha) latency quantile that the
-    service had inside the chain, trained on the end-to-end samples (data.node_latencies of the sample runs), and the
-    predictions are added. Not a guarantee: a point prediction per service, and the quantile of a sum is not the sum of
-    the quantiles. With real data the GPs are fitted on the logarithm of the quantile, as in B."""
-    inputs = {s: _chain_inputs(data, s) for s in set(data.path)}
-    latencies = {s: data.node_latencies[samples][:, :, k] for k, s in enumerate(data.path)}
-    return summed_service_quantiles({s: x[samples] for s, x in inputs.items()}, latencies, data.path, alpha, {s: x[test] for s, x in inputs.items()},
-                                    log_target=data.y_train_spread is not None)
-
-
 def fluxion_style(data, samples: np.ndarray, test: np.ndarray, alpha: float, levels: tuple = (0.5, 0.75, 0.9)) -> np.ndarray:
     """Fluxion-style composition (baselines_chain.py, part 4) at the test configurations, trained on the end-to-end
     samples: one GP per position of the chain and quantile level, which receives the configuration of the whole chain
@@ -90,14 +78,13 @@ def fluxion_style(data, samples: np.ndarray, test: np.ndarray, alpha: float, lev
 def finetuning_methods(data, methods: dict, samples: np.ndarray, test: np.ndarray, alpha: float, miscoverage: float) -> dict:
     """Every method of C.1 at the test configurations, name -> (group, latency in s): both versions of Pegasus,
     fine-tuned with the end-to-end samples (finetuned_bound; with no samples, or too few for the level, the bound of
-    B.1 as it is), and the two baselines trained on these samples, which need at least one sample. methods: the results
+    B.1 as it is), and the baseline trained on these samples (Fluxion-style), which needs at least one sample. methods: the results
     of B.1 for the chain, name -> (group, latency at all held-out configurations), from compare_methods."""
     results = {name: ("proposed", finetuned_bound(methods[name][1], data.measured, samples, test, miscoverage)) for name in (PROPOSED, PROPOSED_SNC)}
     if len(samples) == 0:
         return results
-    # both baselines learn from the latencies at the services, which do not contain the handover between them (hop_time);
+    # the baseline learns from the latencies at the services, which do not contain the handover between them (hop_time);
     # the fine-tuned versions of Pegasus start from the bounds of B.1, which do
-    results[QUANTILE_SUM] = ("baseline", quantile_sum(data, samples, test, alpha) + hop_time(data))
     results[FLUXION] = ("baseline", fluxion_style(data, samples, test, alpha) + hop_time(data))
     return results
 
