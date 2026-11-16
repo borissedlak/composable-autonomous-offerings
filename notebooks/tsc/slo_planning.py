@@ -1,10 +1,10 @@
 """Experiment C.2 of `2f_optimization.ipynb`: choosing the service composition of an application, and its
 configuration, that meets the SLOs of a client, with a numerical solver on the predictions of Pegasus.
 
-Setting. An application type (vision, audio, lidar) has five service compositions, the chains b1u-<application>-<i>
+Setting. An application type (audio, lidar, vision) has five service compositions, the chains b1u-<application>-<i>
 of the second campaign. A configuration of a composition sets
-- q, the data quality that every service of the composition processes (knob data_quality; the image height in pixels
-  for vision, the clip length in seconds for audio, the radius of the point cloud in meters for lidar),
+- q, the data quality that every service of the composition processes (knob data_quality; the clip length in seconds
+  for audio, the radius of the point cloud in meters for lidar, the image height in pixels for vision),
 - w_k, the number of workers of service k (knob parallelism, 1 to 4), and
 - m_k, the model size of every detector that has one (knob model_size, 1 or 2; vision only).
 The client of a scenario sends items at one fixed arrival rate (items/s, Poisson arrivals).
@@ -56,14 +56,20 @@ from pegasus.evaluation import fit_services
 from pegasus.evaluation_setup import alpha, confidence, coverage_check, seed
 from pegasus.service_gp import run_statistics_belief
 
-APPLICATIONS = {app: [f"b1u-{app}-{i}" for i in range(1, 6)] for app in ("vision", "audio", "lidar")}
-QUALITY_UNITS = dict(vision="image height (px)", audio="clip length (s)", lidar="point cloud rad. (m)")   # meaning of q
-QUALITY_SHORT = dict(vision="px", audio="s", lidar="m")   # its unit
+APPLICATIONS = {app: [f"b1u-{app}-{i}" for i in range(1, 6)] for app in ("audio", "lidar", "vision")}   # the order of every table and figure
+QUALITY_UNITS = dict(audio="clip length (s)", lidar="point cloud rad. (m)", vision="image height (px)")   # meaning of q
+QUALITY_SHORT = dict(audio="s", lidar="m", vision="px")   # its unit
 THIRD_MARGINS = (0.50, 0.025, 0.04)   # inches: below (tick labels and x label), above and right of the plot area of a third-width figure
 CORE_HEADROOM = 0.5        # cores per service = workers + CORE_HEADROOM, the rule of the campaign runs (knob <node>.cores)
 CACHE = real_data.CAMPAIGN.parent / "cache" / "slo_planning"   # statics/cache/slo_planning/: the fitted models of every composition (joblib)
 PLANS = real_data.CAMPAIGN.parent / "slo_planning"             # statics/slo_planning/: the plans to deploy (csv)
-C2_RESULTS = real_data.CAMPAIGN.parent / "results_milos_v2" / "c2" / "v1"   # statics/results_milos_v2/c2/v1/: testbed runs of the deployed plans (not committed)
+# the second deployment (statics/results_milos_v2/c2/v2/, experiment folders c2v2-<scenario>-..., not committed) and its plans, as
+# the notebook computed them on 2026-11-14 (c2_plans_new.csv of commit 6238812); the first deployment is in c2/v1/ (c2_plans_old.csv)
+C2_RESULTS, C2_PREFIX = real_data.CAMPAIGN.parent / "results_milos_v2" / "c2" / "v2", "c2v2"
+DEPLOYED_PLANS = PLANS / "c2_plans_v2.csv"
+# training runs per service of the models of C.2: every run of the worker benchmarks (None), not N_TRAIN of the other experiments,
+# because the deployed plans (DEPLOYED_PLANS) were computed with these models
+C2_N_TRAIN = None
 RESTARTS = 10              # SLSQP starting points per composition, as run_optimizer_multi of the RASK paper
 OVERLOAD_LATENCY = 10.0    # s; latency that the continuous relaxation gives an overloaded node, so that SLSQP moves away from it
 TIE_WEIGHT = 1e-3          # weight of a constrained dimension in the objective, which only breaks ties of the free dimensions
@@ -178,7 +184,7 @@ def chain_space(experiment: str) -> dict:
 
 
 def _cache_file(experiment: str, model_seed: int) -> Path:
-    key = hashlib.sha256(f"{experiment}|{model_seed}|{alpha}|{confidence}|{la.code_fingerprint()}".encode()).hexdigest()[:12]
+    key = hashlib.sha256(f"{experiment}|{model_seed}|{alpha}|{confidence}|{C2_N_TRAIN}|{la.code_fingerprint()}".encode()).hexdigest()[:12]
     return CACHE / f"models_{experiment}_{key}.joblib"
 
 
@@ -190,7 +196,7 @@ def fit_composition(experiment: str, model_seed: int = seed, refresh: bool = Fal
         return joblib.load(file)
     with la.extended_training():
         data = real_data.real_chain_data(experiment, level=1 - alpha, coverage_check=coverage_check, seed=[model_seed, 0],
-                                         training_campaign=la.EXTENDED, n_train=la.N_TRAIN)
+                                         training_campaign=la.EXTENDED, n_train=C2_N_TRAIN)
         names = real_data.feature_names(experiment, la.EXTENDED)
     aware = la.load_aware(data)
     models = fit_services(aware, aware.x_train, data.y_train, model_seed=model_seed, confidence=confidence, with_dnn=False)
@@ -489,7 +495,7 @@ def _tradeoff_panel(ax, scenario: Scenario, comps: list, chosen: pd.Series, app:
     """One panel of `tradeoff_figure`: scenario, its compositions `comps` at its rate, its plan row `chosen`. measurement:
     (data quality, predicted bound, end-to-end latencies of all its requests in ms), all of one earlier deployment, drawn at its
     data quality as a box plot of the requests (box: 25th to 75th percentile with the median, whiskers: 1.5 interquartile ranges,
-    points beyond; bar: 95th percentile, the quantile that the bound is about) or None; with a predicted bound of None only the box plot. single: the panel is a figure of its own (larger fonts, no
+    no outlier points; bar: 95th percentile, the quantile that the bound is about) or None; with a predicted bound of None only the box plot. single: the panel is a figure of its own (larger fonts, no
     title, which the caption gives). third: for a figure one third of the usual width: short x label, a legend of the compositions
     only (the measurement and the extrapolated stretch are explained in the text); `_third_legend` draws it."""
     small, big = (9, 12) if single else (8, 10)
@@ -543,12 +549,11 @@ def _tradeoff_panel(ax, scenario: Scenario, comps: list, chosen: pd.Series, app:
         xmin, xmax = ax.get_xlim()
         half = 0.035 * (xmax - xmin)
         black = dict(color="black", linewidth=1.5)
-        # the textbook box plot: box from the 25th to the 75th percentile with the median, whiskers to the most extreme request within
-        # 1.5 interquartile ranges of the box, the requests beyond them as points
-        ax.boxplot([latency], positions=[q], widths=2 * half, whis=1.5, manage_ticks=False, patch_artist=True,
+        # box from the 25th to the 75th percentile with the median, whiskers to the most extreme request within 1.5 interquartile
+        # ranges of the box; the requests beyond them are not drawn (they still count in the p95 bar)
+        ax.boxplot([latency], positions=[q], widths=2 * half, whis=1.5, manage_ticks=False, patch_artist=True, showfliers=False,
                    boxprops=dict(facecolor="white", edgecolor="black", linewidth=1.5, zorder=6), medianprops=dict(color="black", linewidth=1.5, zorder=7),
-                   whiskerprops=dict(**black, zorder=6), capprops=dict(**black, zorder=6),
-                   flierprops=dict(marker=".", markersize=2, markeredgecolor="0.3", markerfacecolor="0.3", alpha=0.5, zorder=5))
+                   whiskerprops=dict(**black, zorder=6), capprops=dict(**black, zorder=6))
         # the p95, which the bound is about: twice as wide as the box and in a color that no composition and no other mark has
         xlim = ax.get_xlim()   # with the box
         ax.plot([q - 2 * half, q + 2 * half], [p95, p95], color="magenta", linewidth=2.5, solid_capstyle="butt", zorder=8)
@@ -631,7 +636,7 @@ def tradeoff_figure(comps: dict, plans: dict, scenarios: list, app: str, worker_
     latency and quality constraints. Star: the plan, labeled with its total workers (hollow: best effort, no configuration
     meets the SLOs). measured, deployed (testbed requests and plans of an earlier deployment, see `measured_c2`): also a
     diamond (the bound that the current models give that deployment's configuration) and a box plot of the measured end-to-end latencies (ms) of its requests
-    (box: 25th to 75th percentile with the median, whiskers: 1.5 interquartile ranges, points beyond; bar: 95th percentile), at its data quality. name: file name in figures/tsc/experimental-results, or None."""
+    (box: 25th to 75th percentile with the median, whiskers: 1.5 interquartile ranges, no outlier points; bar: 95th percentile), at its data quality. name: file name in figures/tsc/experimental-results, or None."""
     import matplotlib.pyplot as plt
     from pegasus.figures import paper_style, save_figure
     colors, markers = _trade_colors(comps)
@@ -825,18 +830,54 @@ def tradeoff_third_figures(selected: dict, compositions: dict, plans: dict, scen
         plt.show()
 
 
+def tradeoff_third_overview(scenarios: dict, compositions: dict, plans: dict, worker_budget: int, measured: dict,
+                            deployed: pd.DataFrame, dpi: int = 110) -> None:
+    """Every scenario as the third-width panel of `tradeoff_third_figures`, to choose the selected ones: one row per application
+    (scenarios: application -> list of Scenario), each panel with a caption (scenario, rate, constraints). The diamond (the
+    bound of the deployed configuration) is drawn only where that configuration is not the plan. Shown, not saved."""
+    import base64
+    import io
+    import matplotlib.pyplot as plt
+    from IPython.display import HTML, display
+    from pegasus.figures import paper_style
+    with paper_style():
+        for app, group in scenarios.items():
+            cells = []
+            for scenario in group:
+                plan = plans[(app, scenario.name)].iloc[0]
+                q, bound, _ = _measurement(scenario, compositions[scenario.name], measured, deployed)
+                is_plan = q == plan["data_quality"] and np.isclose(bound, plan["latency_ms"], rtol=0.01)
+                fig, ax = tradeoff_panel_figure(compositions[scenario.name], plan, scenario, app, worker_budget, measured=measured,
+                                                deployed=deployed, show_bound=not is_plan, third=True, finish=False)
+                _third_legend(ax)
+                buffer = io.BytesIO()
+                fig.savefig(buffer, format="png", dpi=dpi)
+                plt.close(fig)
+                image = base64.b64encode(buffer.getvalue()).decode()
+                caption = f"<b>{scenario.name}</b><br>{scenario.rate:g}/s, {scenario.constraints()}" + ("" if is_plan else "<br>deployed ≠ plan")
+                cells.append(f'<figure style="margin:0 6px;text-align:center"><img src="data:image/png;base64,{image}">'
+                             f'<figcaption style="font-size:11px">{caption}</figcaption></figure>')
+            display(HTML(f'<div style="display:flex;align-items:flex-start">{"".join(cells)}</div>'))
+
+
 # ------------------------------------------------------------------------------
 # Testbed runs of the deployed plans
 # ------------------------------------------------------------------------------
+def _deployed_rows(deployed: pd.DataFrame) -> pd.DataFrame:
+    """The plans that were deployed: the feasible ones and the best-effort ones (no configuration met the SLOs, the one with
+    the smallest predicted bound was deployed); c2_plans_old.csv has no best_effort column."""
+    return deployed[deployed["feasible"] | deployed.get("best_effort", False)]
+
+
 def measured_c2(deployed: pd.DataFrame) -> dict:
-    """The testbed runs of the deployed plans (`deployed`: c2_plans_old.csv). Returns scenario name -> (latencies, as_planned):
+    """The testbed runs of the deployed plans (`deployed`: DEPLOYED_PLANS, runs in C2_RESULTS). Returns scenario name -> (latencies, as_planned):
     the end-to-end latency (ms) of every completed request of the scenario's runs, pooled over the runs, and whether the
     deployed configuration (data quality, workers, cores, model sizes, arrival rate in experiment.yaml) is the planned one."""
     import yaml
     out = {}
-    for _, plan in deployed[deployed["feasible"]].iterrows():
+    for _, plan in _deployed_rows(deployed).iterrows():
         sid = plan["scenario"].split()[0].lower()   # "S-V-1 edge box" -> "s-v-1", the prefix of the experiment folder
-        folder = sorted(C2_RESULTS.glob(f"c2-{sid}-*/*/"))[-1]
+        folder = sorted(C2_RESULTS.glob(f"{C2_PREFIX}-{sid}-*/*/"))[-1]
         experiment = yaml.safe_load((folder / "experiment.yaml").read_text())
         ran = {"shared.data_quality": experiment["shared_knobs"]["data_quality"]}
         for node, spec in experiment["nodes"].items():
@@ -854,15 +895,17 @@ def testbed_table(deployed: pd.DataFrame, measured: dict, scenarios: dict) -> pd
     p95 and p99 (ms), the share of requests slower than the bound (%), the tightness bound / measured p95, and the latency
     SLO of the scenario (ms, if it has one). scenarios: scenario name -> Scenario."""
     rows = []
-    for _, plan in deployed[deployed["feasible"]].iterrows():
+    for _, plan in _deployed_rows(deployed).iterrows():
         latency, as_planned = measured[plan["scenario"]]
         bound, p95 = plan["predicted_p95_ms"], np.percentile(latency, 95)
         limit = scenarios[plan["scenario"]].max_latency
-        rows.append(dict(application=plan["application"], scenario=plan["scenario"], requests=len(latency), as_planned=as_planned,
+        rows.append(dict(application=plan["application"], scenario=plan["scenario"], best_effort=bool(plan.get("best_effort", False)),
+                         requests=len(latency), as_planned=as_planned,
                          bound_ms=bound, measured_p95_ms=p95, measured_p99_ms=np.percentile(latency, 99),
                          above_bound_pct=100 * (latency > bound).mean(), tightness=bound / p95,
                          slo_ms=None if limit is None else 1e3 * limit))
-    return pd.DataFrame(rows)
+    order = list(scenarios)   # the order of SCENARIOS, not that of the plan file
+    return pd.DataFrame(rows).sort_values("scenario", key=lambda names: names.map(order.index), kind="stable").reset_index(drop=True)
 
 
 def testbed_figure(measured: dict, deployed: pd.DataFrame, scenarios: list, app: str, name: str = None) -> None:
