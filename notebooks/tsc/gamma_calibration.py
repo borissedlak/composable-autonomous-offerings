@@ -14,7 +14,7 @@ extended_training with training_campaign=EXTENDED, the view load_aware(data), an
 - chains: every held-out run of the 15 chains of the paper (DEFAULT_CHAINS), one u per node, with the measured mean
   execution time of the node in the run (processing mean plus handling overhead, as training_pool defines it);
 - benchmark: the worker-benchmark runs that were not drawn for training (only for n_train below the pool size).
-n_train: training runs per service; None (every run) is the setting of the paper.
+n_train: training runs per service; N_TRAIN of load_aware_b4.py is the setting of the paper.
 
 The script lives outside pegasus/ on purpose: a new file there would change the cache key of the evaluation notebooks.
 Run from notebooks/tsc with the project venv: python gamma_calibration.py
@@ -27,14 +27,14 @@ import pandas as pd
 from scipy.stats import norm
 from sklearn.exceptions import ConvergenceWarning
 
-from load_aware_b4 import EXTENDED, extended_pool, extended_training
+from load_aware_b4 import EXTENDED, N_TRAIN, extended_pool, extended_training
 from pegasus.data import load_aware, load_chain_data
 from pegasus.evaluation import fit_services
 from pegasus.evaluation_setup import DEFAULT_CHAINS, alpha, configure, confidence, coverage_check, seed, seeds
 from pegasus.real_data import (NOT_CONFIGURATION, POOL_COLUMNS, arrival_rates, chain_path, combined_runs, encode_configurations,
                                handling_overhead, run_table, service_rng, unthrottled_pool)
 
-N_TRAINS = (25, 50, 100, None)   # training runs per service; None: every run of the worker benchmarks (the paper)
+N_TRAINS = (25, 50, 100, None)   # training runs per service; None: every run of the worker benchmarks; the paper: N_TRAIN
 OUT = Path(__file__).resolve().parents[2] / "statics" / "gamma_calibration"
 
 
@@ -117,12 +117,12 @@ def coverage_curves(u: pd.Series, groups: list, gammas: np.ndarray) -> np.ndarra
     return np.array([[(u[g] <= gamma).mean() for gamma in gammas] for g in groups])
 
 
-def calibration_figure(name: str = "gamma_calibration", benchmark_n_train: int = 100) -> dict:
+def calibration_figure(name: str = "gamma_calibration", n_train: int = N_TRAIN) -> dict:
     """Observed vs. target confidence of the pessimistic mean (Eq. 7) of the load-aware GPs, from load_aware_benchmark.csv
     and load_aware_chains.csv (main). Lines: the median over the seeds; bands: their range.
-    - benchmark runs, per service: the worker-benchmark runs not drawn for training, with benchmark_n_train training runs
-      per service (the largest size of main that leaves runs to test on);
-    - chain runs, per service: every node of every held-out chain run, with every benchmark run as training data (the paper);
+    - benchmark runs, per service: the worker-benchmark runs not drawn for training, with n_train training runs per service;
+    - chain runs, per service: every node of every held-out chain run, with n_train training runs per service;
+    n_train: one of N_TRAINS; the default is the setting of the paper (N_TRAIN).
     - chain runs, all K services: the share of chain runs in which every node is covered at gamma, and next to it the
       share that the model implies if the errors of the K services are independent, the mean of gamma^K over the runs.
     Returns the curves (gammas and name -> (seeds, gammas)) for the description of the figure."""
@@ -132,9 +132,9 @@ def calibration_figure(name: str = "gamma_calibration", benchmark_n_train: int =
     from matplotlib.lines import Line2D
 
     benchmark = pd.read_csv(OUT / "load_aware_benchmark.csv")
-    benchmark = benchmark[benchmark["n_train"] == benchmark_n_train]
+    benchmark = benchmark[benchmark["n_train"] == n_train]
     chains = pd.read_csv(OUT / "load_aware_chains.csv", dtype={"n_train": str})
-    chains = chains[chains["n_train"] == "all"]
+    chains = chains[chains["n_train"] == str(n_train or "all")]
     gammas = np.round(np.arange(0.5, 0.995, 0.01), 2)
     seeds_of = lambda table: sorted(table["seed"].unique())
     per_run = chains.groupby(["seed", "experiment", "run"]).agg(u_max=("u", "max"), K=("u", "size")).reset_index()

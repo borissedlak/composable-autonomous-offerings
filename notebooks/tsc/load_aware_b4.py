@@ -26,8 +26,9 @@ for the queueing part, as before.
 ABLATION trains on the same worker benchmarks with the inputs of the current Pegasus (no workers, no rate), so that
 the comparison separates the effect of more data from the effect of the new inputs.
 
-Training runs per service: every run of the worker benchmarks (N_TRAIN = None, real_chain_data), the same for the
-variant and the ablation; the current Pegasus of B.4a uses every benchmark run that all three services have (n_pool).
+Training runs per service: N_TRAIN runs of the worker benchmarks, drawn at random per seed (real_chain_data), the same
+for the variant and the ablation and for every method and experiment except B.2, which sweeps the number of runs. The
+trees of B.3 draw the same number from their own benchmarks.
 Everything else (seeds, alpha, confidence, held-out runs, ground truth) is that of 2c_load.ipynb.
 
 The training pool is set up at call time (extended_training) instead of in pegasus/real_data.py, because the cache key
@@ -55,7 +56,7 @@ from pegasus.service_gp import configurations_of, run_statistics_belief
 EXTENDED = "benchmark-workers"   # training_campaign of real_chain_data under extended_training: the worker benchmarks
 VARIANT = "Pegasus (load-aware)"
 ABLATION = "Pegasus, more data"
-N_TRAIN = None   # every run of the worker benchmarks, in a random order (seed)
+N_TRAIN = 50     # training runs per service, drawn at random per seed; None: every run of the worker benchmarks (160 to 200)
 CACHE = CAMPAIGN.parent / "load_aware_b4"   # statics/load_aware_b4/
 
 _original = dict(training_pool=real_data.training_pool, training_exclusion=real_data.training_exclusion, campaign_nodes=real_data.campaign_nodes)

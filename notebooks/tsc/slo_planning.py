@@ -63,7 +63,7 @@ THIRD_MARGINS = (0.50, 0.025, 0.04)   # inches: below (tick labels and x label),
 CORE_HEADROOM = 0.5        # cores per service = workers + CORE_HEADROOM, the rule of the campaign runs (knob <node>.cores)
 CACHE = real_data.CAMPAIGN.parent / "cache" / "slo_planning"   # statics/cache/slo_planning/: the fitted models of every composition (joblib)
 PLANS = real_data.CAMPAIGN.parent / "slo_planning"             # statics/slo_planning/: the plans to deploy (csv)
-C2_RESULTS = real_data.CAMPAIGN.parent / "results_milos_v2" / "c2"   # statics/results_milos_v2/c2/: testbed runs of the deployed plans (not committed)
+C2_RESULTS = real_data.CAMPAIGN.parent / "results_milos_v2" / "c2" / "v1"   # statics/results_milos_v2/c2/v1/: testbed runs of the deployed plans (not committed)
 RESTARTS = 10              # SLSQP starting points per composition, as run_optimizer_multi of the RASK paper
 OVERLOAD_LATENCY = 10.0    # s; latency that the continuous relaxation gives an overloaded node, so that SLSQP moves away from it
 TIE_WEIGHT = 1e-3          # weight of a constrained dimension in the objective, which only breaks ties of the free dimensions
@@ -190,7 +190,7 @@ def fit_composition(experiment: str, model_seed: int = seed, refresh: bool = Fal
         return joblib.load(file)
     with la.extended_training():
         data = real_data.real_chain_data(experiment, level=1 - alpha, coverage_check=coverage_check, seed=[model_seed, 0],
-                                         training_campaign=la.EXTENDED, n_train=None)
+                                         training_campaign=la.EXTENDED, n_train=la.N_TRAIN)
         names = real_data.feature_names(experiment, la.EXTENDED)
     aware = la.load_aware(data)
     models = fit_services(aware, aware.x_train, data.y_train, model_seed=model_seed, confidence=confidence, with_dnn=False)
