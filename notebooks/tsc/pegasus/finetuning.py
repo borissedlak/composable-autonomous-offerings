@@ -103,7 +103,8 @@ def finetuning_methods(data, methods: dict, samples: np.ndarray, test: np.ndarra
 
 
 def finetuning_figure(sizes: list, statistics: dict, level_label: str, output: Path = None, holds_labels: list = None,
-                      legend_options: dict = None, styles: dict = None, xlabel: str = "end-to-end samples n", half: bool = False) -> None:
+                      legend_options: dict = None, styles: dict = None, xlabel: str = "end-to-end samples n", half: bool = False,
+                      xticks: list = None) -> None:
     """Tightness of every method of C.1 over the number of end-to-end samples, in the style of the tightness figures of
     B (evaluation.py, figures.py): per method the median over the seeds with the band from the smallest to the largest
     seed (sweep_line), a filled marker where the method holds (statistics[name]["holds"]) and a hollow one where it does
@@ -116,7 +117,8 @@ def finetuning_figure(sizes: list, statistics: dict, level_label: str, output: P
     legend_options: options of the legend that replace the defaults below (ncol, fontsize, ...), and "locations", the locations tried in order.
     styles: marker and line style of further methods, name -> e.g. "v:", drawn and listed in the legend before those of STYLES. xlabel: label of the horizontal axis.
     half: half the width of an evaluation figure (fraction_figure(0.5)), at the same height and font size; every second
-    sample size gets a tick label, so that the labels of the narrower axis do not collide."""
+    sample size gets a tick label, so that the labels of the narrower axis do not collide. xticks: the labeled sample sizes
+    instead (default: every one, or every second one with half)."""
     from matplotlib.ticker import FuncFormatter
     from .evaluation import sweep_line, sweep_segments
     from .figures import (FAILURE_COLOR, FAILURE_TEXT_COLOR, METHOD_STYLES, holds_handles, legend_inside, paper_figure, paper_style, save_figure,
@@ -141,7 +143,7 @@ def finetuning_figure(sizes: list, statistics: dict, level_label: str, output: P
         ax.text(0.01, 0.015, "SLO violated", transform=ax.transAxes, ha="left", va="bottom", color=FAILURE_TEXT_COLOR)
         ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: tightness_tick(value)))
         ax.set_ylabel(tightness_label(level_label))
-        ax.set_xticks(sizes[::2] if half else sizes)
+        ax.set_xticks(xticks if xticks is not None else sizes[::2] if half else sizes)
         ax.set_xlabel(xlabel)
         ax.grid(True, linestyle=":", alpha=0.6)
         handles, labels = ax.get_legend_handles_labels()
