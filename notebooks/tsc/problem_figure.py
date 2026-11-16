@@ -133,7 +133,7 @@ y_high = 1e3 * 1.4 * max(predicted[name][finite[name]].max() for name in point_p
 low, high = min(x_low, y_low), max(x_high, y_high)
 ax_scatter.fill_between([low, high], [low, high], [high, high], color="0.9", linewidth=0)   # above the diagonal: overestimated
 ax_scatter.fill_between([low, high], [low, low], [low, high], color="mistyrose", linewidth=0)   # below: underestimated
-ax_scatter.plot([low, high], [low, high], color="black", linewidth=1)   # no legend entry: the two zones it separates are labeled
+ax_scatter.plot([low, high], [low, high], color="black", linewidth=1, zorder=3)   # above the points (zorder 2), so it stays visible; no legend entry: the two zones it separates are labeled
 for name in point_predictors:
     marker = METHOD_STYLES[name][0]   # the marker of the method in the evaluation figures
     below = np.mean(predicted[name][finite[name]] < truth[finite[name]])
