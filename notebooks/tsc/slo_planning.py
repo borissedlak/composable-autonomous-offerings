@@ -12,7 +12,7 @@ The client of a scenario sends items at one fixed arrival rate (items/s, Poisson
 Three SLO dimensions, each one number per configuration:
 - cost: the total number of workers of the composition, sum_k w_k;
 - latency: the Pegasus bound (s) on the p95 of the end-to-end latency at the arrival rate of the scenario,
-  with the load-aware models (load_aware_b4.py, the default of B.1);
+  with the load-aware models (load_aware in pegasus/data.py, the default of B.1);
 - quality: the data quality q, and, for vision, the smallest model size among the detectors of the composition.
 A scenario poses one or two of these as constraints (max workers, max latency, min quality). Every dimension that it
 does not constrain is free and is optimized (fewer workers, lower latency, higher quality): the objective is a weighted
@@ -49,11 +49,11 @@ import pandas as pd
 from scipy.interpolate import RegularGridInterpolator
 from scipy.optimize import minimize
 
-import load_aware_b4 as la
 import pegasus.real_data as real_data
 from pegasus.bounds import martingale_closed_form_node_bound
 from pegasus.evaluation import fit_services
-from pegasus.evaluation_setup import alpha, confidence, coverage_check, seed
+from pegasus.data import load_aware
+from pegasus.evaluation_setup import alpha, code_fingerprint, confidence, coverage_check, seed
 from pegasus.service_gp import run_statistics_belief
 
 APPLICATIONS = {app: [f"b1u-{app}-{i}" for i in range(1, 6)] for app in ("audio", "lidar", "vision")}   # the order of every table and figure
@@ -184,7 +184,7 @@ def chain_space(experiment: str) -> dict:
 
 
 def _cache_file(experiment: str, model_seed: int) -> Path:
-    key = hashlib.sha256(f"{experiment}|{model_seed}|{alpha}|{confidence}|{C2_N_TRAIN}|{la.code_fingerprint()}".encode()).hexdigest()[:12]
+    key = hashlib.sha256(f"{experiment}|{model_seed}|{alpha}|{confidence}|{C2_N_TRAIN}|{code_fingerprint()}".encode()).hexdigest()[:12]
     return CACHE / f"models_{experiment}_{key}.joblib"
 
 
@@ -194,11 +194,10 @@ def fit_composition(experiment: str, model_seed: int = seed, refresh: bool = Fal
     file = _cache_file(experiment, model_seed)
     if file.exists() and not refresh:
         return joblib.load(file)
-    with la.extended_training():
-        data = real_data.real_chain_data(experiment, level=1 - alpha, coverage_check=coverage_check, seed=[model_seed, 0],
-                                         training_campaign=la.EXTENDED, n_train=C2_N_TRAIN)
-        names = real_data.feature_names(experiment, la.EXTENDED)
-    aware = la.load_aware(data)
+    data = real_data.real_chain_data(experiment, level=1 - alpha, coverage_check=coverage_check, seed=[model_seed, 0],
+                                     training_campaign=real_data.WORKER_TRAINING, n_train=C2_N_TRAIN)
+    names = real_data.feature_names(experiment, real_data.WORKER_TRAINING)
+    aware = load_aware(data)
     models = fit_services(aware, aware.x_train, data.y_train, model_seed=model_seed, confidence=confidence, with_dnn=False)
     fitted = dict(path=list(data.path), services=real_data.chain_path(experiment)[1], names=names, gp=models["gp"],
                   log_rates={node: (data.x_train_load[node][:, -1].min(), data.x_train_load[node][:, -1].max()) for node in data.path})
@@ -238,7 +237,7 @@ def composition(experiment: str, rate: float, model_seed: int = seed, refresh: b
         mean, var = run_statistics_belief(fitted["gp"][node], x, confidence)
         bound = martingale_closed_form_node_bound(mean, var, "poisson", rate, epsilon, workers=grid[:, 1].astype(int))
         tables[node] = np.asarray(bound, dtype=float).reshape([len(a) for a in axes])
-    q_range = {node: (lambda q: (q.min(), q.max()))(la.extended_pool(fitted["services"][node])["data_quality"]) for node in path}
+    q_range = {node: (lambda q: (q.min(), q.max()))(real_data.worker_benchmark_pool(fitted["services"][node])["data_quality"]) for node in path}
     return Composition(experiment, path, fitted["services"], rate, qualities, workers, model_nodes, models, tables, extrapolated, q_range,
                        handover=real_data.platform_handover(experiment))
 

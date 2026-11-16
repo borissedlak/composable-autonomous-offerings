@@ -31,9 +31,10 @@ from .data import (assert_unseen, busiest_utilization, load_chain_data, model_in
                    synthetic_tree_data, with_training_data)
 from .evaluation import (METHOD_COLORS, PROPOSED, PROPOSED_SNC, TIGHTNESS_RANGE, TIGHTNESS_TICKS, arrival_text, compare_methods,
                          compare_tree_methods, coverage,
-                         finite_share, fit_services, ground_truth_conclusion, hop_time, sweep_conclusion, sweep_seconds, sweep_statistics,
+                         finite_share, fit_services, ground_truth_conclusion, hop_time, same_information_methods, sweep_conclusion, sweep_seconds,
+                         sweep_statistics,
                          tightness_and_time_figure, tightness_figure, tightness_sweep_figure, time_conclusion)
-from .real_data import (BENCHMARKS_V2, CAMPAIGN_V2, CHAINS_UNTHROTTLED_V2, b4_chain_data, b4_utilization, campaign_nodes, chain_experiments,
+from .real_data import (BENCHMARKS_V2, CAMPAIGN_V2, WORKER_TRAINING, CHAINS_UNTHROTTLED_V2, b4_chain_data, b4_utilization, campaign_nodes, chain_experiments,
                         chain_path, chain_tail_ratios, real_tree_data, training_pool, tree_structure, unthrottled_pool, unthrottled_runs,
                         VM_TREE_SETS, vm_tree_experiments, vm_tree_preliminary)
 from .service_gp import configurations_of
@@ -46,6 +47,9 @@ seed = 35                                              # base seed of the data s
 seeds = list(range(3))                                 # every experiment is repeated for these seeds; a seed determines the training data and the
                                                        # randomness of the ground truth, and with synthetic data also the generated service types
 n_calibration = 20                                     # training configurations that Conformal sets aside for calibration; the rest trains its model
+# real data: training runs per service and seed, drawn from its runs with one to four workers (training_campaign=WORKER_TRAINING),
+# the same for every method and every experiment except B.2, which sweeps the number of runs; the trees of B.3 draw it from their own benchmarks
+N_TRAIN = 50
 p_label = f"p{100 * (1 - alpha):g}"
 pegasus_versions = [PROPOSED, PROPOSED_SNC]            # the two versions of the proposed method: union bound over node bounds, network service curve
 competitors = [name for name in METHOD_COLORS if name != "Oracle"]   # the proposed method and the baselines; the Oracle is a reference
@@ -112,7 +116,7 @@ def configure(data_source: str, chains: str = DEFAULT_CHAINS) -> dict:
             n_pool=min(len(unthrottled_pool(training_pool(service, campaign=BENCHMARKS_V2))) for service in chain_path(base_experiment)[1].values()),
             training_options=lambda s: dict(level=1 - alpha, coverage_check=coverage_check, **chain_options(s)),
             # B.2: its chain with every training run of every service in a random order, from the one-worker benchmark;
-            # 2b_evidence.ipynb replaces this pool with the worker benchmarks of the load-aware models (load_aware_b4.py)
+            # 2_B2_evidence.ipynb replaces this pool with the worker benchmarks of the load-aware models (WORKER_TRAINING)
             evidence_options=lambda s: dict(experiment=EVIDENCE_CHAIN[chain_campaign] + suffix, n_train=None, training_campaign=BENCHMARKS_V2),
             # B.3: the balanced fork-join trees of the second machine (statics/results_milos_v2/b3-vm/, VM_TREE_SETS in real_data.py)
             # of the sets B3_TREE_SETS, (tree set, levels h) -> experiment, every finished tree of each set and every tree that is
@@ -270,6 +274,12 @@ def _computation_code() -> bytes:
                 del lines[start:node.end_lineno]
         code += path.name.encode() + "".join(lines).encode()
     return code
+
+
+def code_fingerprint() -> str:
+    """Hash of the computing code of the package (_computation_code), for the caches of the scripts next to the
+    notebooks (slo_planning.py, utilization_one.py), which cached does not manage."""
+    return hashlib.sha256(_computation_code()).hexdigest()[:16]
 
 
 def _function_code(function) -> bytes:

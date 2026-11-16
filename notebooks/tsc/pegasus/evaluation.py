@@ -17,7 +17,7 @@ from .baselines import (conformal_service_bounds, joint_gaussian_quantile, queue
 from .service_gp import (RunStatisticsModel, configurations_of, execution_time_belief, run_statistics_belief, train_gp_models,
                          train_run_statistics_models)
 from .bounds import martingale_closed_form_node_bound, martingale_closed_form_node_bounds, network_service_bound
-from .data import model_inputs, path_workers
+from .data import load_aware, model_inputs, path_workers
 from .model_cache import training_clock
 from .trees import leaf_to_root_paths, max_over_paths, max_path_sum
 
@@ -170,7 +170,7 @@ def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alph
     of the latency quantile, like the GP of the mean execution time (fit_services): the latency of a real service
     differs by orders of magnitude between its configurations. No model receives the number of workers of a
     configuration (model_inputs in data.py); GP Queue and both versions of Pegasus get it from path_workers.
-    load_aware_models: every method on the same information (real data, same_information_latencies in load_aware_b4.py):
+    load_aware_models: every method on the same information (real data, same_information_methods):
     `models` were fitted on load_aware(data), so every model receives the knobs, the number of workers and log10 of the
     arrival rate. GP Sum, DNN Sum and GP Queue predict at data.x_test_load, Quantile Union and Conformal keep the
     workers in their inputs (x_train_load, data.x_test_load), and the queueing parts still read the workers of every
@@ -223,6 +223,21 @@ def compare_methods(data, models: dict, x_train, monitored_latencies: dict, alph
     if data.node_latencies is not None:         # reference: what a union bound reaches with measured instead of predicted nodes
         methods["Oracle"] = ("reference", union_bound_oracle(data.node_latencies, alpha) + hop_time(data))
     return methods, seconds
+
+
+def same_information_methods(data, model_seed: int, alpha: float, confidence: float, n_calibration: int, with_dnn: bool = False) -> dict:
+    """Every method of a real-data chain experiment on the same information, name -> (group, latency per held-out run
+    in s), as compare_methods returns it, without Pegasus SNC (trees only) and, unless with_dnn, without DNN Sum (B.1
+    only). `data` comes from real_chain_data with training_campaign=WORKER_TRAINING, so every method trains on the same
+    runs, and every model receives the same inputs, load_aware(data): the knobs, the number of workers and log10 of the
+    arrival rate. The queueing parts still read the workers of every held-out run from `data` (path_workers).
+    model_seed: seed of the DNN and of the calibration split of Conformal."""
+    view = load_aware(data)
+    models = fit_services(view, view.x_train, data.y_train, model_seed=model_seed, confidence=confidence, with_dnn=with_dnn)
+    leave_out = (PROPOSED_SNC,) if with_dnn else (PROPOSED_SNC, "DNN Sum")
+    methods, _ = compare_methods(data, models, view.x_train, data.monitored_latencies, alpha, confidence, n_calibration, model_seed=model_seed,
+                                 leave_out=leave_out, x_train_load=data.x_train_load, load_aware_models=True)
+    return methods
 
 
 def compare_tree_methods(data, models: dict, alpha: float, confidence: float, n_calibration: int, model_seed: int,

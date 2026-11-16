@@ -2,7 +2,7 @@
 (25, 50 or every run of the worker benchmarks), for one seed, on the real data of B.1 (all chains), B.3 (trees),
 B.4a/b (load and arrival variability) and C.1 (fine-tuning, Pegasus only; its baselines train on end-to-end samples).
 
-Everything else is the setup of the notebooks (same information for every method, load_aware_b4.py). DNN Sum is left
+Everything else is the setup of the notebooks (same information for every method, same_information_methods in pegasus/evaluation.py). DNN Sum is left
 out (B.1 only, and slow). B.3 trains on its own VM benchmarks, where "all" is not an option of real_tree_data, so B.3
 runs 25 and 50 only. Results go to statics/training_runs_test/ (one joblib per experiment and n_train, then a CSV).
 Outside pegasus/ on purpose: a file there would change the cache key of the evaluation notebooks.
@@ -17,12 +17,11 @@ import numpy as np
 import pandas as pd
 from sklearn.exceptions import ConvergenceWarning
 
-from load_aware_b4 import EXTENDED, VARIANT, extended_training, same_information_latencies, same_information_methods
 from pegasus.data import load_aware, load_chain_data
-from pegasus.evaluation import PROPOSED, compare_tree_methods, fit_services
+from pegasus.evaluation import PROPOSED, compare_tree_methods, fit_services, same_information_methods
 from pegasus.evaluation_setup import DEFAULT_CHAINS, MAX_WORKERS, alpha, configure, confidence, coverage_check, n_calibration, only_base_case, seed, seeds
 from pegasus.finetuning import finetuned_bound, split_samples
-from pegasus.real_data import real_tree_data
+from pegasus.real_data import WORKER_TRAINING, real_tree_data
 
 S = seeds[0]                      # the one seed of the test
 N_TRAINS = (25, 50, None)         # training runs per service; None: every run of the worker benchmarks (the current setting)
@@ -47,27 +46,24 @@ def run(name: str, n_train, compute):
 
 
 def rows_of(setting, methods: dict, measured, measured_low) -> list:
-    return [dict(setting=setting, method=PROPOSED if m == VARIANT else m, latency=np.asarray(v[1] if isinstance(v, tuple) else v),
+    return [dict(setting=setting, method=m, latency=np.asarray(v[1] if isinstance(v, tuple) else v),
                  measured=measured, measured_low=measured_low) for m, v in methods.items()]
 
 
 def b1(options, n_train):
     rows = []
     for chain in options["chain_names"]:
-        with extended_training():
-            data = load_chain_data("real", experiment=chain, level=1 - alpha, coverage_check=coverage_check, seed=[seed, S],
-                                   n_train=n_train, training_campaign=EXTENDED)
-        latencies = same_information_latencies(data, S, seed + S, alpha, confidence, n_calibration, with_dnn=False)
-        rows += rows_of(chain, latencies, data.measured, data.measured_low)
+        data = load_chain_data("real", experiment=chain, level=1 - alpha, coverage_check=coverage_check, seed=[seed, S],
+                               n_train=n_train, training_campaign=WORKER_TRAINING)
+        rows += rows_of(chain, same_information_methods(data, seed + S, alpha, confidence, n_calibration), data.measured, data.measured_low)
     return rows
 
 
 def b4(options, n_train, sweep):
     rows = []
     for setting in options["loads"] if sweep == "load" else options["arrival_cv2s"]:
-        with extended_training():
-            data = options["b4_data"](S, sweep, setting, training_campaign=EXTENDED, n_train=n_train)
-        rows += rows_of(setting, same_information_methods(data, S, seed + S, alpha, confidence, n_calibration), data.measured, data.measured_low)
+        data = options["b4_data"](S, sweep, setting, training_campaign=WORKER_TRAINING, n_train=n_train)
+        rows += rows_of(setting, same_information_methods(data, seed + S, alpha, confidence, n_calibration), data.measured, data.measured_low)
     return rows
 
 

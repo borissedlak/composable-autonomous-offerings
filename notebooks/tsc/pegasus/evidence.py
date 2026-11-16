@@ -10,8 +10,8 @@ with a few training runs, and one service after the other moves up to its next n
 The training runs of every service come in one fixed random order per seed (n_train=None in real_chain_data), and a
 training set of n runs is the first n of them (training_prefix), so that a step only adds runs.
 
-load_aware_models (real data): every method on the same information, as in B.1 (same_information_latencies in
-load_aware_b4.py): the models of Pegasus and of every baseline receive the knobs, the number of workers and log10 of
+load_aware_models (real data): every method on the same information, as in B.1 (same_information_methods in
+evaluation.py): the models of Pegasus and of every baseline receive the knobs, the number of workers and log10 of
 the arrival rate (load_aware in data.py; compare_methods with load_aware_models). The cost of uncertainty of a service
 is then read from the load-aware models.
 """

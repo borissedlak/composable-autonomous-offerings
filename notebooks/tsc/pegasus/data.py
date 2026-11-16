@@ -140,9 +140,11 @@ def path_workers(data: ChainData) -> list:
 
 
 def load_aware(data: ChainData) -> ChainData:
-    """The ChainData that the load-aware execution-time models of Pegasus see (load_aware_b4.py): the inputs with
-    the arrival rate (x_train_load, x_test_load) and with the number of workers kept (workers_column None, so
-    model_inputs drops nothing). The bound itself takes the workers from the original data (path_workers), because
+    """The ChainData that the load-aware models of every method see on real data (same_information_methods in
+    evaluation.py): the inputs with the arrival rate (x_train_load, x_test_load) and with the number of workers kept
+    (workers_column None, so model_inputs drops nothing). The arrival rate stands for the load rather than the
+    utilization, because the utilization contains the execution time that the models predict; the rate of every
+    held-out run is known before it runs. The bound itself takes the workers from the original data (path_workers), because
     this view has no workers column."""
     return replace(data, x_train=data.x_train_load, x_test=data.x_test_load, workers_column=None)
 

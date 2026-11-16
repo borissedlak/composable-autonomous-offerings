@@ -1,5 +1,5 @@
 """Calibration of the confidence gamma of the pessimistic mean of Pegasus (Eq. 7), on the real data, for the Pegasus of
-the paper: the load-aware GPs of load_aware_b4.py (inputs: the quality knobs, the number of workers and log10 of the
+the paper: the load-aware GPs (load_aware in pegasus/data.py; inputs: the quality knobs, the number of workers and log10 of the
 arrival rate; trained on the worker benchmarks benchmark/w1 to w4, no run of any chain).
 
 What gamma claims (RunStatisticsModel.mean, run_statistics_belief in pegasus/service_gp.py): the center GP of a service
@@ -9,12 +9,12 @@ run is therefore covered at level gamma if and only if
     u = Phi((ln y_bar - mu) / sigma) <= gamma,
 so the share of runs with u <= gamma is the observed coverage at every gamma at once.
 
-The data and the GPs come from the pipeline of B.1 on all chains (2a_base_case.ipynb): load_chain_data inside
-extended_training with training_campaign=EXTENDED, the view load_aware(data), and fit_services on it. Two tests:
+The data and the GPs come from the pipeline of B.1 on all chains (2_B1_base_case.ipynb): load_chain_data with
+training_campaign=WORKER_TRAINING, the view load_aware(data), and fit_services on it. Two tests:
 - chains: every held-out run of the 15 chains of the paper (DEFAULT_CHAINS), one u per node, with the measured mean
   execution time of the node in the run (processing mean plus handling overhead, as training_pool defines it);
 - benchmark: the worker-benchmark runs that were not drawn for training (only for n_train below the pool size).
-n_train: training runs per service; N_TRAIN of load_aware_b4.py is the setting of the paper.
+n_train: training runs per service; N_TRAIN of pegasus/evaluation_setup.py is the setting of the paper.
 
 The script lives outside pegasus/ on purpose: a new file there would change the cache key of the evaluation notebooks.
 Run from notebooks/tsc with the project venv: python gamma_calibration.py
@@ -27,12 +27,11 @@ import pandas as pd
 from scipy.stats import norm
 from sklearn.exceptions import ConvergenceWarning
 
-from load_aware_b4 import EXTENDED, N_TRAIN, extended_pool, extended_training
 from pegasus.data import load_aware, load_chain_data
 from pegasus.evaluation import fit_services
-from pegasus.evaluation_setup import DEFAULT_CHAINS, alpha, configure, confidence, coverage_check, seed, seeds
+from pegasus.evaluation_setup import DEFAULT_CHAINS, N_TRAIN, alpha, configure, confidence, coverage_check, seed, seeds
 from pegasus.real_data import (NOT_CONFIGURATION, POOL_COLUMNS, arrival_rates, chain_path, combined_runs, encode_configurations,
-                               handling_overhead, run_table, service_rng, unthrottled_pool)
+                               handling_overhead, run_table, service_rng, unthrottled_pool, worker_benchmark_pool, WORKER_TRAINING)
 
 N_TRAINS = (25, 50, 100, None)   # training runs per service; None: every run of the worker benchmarks; the paper: N_TRAIN
 OUT = Path(__file__).resolve().parents[2] / "statics" / "gamma_calibration"
@@ -52,8 +51,7 @@ def measured_node_means(chain: str, path: list) -> np.ndarray:
 def training_draw(service: str, s: int, n_train) -> tuple:
     """(training runs, the other runs) of the service's worker-benchmark pool under seed=[seed, s], as real_chain_data
     draws them (service_rng from the training sequence)."""
-    with extended_training():
-        pool = unthrottled_pool(extended_pool(service))
+    pool = unthrottled_pool(worker_benchmark_pool(service))
     rng = service_rng(np.random.SeedSequence([seed, s]).spawn(3)[0], service)
     index = rng.permutation(len(pool)) if n_train is None else np.sort(rng.choice(len(pool), size=n_train, replace=False))
     return pool.iloc[index], pool.drop(index=pool.index[index])
@@ -80,9 +78,8 @@ def main():
         for s in seeds:
             done = set()
             for chain in chains:
-                with extended_training():
-                    data = load_chain_data("real", experiment=chain, level=1 - alpha, coverage_check=coverage_check, seed=[seed, s],
-                                           n_train=n_train, training_campaign=EXTENDED)
+                data = load_chain_data("real", experiment=chain, level=1 - alpha, coverage_check=coverage_check, seed=[seed, s],
+                                       n_train=n_train, training_campaign=WORKER_TRAINING)
                 aware = load_aware(data)
                 models = fit_services(aware, aware.x_train, data.y_train, model_seed=seed + s, confidence=confidence, with_dnn=False)
                 path, service_of = chain_path(chain)[:2]

@@ -105,6 +105,9 @@ CAMPAIGN_V2 = CAMPAIGN.parent / "results_milos_v2" / "b1"
 BENCHMARKS_V2 = CAMPAIGN_V2.parent / "benchmark" / "w1"
 # Benchmarks with c workers per service (module docstring): c -> folder; c = 1 is BENCHMARKS_V2
 WORKER_BENCHMARKS = {c: CAMPAIGN_V2.parent / "benchmark" / f"w{c}" for c in (1, 2, 3, 4)}
+# training_campaign of real_chain_data that trains every service on its runs in every folder of WORKER_BENCHMARKS
+# (worker_benchmark_pool): the training pool of the load-aware models (load_aware in data.py) of every real-data experiment
+WORKER_TRAINING = "benchmark-workers"
 BENCHMARK_GRID_V2 = CAMPAIGN_V2.parent / "benchmark-grid"       # every configuration, probe with 8 cores (module docstring)
 BENCHMARK_GRID15_V2 = CAMPAIGN_V2.parent / "benchmark-grid15"   # every configuration, probe and cores capped at 1.5
 # The benchmark that trains every service type of the trees of B.3 (real_tree_data): the 1.5-core grid where it measured
@@ -237,12 +240,13 @@ def node_configurations(table: pd.DataFrame, node: str) -> pd.DataFrame:
 def campaign_experiments(campaign) -> list:
     """The experiments of `campaign`, sorted: a campaign folder, without the folders "campaigns" and "results" of the
     first campaign, which hold no experiments, and the `check-*` experiments of CHAINS_UNTHROTTLED_V2, which are checks
-    of the setup (chain_experiments); or a FolderView, whose experiments are named "<folder>/<experiment>"."""
+    of the setup (chain_experiments), and hidden folders (e.g. a tool's lock folder), which hold no experiment; or a
+    FolderView, whose experiments are named "<folder>/<experiment>"."""
     if isinstance(campaign, FolderView):
         return sorted(f"{campaign.folder.name}/{path.name}" for path in campaign.folder.iterdir()
                       if path.is_dir() and path.name.startswith(campaign.prefix))
     return sorted(path.name for path in campaign.iterdir()
-                  if path.is_dir() and path.name not in ("campaigns", "results") and not path.name.startswith("check-"))
+                  if path.is_dir() and path.name not in ("campaigns", "results") and not path.name.startswith(("check-", ".")))
 
 
 @lru_cache(maxsize=None)
@@ -348,7 +352,10 @@ def training_pool(service: str, exclude_pipeline: str = None, sources: tuple = (
     every knob of the service are left out, because the value of the missing knob is not stored. overhead_s is the
     handling overhead of the run (s, handling_overhead), which mean_s contains. A run without a
     measurable handling overhead (no request found the service idle, which happens in benchmarks at utilization 1.0)
-    is left out, because its mean execution time is unknown."""
+    is left out, because its mean execution time is unknown.
+    campaign = WORKER_TRAINING: the runs of every folder of WORKER_BENCHMARKS (worker_benchmark_pool), no run of a chain."""
+    if campaign == WORKER_TRAINING:
+        return worker_benchmark_pool(service, sources)
     nodes = campaign_nodes(campaign)
     nodes = nodes[(nodes["service"] == service) & (nodes["pipeline"] != exclude_pipeline) & (nodes["experiment"] != exclude_experiment)]
     knobs = max((set(node_configurations(run_table(row.experiment), row.node).columns) for row in nodes.itertuples()), key=len)
@@ -377,9 +384,10 @@ def training_pool(service: str, exclude_pipeline: str = None, sources: tuple = (
 def training_exclusion(experiment: str, training_campaign: Path = None) -> dict:
     """The arguments of training_pool that hold out the chain `experiment`: in the first campaign every run with its
     topology, in the second campaign (one topology per chain) every run of the experiment itself. With
-    training_campaign = BENCHMARKS_V2, the services are trained on their benchmarks, which contain no chain."""
-    if training_campaign == BENCHMARKS_V2:
-        return dict(campaign=BENCHMARKS_V2)
+    training_campaign = BENCHMARKS_V2 (or WORKER_TRAINING), the services are trained on their one-worker benchmarks
+    (or on their benchmarks with one to four workers), which contain no chain."""
+    if training_campaign in (BENCHMARKS_V2, WORKER_TRAINING):
+        return dict(campaign=training_campaign)
     campaign = campaign_of(experiment)
     if campaign in MEASURED_CHAINS:
         return dict(campaign=campaign, exclude_experiment=experiment)
@@ -830,7 +838,8 @@ def real_chain_data(experiment: str, level: float, coverage_check: dict, seed, u
     instead of the other experiments (split_training_pool).
 
     training_campaign (second campaign, without split): BENCHMARKS_V2 trains every service on its benchmark runs (the
-    service alone, at five utilizations); the default (None) trains it on the runs of the other chains that contain it.
+    service alone, at five utilizations), WORKER_TRAINING on its benchmark runs with one to four workers (the training
+    pool of every real-data experiment); the default (None) trains it on the runs of the other chains that contain it.
     Second campaign: the held-out runs are the unthrottled_runs of the chain, and the training runs are unthrottled
     as well up to TRAINING_THROTTLE_LIMIT (unthrottled_pool). No model receives the knobs of NOT_CONFIGURATION (the cores).
 
