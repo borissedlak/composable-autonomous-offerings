@@ -1,5 +1,5 @@
-"""Two early figures (Section II-A) that show the two problems the paper addresses, on the real chain of B.1
-(b1-vision-1-single: cv-analyzer -> image-transformer -> image-compressor).
+"""Two early figures (Section II-A) that show the two problems the paper addresses, on the real chain of B.1 and B.4a
+(cv-analyzer -> image-transformer -> image-compressor), measured at several loads.
 
 Claims of the figures:
  (a) Per-service execution times do not add up to the end-to-end tail latency: the gap is the queueing, and it grows
@@ -10,16 +10,18 @@ Claims of the figures:
 Run from `notebooks/tsc/` with the venv:  ../../venv/Scripts/python problem_figure.py
 Writes figures/tsc/problem_queueing.pdf and .jpg for (a), and figures/tsc/problem_prediction.pdf and .jpg for (b).
 
-Source of the data: the second testbed campaign in statics/results_milos_v2, loaded with pegasus/real_data.py as in
-the base case of B.1 (`2a_base_case.ipynb`): every service is trained on its benchmark runs with one to four workers
-(the service alone; load_aware_b4.py), no run of the chain is used for training, and every model receives the knobs,
-the number of workers and log10 of the arrival rate (the same information for every method). The campaign ran every run of the chain at one load (the slowest service busy
-about half of the time), so:
- (a) the end-to-end latencies at the swept loads are emulated: the measured processing times of every held-out run
-     are replayed through a chain of FIFO queues under Poisson arrivals (emulate_runs in pegasus/real_data.py);
- (b) the true latencies are the measured end-to-end latencies of the runs, at the load of the campaign.
-The methods are the baselines of the evaluation (pegasus/evaluation.py): GP Sum, GP Queue and Quantile Union, trained
-on single-service data only.
+Source of the data: the measured runs of B.4a (statics/results_milos_v2/b4/, b4_chain_data in pegasus/real_data.py),
+loaded as in the load sweep of the evaluation (`2_B4_load.ipynb`, sweep_bounds in load_aware_b4.py). B.4a measured the
+chain with the configurations of b1u-vision-1 and b1u2-vision-1 at several utilizations u of the busiest service; every
+utilization holds out the same runs (b4_held_out), at most MAX_WORKERS workers per service. The true latency of a run is
+its measured end-to-end P95, which contains the handover between the services, as every method's prediction does.
+Training: every service on N_TRAIN of its benchmark runs with one to four workers (load_aware_b4.py, the number of every
+experiment of the evaluation except B.2), drawn at random per seed (the service alone); no run of the chain is used for
+training, and every model receives the knobs, the number of workers and log10 of the arrival rate (the same information
+for every method). The models of a seed are fitted once and predict at the arrival rate of every run and utilization.
+ (a) the measured P95 and GP Sum at every utilization of B.4a, first seed;
+ (b) the measured P95 against the predictions of GP Queue and Quantile Union at the loads PANEL_B_LOADS, every seed.
+The methods are the baselines of the evaluation (pegasus/evaluation.py), trained on single-service data only.
 """
 import warnings
 from pathlib import Path
@@ -29,67 +31,63 @@ import numpy as np
 from sklearn.exceptions import ConvergenceWarning
 
 from load_aware_b4 import EXTENDED, N_TRAIN, extended_training
-from pegasus.data import load_aware, load_chain_data
+from pegasus.data import load_aware
 from pegasus.evaluation import METHOD_COLORS, compare_methods, fit_services
 from pegasus.figures import METHOD_STYLES
-from pegasus.real_data import chain_run_execution_times, chain_run_workers, emulate_runs, unthrottled_runs
+from pegasus.real_data import b4_chain_data
 
 plt.style.use('default')
 plt.rcParams.update({'font.size': 12})
 
 OUTPUT = Path(__file__).resolve().parents[2] / "figures" / "tsc"
-experiment = "b1-vision-1-single"                     # the chain of B.1, as in pegasus/evaluation_setup.py
-n_items = 5000                                         # panel (a): items per emulated run, as in real_chain_data
 alpha, confidence = 0.05, 0.95                         # violation probability epsilon (the bounded quantile is $P_{95}$) and confidence, as in pegasus/evaluation_setup.py
 coverage_check = dict(n_batches=10, confidence=0.95)
 seed, n_calibration = 35, 20                           # base seed and calibration size, as in pegasus/evaluation_setup.py
-utilizations = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]   # panel (a): utilization of the busiest service of every run
-seeds = list(range(5))                                 # panel (b): a seed determines the training runs and the randomness of the emulation
+utilizations = [0.1, 0.25, 0.4, 0.5, 0.7, 0.9]         # B.4a: utilization of the busiest service of every run (loads in pegasus/evaluation_setup.py)
+MAX_WORKERS = 4                                        # held-out runs: at most this many workers per service, as in pegasus/evaluation_setup.py
+PANEL_B_LOADS = [0.5, 0.7, 0.9]                        # panel (b): the utilizations whose runs are pooled, from the load of B.1 upward
+seeds = list(range(5))                                 # a seed determines the training runs of every service
 point_predictors = ["GP Queue", "Quantile Union"]       # panel (b): one analytic and one learned predictor of the latency quantile
 p_label = f"$P_{{{100 * (1 - alpha):g}}}$"
 FIGSIZE = (6, 2.5)                                      # (width, height) in inches of each panel; lower than the evaluation figures (6 x 3.7) so that Fig. 1 takes less space
 
 
-def load(s):
+def load(s) -> dict:
+    """Utilization -> (data, methods) of the seed s: the held-out runs of B.4a at that utilization and the predictions of
+    every method, as compare_methods returns them. The GPs are fitted once, on the data of the first utilization, and
+    every later utilization checks that its training data is the same (as sweep_bounds in load_aware_b4.py)."""
+    results, models, y_train = {}, None, None
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", ConvergenceWarning)   # GP hyperparameters at their bounds, as in pegasus/evaluation_setup.py
-        with extended_training():   # the training runs of B.1: every benchmark run with one to four workers
-            data = load_chain_data("real", experiment=experiment, level=1 - alpha, coverage_check=coverage_check, seed=[seed, s], n_train=N_TRAIN,
-                                   training_campaign=EXTENDED)
-        view = load_aware(data)       # the inputs of every model: the knobs, the workers and the arrival rate, as in B.1
-        models = fit_services(view, view.x_train, data.y_train, model_seed=seed + s, confidence=confidence, with_dnn=False)
-        methods, _ = compare_methods(data, models, data.x_train, data.monitored_latencies, alpha, confidence, n_calibration, model_seed=seed + s,
-                                     leave_out=("DNN Sum",), x_train_load=data.x_train_load, load_aware_models=True)
-    return data, methods
+        with extended_training():   # the training pool of B.1: the benchmark runs with one to four workers
+            for u in utilizations:
+                data = b4_chain_data("load", u, utilizations, MAX_WORKERS, level=1 - alpha, coverage_check=coverage_check, seed=[seed, s],
+                                     n_train=N_TRAIN, training_campaign=EXTENDED)
+                if models is None:
+                    view = load_aware(data)       # the inputs of every model: the knobs, the workers and the arrival rate, as in B.1
+                    models, y_train = fit_services(view, view.x_train, data.y_train, model_seed=seed + s, confidence=confidence, with_dnn=False), data.y_train
+                assert all(np.array_equal(data.y_train[node], y_train[node]) for node in data.path), "the training data differs between the loads"
+                methods, _ = compare_methods(data, models, data.x_train, data.monitored_latencies, alpha, confidence, n_calibration, model_seed=seed + s,
+                                             leave_out=("DNN Sum",), x_train_load=data.x_train_load, load_aware_models=True)
+                results[u] = (data, methods)
+    return results
 
 
 loaded = {s: load(s) for s in seeds}
 
-# Panel (a): the true end-to-end quantile and the sum of the predicted execution times against the load, first seed,
-# in ms per held-out run of the chain. The sum does not depend on the load (the GPs predict execution times), so it is
-# computed once; the truth is emulated at every load, because the campaign measured every run at one load only.
-data, methods = loaded[seeds[0]]
-runs = unthrottled_runs(experiment)   # the held-out runs of real_chain_data, in its order
-assert len(runs) == len(data.measured)
-execution, workers = chain_run_execution_times(experiment, runs), chain_run_workers(experiment, runs)
-# work (s) per item and worker of the busiest service of every run: the arrival rate utilization / busiest keeps every
-# worker of that service busy for the share `utilization` of the time, as in the emulation of the first campaign
-busiest = np.max(np.array([times.mean(axis=0) for times in execution]) / workers, axis=1)
-rng = np.random.default_rng([seed, 1])
-measured_by_load, summed_by_load = [], []
-for utilization in utilizations:
-    _, latencies = emulate_runs(execution, utilization / busiest, n_items, rng, workers=workers)
-    measured_by_load.append(1e3 * np.quantile(latencies, 1 - alpha, axis=1))
-    summed_by_load.append(1e3 * methods["GP Sum"][1])
-measured_by_load, summed_by_load = np.array(measured_by_load), np.array(summed_by_load)   # (loads, runs)
+# Panel (a): the measured end-to-end quantile and GP Sum (the sum of the predicted execution times, with the handover)
+# against the load, first seed, in ms per held-out run; the same runs at every load (b4_held_out)
+measured_by_load = np.array([1e3 * loaded[seeds[0]][u][0].measured for u in utilizations])        # (loads, runs)
+summed_by_load = np.array([1e3 * loaded[seeds[0]][u][1]["GP Sum"][1] for u in utilizations])
 
-# Panel (b): predicted against measured quantile for every held-out run and seed at the load of the campaign
+# Panel (b): predicted against measured quantile for every held-out run and seed at the loads PANEL_B_LOADS, pooled
 truth, predicted = [], {name: [] for name in point_predictors}
 for s in seeds:
-    data, methods = loaded[s]
-    truth.append(data.measured)
-    for name in point_predictors:
-        predicted[name].append(methods[name][1])
+    for u in PANEL_B_LOADS:
+        data, methods = loaded[s][u]
+        truth.append(data.measured)
+        for name in point_predictors:
+            predicted[name].append(methods[name][1])
 truth = np.concatenate(truth)
 predicted = {name: np.concatenate(values) for name, values in predicted.items()}
 
@@ -127,8 +125,12 @@ save(fig_load, "problem_queueing")
 # --- (b) -----------------------------------------------------------------------
 fig_scatter, ax_scatter = plt.subplots(figsize=FIGSIZE)
 finite = {name: np.isfinite(values) for name, values in predicted.items()}
-low = 1e3 * 0.7 * min(truth.min(), *(predicted[name][finite[name]].min() for name in point_predictors))
-high = 1e3 * 1.4 * max(truth.max(), *(predicted[name][finite[name]].max() for name in point_predictors))
+# each axis spans its own values (x: the truth, y: the finite predictions), so that a few very large predictions do not
+# leave most of the x axis empty; the zones and the diagonal are drawn over both ranges, so they stay correct
+x_low, x_high = 1e3 * 0.7 * truth.min(), 1e3 * 1.4 * truth.max()
+y_low = 1e3 * 0.7 * min(predicted[name][finite[name]].min() for name in point_predictors)
+y_high = 1e3 * 1.4 * max(predicted[name][finite[name]].max() for name in point_predictors)
+low, high = min(x_low, y_low), max(x_high, y_high)
 ax_scatter.fill_between([low, high], [low, high], [high, high], color="0.9", linewidth=0)   # above the diagonal: overestimated
 ax_scatter.fill_between([low, high], [low, low], [low, high], color="mistyrose", linewidth=0)   # below: underestimated
 ax_scatter.plot([low, high], [low, high], color="black", linewidth=1)   # no legend entry: the two zones it separates are labeled
@@ -141,14 +143,15 @@ ax_scatter.text(0.03, 0.97, "overestimated: resources wasted", transform=ax_scat
 ax_scatter.text(0.97, 0.03, "underestimated: SLO violated", transform=ax_scatter.transAxes, ha="right", va="bottom", color="darkred")
 ax_scatter.set_xscale("log")
 ax_scatter.set_yscale("log")
-ax_scatter.set_xlim(low, high)
-ax_scatter.set_ylim(low, high)
+ax_scatter.set_xlim(x_low, x_high)
+ax_scatter.set_ylim(y_low, y_high)
 ax_scatter.set_xlabel(f"true end-to-end latency {p_label} (ms)")   # log scale, visible from the ticks
 ax_scatter.set_ylabel(f"predicted {p_label} (ms)")
 ax_scatter.grid(True, linestyle=":", alpha=0.6)
-ticks = [t for t in (20, 50, 100, 200, 500, 1000) if low <= t <= high]
-ax_scatter.set_xticks(ticks, [str(t) for t in ticks])
-ax_scatter.set_yticks(ticks, [str(t) for t in ticks])
+tick_text = lambda t: f"{t // 1000}k" if t >= 1000 else str(t)   # 1k = 1000 ms: short labels, so that neighbors on the log axis do not overlap
+for set_ticks, (a, b) in ((ax_scatter.set_xticks, (x_low, x_high)), (ax_scatter.set_yticks, (y_low, y_high))):
+    ticks = [t for t in (20, 50, 100, 200, 500, 1000, 2000, 5000, 10000) if a <= t <= b]
+    set_ticks(ticks, [tick_text(t) for t in ticks])
 ax_scatter.minorticks_off()
 ax_scatter.legend(loc="upper left", bbox_to_anchor=(0, 0.88), fontsize=10, handlelength=1, borderpad=0.3, framealpha=0.8)   # in the empty corner below the zone label
 save(fig_scatter, "problem_prediction")
