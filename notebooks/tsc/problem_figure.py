@@ -80,15 +80,17 @@ loaded = {s: load(s) for s in seeds}
 measured_by_load = np.array([1e3 * loaded[seeds[0]][u][0].measured for u in utilizations])        # (loads, runs)
 summed_by_load = np.array([1e3 * loaded[seeds[0]][u][1]["GP Sum"][1] for u in utilizations])
 
-# Panel (b): predicted against measured quantile for every held-out run and seed at the loads PANEL_B_LOADS, pooled
-truth, predicted = [], {name: [] for name in point_predictors}
+# Panel (b): predicted against measured quantile for every held-out run and seed at the loads PANEL_B_LOADS, pooled;
+# seed_of: the seed of every point, because the scatter shows the points of one seed only (see the panel)
+truth, predicted, seed_of = [], {name: [] for name in point_predictors}, []
 for s in seeds:
     for u in PANEL_B_LOADS:
         data, methods = loaded[s][u]
         truth.append(data.measured)
+        seed_of.append(np.full(len(data.measured), s))
         for name in point_predictors:
             predicted[name].append(methods[name][1])
-truth = np.concatenate(truth)
+truth, seed_of = np.concatenate(truth), np.concatenate(seed_of)
 predicted = {name: np.concatenate(values) for name, values in predicted.items()}
 
 OUTPUT.mkdir(parents=True, exist_ok=True)
@@ -125,19 +127,23 @@ save(fig_load, "problem_queueing")
 # --- (b) -----------------------------------------------------------------------
 fig_scatter, ax_scatter = plt.subplots(figsize=FIGSIZE)
 finite = {name: np.isfinite(values) for name, values in predicted.items()}
-# each axis spans its own values (x: the truth, y: the finite predictions), so that a few very large predictions do not
-# leave most of the x axis empty; the zones and the diagonal are drawn over both ranges, so they stay correct
-x_low, x_high = 1e3 * 0.7 * truth.min(), 1e3 * 1.4 * truth.max()
-y_low = 1e3 * 0.7 * min(predicted[name][finite[name]].min() for name in point_predictors)
-y_high = 1e3 * 1.4 * max(predicted[name][finite[name]].max() for name in point_predictors)
+# The scatter shows the points of the first seed only: the seeds share the held-out runs and their true latency and
+# differ only in the training runs, so every seed would add a near copy of every point. The shares in the legend and
+# the printed statistics use every seed.
+shown = {name: finite[name] & (seed_of == seeds[0]) for name in point_predictors}
+# each axis spans the values it shows (x: the truth, y: the finite predictions), so that a few very large predictions
+# do not leave most of the x axis empty; the zones and the diagonal are drawn over both ranges, so they stay correct
+x_low, x_high = 1e3 * 0.7 * truth[seed_of == seeds[0]].min(), 1e3 * 1.4 * truth[seed_of == seeds[0]].max()
+y_low = 1e3 * 0.7 * min(predicted[name][shown[name]].min() for name in point_predictors)
+y_high = 1e3 * 1.4 * max(predicted[name][shown[name]].max() for name in point_predictors)
 low, high = min(x_low, y_low), max(x_high, y_high)
 ax_scatter.fill_between([low, high], [low, high], [high, high], color="0.9", linewidth=0)   # above the diagonal: overestimated
 ax_scatter.fill_between([low, high], [low, low], [low, high], color="mistyrose", linewidth=0)   # below: underestimated
-ax_scatter.plot([low, high], [low, high], color="black", linewidth=1, zorder=3)   # above the points (zorder 2), so it stays visible; no legend entry: the two zones it separates are labeled
+ax_scatter.plot([low, high], [low, high], color="black", linewidth=1, linestyle="--", zorder=3)   # above the points (zorder 2), dashed so that the points stay visible behind it; no legend entry: the two zones it separates are labeled
 for name in point_predictors:
     marker = METHOD_STYLES[name][0]   # the marker of the method in the evaluation figures
     below = np.mean(predicted[name][finite[name]] < truth[finite[name]])
-    ax_scatter.plot(1e3 * truth[finite[name]], 1e3 * predicted[name][finite[name]], marker, color=METHOD_COLORS[name], markersize=5, alpha=0.6,
+    ax_scatter.plot(1e3 * truth[shown[name]], 1e3 * predicted[name][shown[name]], marker, color=METHOD_COLORS[name], markersize=5, alpha=0.6,
                     linestyle="none", label=f"{name}: {below:.0%} too low")
 ax_scatter.text(0.03, 0.97, "overestimated: resources wasted", transform=ax_scatter.transAxes, ha="left", va="top")
 ax_scatter.text(0.97, 0.03, "underestimated: SLO violated", transform=ax_scatter.transAxes, ha="right", va="bottom", color="darkred")
@@ -149,8 +155,10 @@ ax_scatter.set_xlabel(f"true end-to-end latency {p_label} (ms)")   # log scale, 
 ax_scatter.set_ylabel(f"predicted {p_label} (ms)")
 ax_scatter.grid(True, linestyle=":", alpha=0.6)
 tick_text = lambda t: f"{t // 1000}k" if t >= 1000 else str(t)   # 1k = 1000 ms: short labels, so that neighbors on the log axis do not overlap
-for set_ticks, (a, b) in ((ax_scatter.set_xticks, (x_low, x_high)), (ax_scatter.set_yticks, (y_low, y_high))):
-    ticks = [t for t in (20, 50, 100, 200, 500, 1000, 2000, 5000, 10000) if a <= t <= b]
+# x: 1-2-5 steps; y: 1-3 steps (about half a decade each), because the panel is low and spans more decades upward
+for set_ticks, (a, b), candidates in ((ax_scatter.set_xticks, (x_low, x_high), (20, 50, 100, 200, 500, 1000, 2000, 5000, 10000)),
+                                      (ax_scatter.set_yticks, (y_low, y_high), (10, 30, 100, 300, 1000, 3000, 10000, 30000))):
+    ticks = [t for t in candidates if a <= t <= b]
     set_ticks(ticks, [tick_text(t) for t in ticks])
 ax_scatter.minorticks_off()
 ax_scatter.legend(loc="upper left", bbox_to_anchor=(0, 0.88), fontsize=10, handlelength=1, borderpad=0.3, framealpha=0.8)   # in the empty corner below the zone label
