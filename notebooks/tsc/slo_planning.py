@@ -66,6 +66,9 @@ PLANS = real_data.CAMPAIGN.parent / "slo_planning"             # statics/slo_pla
 # the second deployment (statics/results_milos_v2/c2/v2/, experiment folders c2v2-<scenario>-..., not committed) and its plans, as
 # the notebook computed them on 2026-11-14 (c2_plans_new.csv of commit 6238812); the first deployment is in c2/v1/ (c2_plans_old.csv)
 C2_RESULTS, C2_PREFIX = real_data.CAMPAIGN.parent / "results_milos_v2" / "c2" / "v2", "c2v2"
+# the neighborhood of every deployed plan of C2_RESULTS (c2/v2nb/, folders c2nb-<scenario>-...): one run per configuration of a
+# small grid of data qualities and workers around the plan (experiment.yaml of the folder), at the rate of the scenario
+NEIGHBORHOOD_RESULTS, NEIGHBORHOOD_PREFIX = C2_RESULTS.parent / "v2nb", "c2nb"
 DEPLOYED_PLANS = PLANS / "c2_plans_v2.csv"
 # training runs per service of the models of C.2: every run of the worker benchmarks (None), not N_TRAIN of the other experiments,
 # because the deployed plans (DEPLOYED_PLANS) were computed with these models
@@ -868,6 +871,57 @@ def _deployed_rows(deployed: pd.DataFrame) -> pd.DataFrame:
     return deployed[deployed["feasible"] | deployed.get("best_effort", False)]
 
 
+def _c2_folder(scenario: str, results: Path = None, prefix: str = None) -> Path:
+    """The newest execution folder of the testbed runs of one scenario in `results` (default C2_RESULTS, whose folders
+    start with C2_PREFIX)."""
+    results, prefix = (C2_RESULTS, C2_PREFIX) if results is None else (results, prefix)
+    sid = scenario.split()[0].lower()   # "S-V-1 edge box" -> "s-v-1", the prefix of the experiment folder
+    return sorted(results.glob(f"{prefix}-{sid}-*/*/"))[-1]
+
+
+def c2_runs(plan: pd.Series, neighborhood: bool = False) -> dict:
+    """The testbed runs of one deployed plan (a row of DEPLOYED_PLANS) for C.1: its repetitions in C2_RESULTS, or with
+    neighborhood=True the runs of the configurations around it in NEIGHBORHOOD_RESULTS. Runs that the testbed marked
+    invalid (run.json) are left out. Returns a dictionary, one entry per run in the order of the run folders:
+    - "latencies": the end-to-end latency (ms) of every completed request, in the order in which the requests entered
+      the chain (traces.csv), the order that the confidence interval of a measured quantile needs (measured_quantiles);
+    - "node_latencies": the latency (s) at every node, waiting plus processing (trace_steps.csv), of the requests that
+      completed at every node, in the order in which they entered the chain, (requests, nodes), for the baselines;
+    - "knobs": the configuration of the run in the knob names of DEPLOYED_PLANS (run.json), and "rate" its arrival rate
+      (items/s);
+    - "inputs": node -> (runs, features), the inputs of the load-aware models: data quality, workers, cores, model size
+      (if the node has one) and log10 of the arrival rate;
+    and "path", the nodes in chain order."""
+    path = plan["services"].split(" → ")
+    folder = _c2_folder(plan["scenario"], *((NEIGHBORHOOD_RESULTS, NEIGHBORHOOD_PREFIX) if neighborhood else ()))
+    out = dict(path=path, latencies=[], node_latencies=[], knobs=[], rate=[])
+    for run in sorted(folder.glob("runs/*/")):
+        run_info = json.loads((run / "run.json").read_text())
+        if not run_info["valid"]:   # the testbed marked the run invalid (e.g. a service refused requests): no usable traces
+            continue
+        run_plan = run_info["plan"]
+        nodes = {node["name"]: node for node in run_plan["nodes"]}
+        knobs = {"shared.data_quality": nodes[path[0]]["knobs"]["data_quality"]}
+        for name in path:
+            knobs[f"{name}.parallelism"], knobs[f"{name}.cores"] = nodes[name]["knobs"]["parallelism"], nodes[name]["cores"]
+            if "model_size" in nodes[name]["knobs"]:
+                knobs[f"{name}.model_size"] = nodes[name]["knobs"]["model_size"]
+        traces = pd.read_csv(run / "traces.csv")
+        traces = traces[traces["completed"]].sort_values("entered_at_ns")
+        steps = pd.read_csv(run / "trace_steps.csv")
+        steps = steps[steps["outcome"] == "completed"]
+        node = steps.assign(latency_s=(steps["waiting_ms"] + steps["processing_ms"]) / 1e3).pivot(index="request_id", columns="node", values="latency_s")
+        node = node[path].dropna()
+        out["latencies"].append(traces["total_ms"].to_numpy())
+        out["node_latencies"].append(node.loc[traces["request_id"][traces["request_id"].isin(node.index)]].to_numpy())
+        out["knobs"].append(knobs)
+        out["rate"].append(run_plan["rps"])
+    features = lambda knobs, rate, name: ([knobs["shared.data_quality"], knobs[f"{name}.parallelism"], knobs[f"{name}.cores"]]
+                                          + ([knobs[f"{name}.model_size"]] if f"{name}.model_size" in knobs else []) + [np.log10(rate)])
+    out["inputs"] = {name: np.array([features(k, r, name) for k, r in zip(out["knobs"], out["rate"])], dtype=float) for name in path}
+    return out
+
+
 def measured_c2(deployed: pd.DataFrame) -> dict:
     """The testbed runs of the deployed plans (`deployed`: DEPLOYED_PLANS, runs in C2_RESULTS). Returns scenario name -> (latencies, as_planned):
     the end-to-end latency (ms) of every completed request of the scenario's runs, pooled over the runs, and whether the
@@ -875,8 +929,7 @@ def measured_c2(deployed: pd.DataFrame) -> dict:
     import yaml
     out = {}
     for _, plan in _deployed_rows(deployed).iterrows():
-        sid = plan["scenario"].split()[0].lower()   # "S-V-1 edge box" -> "s-v-1", the prefix of the experiment folder
-        folder = sorted(C2_RESULTS.glob(f"{C2_PREFIX}-{sid}-*/*/"))[-1]
+        folder = _c2_folder(plan["scenario"])
         experiment = yaml.safe_load((folder / "experiment.yaml").read_text())
         ran = {"shared.data_quality": experiment["shared_knobs"]["data_quality"]}
         for node, spec in experiment["nodes"].items():

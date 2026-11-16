@@ -103,7 +103,7 @@ def finetuning_methods(data, methods: dict, samples: np.ndarray, test: np.ndarra
 
 
 def finetuning_figure(sizes: list, statistics: dict, level_label: str, output: Path = None, holds_labels: list = None,
-                      legend_options: dict = None) -> None:
+                      legend_options: dict = None, styles: dict = None, xlabel: str = "end-to-end samples n", half: bool = False) -> None:
     """Tightness of every method of C.1 over the number of end-to-end samples, in the style of the tightness figures of
     B (evaluation.py, figures.py): per method the median over the seeds with the band from the smallest to the largest
     seed (sweep_line), a filled marker where the method holds (statistics[name]["holds"]) and a hollow one where it does
@@ -113,31 +113,36 @@ def finetuning_figure(sizes: list, statistics: dict, level_label: str, output: P
     sweep_statistics over `sizes`; a method without a value at a size (the baselines at n = 0) has no point there.
     output: path without suffix; its name is the file name in figures/tsc (save_figure), or None. holds_labels: legend
     text of the filled and the hollow marker (default: holds_handles), e.g. where the band spans chains instead of seeds.
-    legend_options: options of the legend that replace the defaults below (ncol, fontsize, ...), and "locations", the locations tried in order."""
+    legend_options: options of the legend that replace the defaults below (ncol, fontsize, ...), and "locations", the locations tried in order.
+    styles: marker and line style of further methods, name -> e.g. "v:", drawn and listed in the legend before those of STYLES. xlabel: label of the horizontal axis.
+    half: half the width of an evaluation figure (fraction_figure(0.5)), at the same height and font size; every second
+    sample size gets a tick label, so that the labels of the narrower axis do not collide."""
     from matplotlib.ticker import FuncFormatter
     from .evaluation import sweep_line, sweep_segments
     from .figures import (FAILURE_COLOR, FAILURE_TEXT_COLOR, METHOD_STYLES, holds_handles, legend_inside, paper_figure, paper_style, save_figure,
-                          tightness_label, tightness_tick)
-    METHOD_STYLES.update({name: (style[0], style[1:]) for name, style in STYLES.items()})   # sweep_line draws a method by its name
-    names = [name for name in STYLES if name in statistics]
+                          fraction_figure, tightness_label, tightness_tick)
+    styles = (styles or {}) | STYLES   # the further methods first (their order is that of the legend), then those of STYLES
+    METHOD_STYLES.update({name: (style[0], style[1:]) for name, style in styles.items()})   # sweep_line draws a method by its name
+    names = [name for name in styles if name in statistics]
     with paper_style():
-        fig, ax = paper_figure()
+        fig, ax = fraction_figure(0.5) if half else paper_figure()
         segments = []
         for name in names:
             sweep_line(ax, sizes, statistics[name]["tightness"], name, held=statistics[name]["holds"])
             segments += sweep_segments(sizes, statistics[name]["tightness"])
         # zoomed: from a little below 1x, so that the red zone shows, to a little above the highest band
         top = max(high for _, _, high in segments)
-        # the red zone tall enough for its label at the font size of the axes
-        ax.set_ylim(1 - 0.15 * (top - 1), top + 0.1 * (top - 1))
+        bottom = min(low for _, low, _ in segments)
+        # the red zone tall enough for its label at the font size of the axes, and deep enough that the label fits below the lowest band
+        ax.set_ylim(min(1 - 0.15 * (top - 1), bottom - 0.2 * (top - 1)), top + 0.1 * (top - 1))
         ax.axhspan(ax.get_ylim()[0], 1.0, color=FAILURE_COLOR, linewidth=0)
         ax.axhline(1.0, color="black", linewidth=1)
         # at the left, where the baselines, which need samples, leave the red zone free; short, so that it ends before the first sample size
         ax.text(0.01, 0.015, "SLO violated", transform=ax.transAxes, ha="left", va="bottom", color=FAILURE_TEXT_COLOR)
         ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: tightness_tick(value)))
         ax.set_ylabel(tightness_label(level_label))
-        ax.set_xticks(sizes)
-        ax.set_xlabel("end-to-end samples n")
+        ax.set_xticks(sizes[::2] if half else sizes)
+        ax.set_xlabel(xlabel)
         ax.grid(True, linestyle=":", alpha=0.6)
         handles, labels = ax.get_legend_handles_labels()
         marker_handles, marker_labels = holds_handles()

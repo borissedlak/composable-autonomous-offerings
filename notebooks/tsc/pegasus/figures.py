@@ -63,8 +63,9 @@ def paper_style():
 
 
 def method_linewidth(name: str) -> float:
-    """The two versions of Pegasus are drawn thicker than the baselines."""
-    return 2.5 if name in (PROPOSED, PROPOSED_SNC) else 1.8
+    """The versions of Pegasus (PROPOSED, PROPOSED_SNC, and those that a notebook names "Pegasus (...)", e.g. in C.1) are
+    drawn thicker than the baselines."""
+    return 2.5 if name in (PROPOSED, PROPOSED_SNC) or name.startswith("Pegasus") else 1.8
 
 
 def method_handle(name: str, filled: bool = True, line: bool = True) -> Line2D:
