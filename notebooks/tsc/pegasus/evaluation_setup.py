@@ -44,7 +44,7 @@ alpha = 0.05                                           # violation probability e
 confidence = 0.95                                      # the pessimistic mean of a bound lies above the true mean with this probability
 coverage_check = dict(n_batches=10, confidence=0.95)   # confidence interval of a measured quantile (batch means)
 seed = 35                                              # base seed of the data source
-seeds = list(range(3))                                 # every experiment is repeated for these seeds; a seed determines the training data and the
+seeds = list(range(10))                                # every experiment is repeated for these seeds; a seed determines the training data and the
                                                        # randomness of the ground truth, and with synthetic data also the generated service types
 n_calibration = 20                                     # training configurations that Conformal sets aside for calibration; the rest trains its model
 # real data: training runs per service and seed, drawn from its runs with one to four workers (training_campaign=WORKER_TRAINING),
