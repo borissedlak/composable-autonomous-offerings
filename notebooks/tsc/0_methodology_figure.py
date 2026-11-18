@@ -252,7 +252,7 @@ load_ticks = np.array([0.25, 0.5, 1, 2, 4])
 load_ticks = load_ticks[(np.log(load_ticks) >= ax_load.get_ylim()[0]) & (np.log(load_ticks) <= ax_load.get_ylim()[1])]
 ax_load.set_yticks(np.log(load_ticks), [f"{tick:g}" for tick in load_ticks])
 ax_load.set_xlabel(r"candidate rate $\theta$ (1/s)")   # theta_i^* is the largest candidate that keeps the load below 1
-ax_load.set_ylabel(r"service load $\phi_i(\theta)$", labelpad=4)   # the tick values show the log scale
+ax_load.set_ylabel(r"stability $\phi_i(\theta)$", labelpad=4)   # the tick values show the log scale
 ax_load.grid(True, linestyle=":", alpha=0.6)
 ax_load.legend(loc="upper left", fontsize=10.5, framealpha=0.95, borderaxespad=0.3)
 
@@ -338,7 +338,7 @@ for divider in dividers:
                               linestyle=(0, (6, 4))))
 # every step title is centered in its section, the space between the figure edge and the dividers
 centers = [(0.0 + dividers[0]) / 2, (dividers[0] + dividers[1]) / 2, (dividers[1] + 1.0) / 2]
-titles = ["① Learn service performance", "② Model service load", "③ Compose service models"]
+titles = ["① Learn service performance", "② Model queuing dynamics", "③ Compose service models"]
 for center, title in zip(centers, titles):
     fig.text(center, from_top(Y_TITLES), title, ha="center", va="center", fontsize=13, fontweight="bold")
 # below the x label of the service models, in two columns so that it takes three rows; the check below the figure
