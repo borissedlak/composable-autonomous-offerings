@@ -18,6 +18,7 @@ shown is computed: the GP fits, the loads, the simulated latency of the first se
 end-to-end latency. It is an illustration on a setting chosen for readability, not a result of the evaluation.
 As in the first version, every service has two workers, to show how c_i enters the load.
 """
+import io
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -118,7 +119,7 @@ print(f"decay rates theta_i^* (1/s): {np.round(theta_star, 1)}; service bounds a
 # Figure
 # ------------------------------------------------------------------------------
 # narrower than the first version (15 in), so that the text is larger at the width of the page; the exported file is
-# cropped to the content, about 0.1 in less high than FIG_H
+# cropped to the drawn content (see the end of the script), so it is less high than FIG_H
 FIG_W, FIG_H = 12, 5.1   # in
 fig = plt.figure(figsize=(FIG_W, FIG_H))
 
@@ -360,6 +361,13 @@ to_inches = fig.dpi_scale_trans.inverted()
 frame = inputs.get_bbox_patch().get_window_extent(renderer).transformed(to_inches)
 frame = Bbox.from_extents(frame.x0 - 0.01, frame.y0 - 0.01, frame.x1 + 0.01, frame.y1 + 0.01)
 crop = Bbox.union([fig.get_tightbbox(renderer), frame])
+# top and bottom are cropped to the drawn pixels instead: the tight crop keeps blank space where the dashed dividers end
+# in a gap and below the descent of the legend text. Rendered at the dpi of the jpg, so the crop is exact to one pixel there
+CROP_DPI = 300
+fig.savefig(buffer := io.BytesIO(), format="rgba", dpi=CROP_DPI, facecolor="white")
+pixels = np.frombuffer(buffer.getvalue(), dtype=np.uint8).reshape(round(FIG_H * CROP_DPI), round(FIG_W * CROP_DPI), 4)
+inked_rows = np.flatnonzero((pixels[..., :3] < 255).any(axis=(1, 2)))
+crop = Bbox.from_extents(crop.x0, FIG_H - (inked_rows[-1] + 1) / CROP_DPI, crop.x1, FIG_H - inked_rows[0] / CROP_DPI)
 OUTPUT.mkdir(parents=True, exist_ok=True)
 fig.savefig(OUTPUT / "methodology_overview.pdf", bbox_inches=crop, pad_inches=0)
 fig.savefig(OUTPUT / "methodology_overview.jpg", dpi=300, bbox_inches=crop, pad_inches=0, facecolor="white")
