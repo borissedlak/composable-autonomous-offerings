@@ -246,7 +246,8 @@ ax_load.set_ylim(lowest - 0.08 * (highest - lowest), highest + 0.15 * (highest -
 # the curve leaves it again
 ax_load.axhspan(ax_load.get_ylim()[0], 0.0, color=C_BOUND, alpha=0.12, linewidth=0)
 # named inside the shading, at its lower right, which the curves have left again; a legend entry would hide the curve names
-ax_load.text(0.97, 0.04, "stable\n(load < 1)", transform=ax_load.transAxes, ha="right", va="bottom", color="darkgreen", linespacing=1.1)
+ax_load.text(0.97, 0.04, "stable\n"
+                         r"$\phi_i(\theta)$ < 1", transform=ax_load.transAxes, ha="right", va="bottom", color="darkgreen", linespacing=1.1)
 # the curves are ln phi_i; the ticks show phi_i itself, so that the axis reads as a load on a log scale
 load_ticks = np.array([0.25, 0.5, 1, 2, 4])
 load_ticks = load_ticks[(np.log(load_ticks) >= ax_load.get_ylim()[0]) & (np.log(load_ticks) <= ax_load.get_ylim()[1])]
