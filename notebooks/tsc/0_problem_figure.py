@@ -107,7 +107,7 @@ quartiles = lambda values: np.nanquantile(values, [0.25, 0.5, 0.75], axis=1)
 gp_sum_style = "".join(METHOD_STYLES["GP Sum"])   # marker and line style of GP Sum in the evaluation figures
 # the band of the black truth is fainter, so that it does not look like the gray band of the sum
 for values, color, style, band_alpha, label in ((measured_by_load, "black", "o-", 0.1, f"true end-to-end {p_label}"),
-                                                (summed_by_load, METHOD_COLORS["GP Sum"], gp_sum_style, 0.2, f"{p_label} of summed execution times")):
+                                                (summed_by_load, METHOD_COLORS["GP Sum"], gp_sum_style, 0.2, f"{p_label} of summed execution times (GP Sum)")):
     low, middle, high = quartiles(values)
     ax_load.plot(utilizations, middle, style, color=color, linewidth=1.8, markersize=6, label=label)
     ax_load.fill_between(utilizations, low, high, color=color, alpha=band_alpha, linewidth=0)

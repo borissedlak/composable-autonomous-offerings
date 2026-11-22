@@ -340,9 +340,23 @@ for divider in dividers:
                               linestyle=(0, (6, 4))))
 # every step title is centered in its section, the space between the figure edge and the dividers
 centers = [(0.0 + dividers[0]) / 2, (dividers[0] + dividers[1]) / 2, (dividers[1] + 1.0) / 2]
-titles = ["① Learn service performance", "② Model queuing dynamics", "③ Compose service models"]
-for center, title in zip(centers, titles):
-    fig.text(center, from_top(Y_TITLES), title, ha="center", va="center", fontsize=13, fontweight="bold")
+titles = ["Learn service performance", "Model queuing dynamics", "Compose service models"]
+# every title has its step number in front: white on a black circle, which stands out more than the circled digits of the font
+BADGE_FONT, BADGE_GAP = 12, 0.06   # font size of the number (pt); gap between the circle and the title (in)
+headers = [(fig.text(center, from_top(Y_TITLES), title, ha="left", va="center", fontsize=13, fontweight="bold"),
+            fig.text(center, from_top(Y_TITLES), str(k + 1), ha="center", va="center", fontsize=BADGE_FONT, fontweight="bold", color="white",
+                     bbox=dict(boxstyle="circle,pad=0.22", facecolor="black", edgecolor="none")))
+           for k, (center, title) in enumerate(zip(centers, titles))]
+fig.canvas.draw()   # the circle gets its size only when it is drawn
+renderer = fig.canvas.get_renderer()
+to_figure = fig.transFigure.inverted()
+for center, (text, badge) in zip(centers, headers):
+    text_width = text.get_window_extent(renderer).transformed(to_figure).width
+    badge_width = badge.get_bbox_patch().get_window_extent(renderer).transformed(to_figure).width
+    # the circle and the title together are centered in the section
+    left = center - (badge_width + BADGE_GAP / FIG_W + text_width) / 2
+    badge.set_x(left + badge_width / 2)
+    text.set_x(left + badge_width + BADGE_GAP / FIG_W)
 # below the x label of the service models, in two columns so that it takes three rows; the check below the figure
 # reports if it reaches past the divider to step 2
 STEP1_LEGEND_FONT = 10.5
