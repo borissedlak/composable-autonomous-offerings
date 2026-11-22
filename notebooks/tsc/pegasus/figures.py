@@ -276,10 +276,12 @@ def plain_log_ticks(axis) -> None:
     axis.set_minor_formatter(Plain(labelOnlyBase=False, minor_thresholds=(1, 0.4)))
 
 
-def save_figure(fig, name: str) -> None:
+def save_figure(fig, name: str, tight: bool = False) -> None:
     """figures/tsc/experimental-results/<name>.pdf for LaTeX and .jpg for slides, at exactly the size of the figure (no cropping; the fixed
     margins of paper_figure and half_figure leave no empty border). Prints a note if a label reaches beyond the figure
-    and is cut off, which means that the margins are too small for it."""
+    and is cut off, which means that the margins are too small for it. tight: crop the saved files to the drawn content
+    with no padding instead, so that no white border remains (the file is then smaller than the figure and does not line
+    up with the fixed layout of the other figures)."""
     FIGURES.mkdir(parents=True, exist_ok=True)
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
@@ -293,8 +295,9 @@ def save_figure(fig, name: str) -> None:
                                                          ("top", drawn.y1 - height)) if value > 0.01}
     if beyond:
         print(f"save_figure: {name} reaches beyond the figure by {beyond} inches")
-    fig.savefig(FIGURES / f"{name}.pdf")
-    fig.savefig(FIGURES / f"{name}.jpg", dpi=300, facecolor="white")
+    crop = dict(bbox_inches="tight", pad_inches=0) if tight else {}
+    fig.savefig(FIGURES / f"{name}.pdf", **crop)
+    fig.savefig(FIGURES / f"{name}.jpg", dpi=300, facecolor="white", **crop)
 
 
 # ------------------------------------------------------------------------------
