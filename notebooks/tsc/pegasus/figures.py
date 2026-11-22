@@ -300,6 +300,30 @@ def save_figure(fig, name: str) -> None:
 # ------------------------------------------------------------------------------
 # Result tables (here and not in evaluation.py, so that they do not change the cache key of the results)
 # ------------------------------------------------------------------------------
+def finite_bound_statistics(results: dict, truth: dict, settings: list, seeds: list, confidence: float) -> dict:
+    """sweep_statistics with coverage and tightness on the held-out runs at which the method gives a finite latency
+    only. An infinite latency means that the model of the method expects a service to be overloaded; where every
+    held-out run was sustained (B.4a), it is a guarantee withheld, not a loose one, so it is reported as the share of
+    infinite latencies (sweep_table with `results`) and left out of the tightness instead of counting as infinitely
+    loose. A seed at which the method gives no finite latency at all has nan, as a method that was left out."""
+    from .evaluation import holds, sweep_statistics
+    statistics = sweep_statistics(results, truth, settings, seeds, confidence)
+
+    def on_finite(name, value, s, statistic):
+        if name not in results[(value, s)]:
+            return np.nan
+        latency, (measured, low) = results[(value, s)][name][1], truth[(value, s)]
+        finite = np.isfinite(latency)
+        return statistic(latency[finite], measured[finite], low[finite]) if finite.any() else np.nan
+
+    for name, values in statistics.items():
+        per = lambda statistic: np.array([[on_finite(name, value, s, statistic) for s in seeds] for value in settings], dtype=float)
+        values["coverage"] = per(lambda latency, measured, low: np.mean(latency >= low))
+        values["tightness"] = per(lambda latency, measured, low: np.median(latency / measured))
+        values["holds"] = holds(values["coverage"], confidence)
+    return statistics
+
+
 def sweep_table(settings: list, statistics: dict, names: list, label, truth: dict = None, seeds: list = None, results: dict = None) -> pd.DataFrame:
     """Result table of a sweep: one row per method of `names`, one column per setting. A cell is the tightness, the
     median over the seeds (a seed without a finite tightness counts as infinitely loose), marked ● where the method
@@ -308,8 +332,9 @@ def sweep_table(settings: list, statistics: dict, names: list, label, truth: dic
     quantile in s, the median over the held-out configurations and then over the seeds.
     With results (as in sweep_statistics) and seeds, a cell of a method with infinite latencies (no bound exists there:
     the method expects a service to be overloaded) ends in "(∞ x%)", x the share of the held-out configurations without
-    a finite latency, median over the seeds; the tightness is the median over all configurations, so it is
-    finite only while fewer than half of them are infinite."""
+    a finite latency, median over the seeds. With sweep_statistics the tightness is the median over all configurations,
+    so it is finite only while fewer than half of them are infinite; with finite_bound_statistics it is the median over
+    the configurations with a finite latency."""
     def infinite_note(name, setting):
         if results is None or not any(name in results[(setting, s)] for s in seeds):
             return ""

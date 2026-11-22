@@ -1,9 +1,9 @@
 """The point at utilization 1 of the load sweep B.4a, evaluated on its own held-out runs.
 
-The sweep of 2c_load.ipynb leaves utilization 1 out: there the busiest service of about half of the runs was overloaded
+The sweep of 2_B4_load.ipynb leaves utilization 1 out: there the busiest service of about half of the runs was overloaded
 and those runs have no latency quantile (evaluation_setup.py). Putting 1 into `loads` would restrict the held-out runs of
 every other load to the runs that are valid at 1 (b4_held_out), so this module evaluates utilization 1 alone, on the
-unthrottled valid runs of the measurements (settings=(1,)), and 2c_load.ipynb draws the result as a marked point beside
+unthrottled valid runs of the measurements (settings=(1,)), and 2_B4_load.ipynb draws the result as a marked point beside
 the sweep. The methods are those of the sweep: every method on the same information (same_information_methods in pegasus/evaluation.py), so the point differs
 from the others only in the runs it holds out. Not hashed by the cache key of the evaluation; its own cache is
 statics/load_aware_b4/utilization_one.joblib, keyed on the code of pegasus/ (code_fingerprint).
@@ -22,7 +22,7 @@ CACHE = CAMPAIGN.parent / "load_aware_b4"   # statics/load_aware_b4/, the folder
 
 
 def utilization_one(recompute: bool = False) -> dict:
-    """(methods, truth): as load_methods and load_truth of 2c_load.ipynb, with the key (LOAD, seed)."""
+    """(methods, truth): as load_methods and load_truth of 2_B4_load.ipynb, with the key (LOAD, seed)."""
     path = CACHE / "utilization_one.joblib"
     inputs = dict(code=setup.code_fingerprint())
     if path.exists() and not recompute:

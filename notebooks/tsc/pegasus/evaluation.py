@@ -786,8 +786,9 @@ def _infinite_marks(ax, marked: dict, statistics: dict) -> list:
     """What the line of a method cannot show at the marked setting of a tightness panel (tightness_sweep_figure,
     `marked`), which is evaluated on other held-out runs than the rest of the sweep: a method without a finite median
     there (half of its held-out runs or more have no finite latency) gets an "∞" in its color at the top of the axis, and
-    the proposed method the share of its infinite latencies (median over the seeds) above its marker. Returns the
-    (x, y_low, y_high) of that text, which the legend avoids."""
+    the proposed method the share of its infinite latencies (median over the seeds) above its marker, or marked["label"]
+    instead where given (e.g. the share of the overloaded runs that it detected). Returns the (x, y_low, y_high) of that
+    text, which the legend avoids."""
     from .figures import METHOD_STYLES
     x, segments = marked["x"], []
     for k, name in enumerate(name for name in METHOD_COLORS if name in marked["statistics"]):
@@ -795,6 +796,10 @@ def _infinite_marks(ax, marked: dict, statistics: dict) -> list:
         typical = np.median(np.where(np.isnan(values), np.inf, values))
         if not np.isfinite(typical):
             ax.text(x, TIGHTNESS_RANGE[1] * 0.45 / 1.3 ** k, "∞", color=METHOD_COLORS[name], ha="center", va="center", fontsize=22, fontweight="bold")
+        elif name == PROPOSED and marked.get("label"):
+            ax.annotate(marked["label"], (x, np.nanmax(values)), xytext=(6, 43), textcoords="offset points", ha="right", va="center",
+                        color=METHOD_COLORS[name], fontsize=11.5, linespacing=1.0, zorder=100)   # in front of every line and band
+            segments += [(x - d, np.nanmax(values), np.nanmax(values) * 3) for d in np.linspace(0, 0.35, 12)]
         elif name == PROPOSED:
             share = 1 - float(np.median([np.mean(np.isfinite(marked["methods"][(setting, seed)][name][1])) for (setting, seed) in marked["methods"]
                                          if setting == x]))
