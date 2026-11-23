@@ -38,14 +38,14 @@ The testbed itself (Docker containers, Prometheus) is not needed: every experime
 The experiments read the measurements of the testbed campaign in `statics/results_milos_v2/` at the repository
 root. The folder is too large for the repository and is not committed, so a fresh clone does not contain it.
 
-The measurements are a .zip archive at **https://tucloud.tuwien.ac.at/index.php/s/PgMKsALo5bXgRML** (appending
+The measurements are a .zip archive at **https://tucloud.tuwien.ac.at/index.php/s/p8gj3payEFCdts7** (appending
 `/download` to the link fetches the file directly). Download it and extract it at the repository
 root, into a new folder `statics/results_milos_v2/` (the archive holds `b1/`, `b4/`, ... directly, without a top folder).
 From the repository root:
 
 ```bash
 # Linux / macOS
-curl -L -o results_milos_v2.zip https://tucloud.tuwien.ac.at/index.php/s/PgMKsALo5bXgRML/download
+curl -L -o results_milos_v2.zip https://tucloud.tuwien.ac.at/index.php/s/p8gj3payEFCdts7/download
 unzip results_milos_v2.zip -d statics/results_milos_v2/
 rm results_milos_v2.zip
 ```
