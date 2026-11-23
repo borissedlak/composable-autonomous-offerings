@@ -75,6 +75,7 @@ y_train = {s: true_demand(configurations(quality_train), specs[s]) + noise_scale
 # with this few samples, the hyperparameter search can explain all variation as noise (a length scale near zero and a flat
 # mean); a lower limit on the length scale (in units of the quality) encodes that execution time changes smoothly with the quality
 min_length_scale = 0.3
+ZOOM_HALF_WIDTH = 0.15                    # half the width of the zoom window of the first model, in units of the quality knob
 models = train_gp_models(quality_train[:, None], y_train, services, min_length_scale=min_length_scale)
 
 quality_grid = np.linspace(0.5, 2.0, 200)
@@ -176,17 +177,39 @@ for row, s in enumerate(path):
     ax.plot(quality_grid, 1e3 * mu, color=C_MEAN, linewidth=1.8, label="predicted mean")
     ax.plot(quality_train, 1e3 * y_train[s], "o", color=C_ALEATORIC, markeredgecolor="black", markersize=6, label="observations")
     ax.axvline(quality_target, color="black", linewidth=1, linestyle=":", label="target configuration")
+    # the pessimistic mean m_i^+ (step 2) at the target configuration: the predicted mean plus the epistemic margin
+    pessimistic = 1e3 * beliefs[row][0][0]
+    ax.plot([quality_target], [pessimistic], "^", color=C_EPISTEMIC, markeredgecolor="black", markersize=7, linestyle="none", zorder=4,
+            label="pessimistic mean")
+    if row == 0:
+        # zoom inset in the bottom right of the first model, below its curve: the window around the target configuration,
+        # high enough to hold both bands and the pessimistic mean, so that the epistemic margin is readable
+        i_target = np.argmin(np.abs(quality_grid - quality_target))
+        half_width = 1.4 * max(band_aleatoric[i_target], band_epistemic[i_target])
+        window_x = (quality_target - ZOOM_HALF_WIDTH, quality_target + ZOOM_HALF_WIDTH)
+        inset = ax.inset_axes([0.55, 0.03, 0.43, 0.47])
+        inset.set_facecolor("white")
+        inset.fill_between(quality_grid, 1e3 * (mu - band_aleatoric), 1e3 * (mu + band_aleatoric), color="#fdd0a2", linewidth=0)
+        inset.fill_between(quality_grid, 1e3 * (mu - band_epistemic), 1e3 * (mu + band_epistemic), color="#a6c8e6", linewidth=0)
+        inset.plot(quality_grid, 1e3 * mu, color=C_MEAN, linewidth=1.8)
+        inset.axvline(quality_target, color="black", linewidth=1, linestyle=":")
+        inset.plot([quality_target], [pessimistic], "^", color=C_EPISTEMIC, markeredgecolor="black", markersize=9, zorder=4)
+        inset.set_xlim(*window_x)
+        inset.set_ylim(1e3 * (mu[i_target] - half_width), 1e3 * (mu[i_target] + half_width))
+        inset.tick_params(which="both", bottom=False, left=False, labelbottom=False, labelleft=False)   # no ticks: the box in the main plot states the window
+        zoom_source = ax
     ax.text(0.02, 0.93, f"s{row + 1} (ms)", transform=ax.transAxes, ha="left", va="top")
     ax.grid(True, linestyle=":", alpha=0.6)
     ax.margins(x=0)
     if row < K - 1:
         ax.tick_params(labelbottom=False)
+zoom_source.indicate_inset_zoom(inset, edgecolor="black", alpha=0.7, linewidth=1)
 model_axes[-1].set_xlabel("quality knob of the service")
 model_axes[-1].set_xticks([0.5, 1.0, 1.5, 2.0])
 handles, labels = model_axes[0].get_legend_handles_labels()
 # two columns, filled column by column: the two uncertainties and the target on the left, data and model on the right
-# (the right column has the shorter labels, so the legend ends further left)
-order = (1, 0, 4, 3, 2)
+# (the right column has the shorter labels, so the legend ends further left); the pessimistic mean closes the right column
+order = (1, 0, 4, 3, 2, 5)
 handles, labels = [handles[i] for i in order], [labels[i] for i in order]
 
 # the dataset D_i of every service, a database cylinder with an arrow into its model (figure coordinates)
