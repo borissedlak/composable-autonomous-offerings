@@ -164,7 +164,7 @@ ax_scatter.minorticks_off()
 # Zoom inset in the bottom right corner: the same points, in the window around a true latency of ZOOM_X ms, where the
 # scatter is densest and the two predictors lie on both sides of the diagonal
 ZOOM_X, ZOOM_Y = (150, 270), (107, 400)   # (ms) window of the inset: true latency (x) and predicted latency (y)
-inset = ax_scatter.inset_axes([0.7453, 0.0391, 0.2512, 0.3636])
+inset = ax_scatter.inset_axes([0.7453, 0.0141, 0.2512, 0.3636])
 inset.set_facecolor("white")
 zoom_line = np.array([1.0, 1e4])
 inset.fill_between(zoom_line, zoom_line, 1e4, color="0.9", linewidth=0)
