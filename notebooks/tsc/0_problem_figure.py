@@ -145,7 +145,7 @@ for name in point_predictors:
     ax_scatter.plot(1e3 * truth[shown[name]], 1e3 * predicted[name][shown[name]], marker, color=METHOD_COLORS[name], markersize=5, alpha=0.6,
                     linestyle="none", label=f"{name}: {below:.0%} too low")
 ax_scatter.text(0.03, 0.97, "overestimated: resources wasted", transform=ax_scatter.transAxes, ha="left", va="top")
-ax_scatter.text(0.97, 0.03, "underestimated: SLO violated", transform=ax_scatter.transAxes, ha="right", va="bottom", color="darkred")
+ax_scatter.text(0.225, 0.03, "underestimated: SLO violated", transform=ax_scatter.transAxes, ha="left", va="bottom", color="darkred")   # as far left as stays inside the red zone, to leave the bottom right corner to the zoom inset
 ax_scatter.set_xscale("log")
 ax_scatter.set_yscale("log")
 ax_scatter.set_xlim(x_low, x_high)
@@ -160,6 +160,25 @@ for set_ticks, (a, b), candidates in ((ax_scatter.set_xticks, (x_low, x_high), (
     ticks = [t for t in candidates if a <= t <= b]
     set_ticks(ticks, [tick_text(t) for t in ticks])
 ax_scatter.minorticks_off()
+
+# Zoom inset in the bottom right corner: the same points, in the window around a true latency of ZOOM_X ms, where the
+# scatter is densest and the two predictors lie on both sides of the diagonal
+ZOOM_X, ZOOM_Y = (150, 270), (107, 400)   # (ms) window of the inset: true latency (x) and predicted latency (y)
+inset = ax_scatter.inset_axes([0.7453, 0.0391, 0.2512, 0.3636])
+inset.set_facecolor("white")
+zoom_line = np.array([1.0, 1e4])
+inset.fill_between(zoom_line, zoom_line, 1e4, color="0.9", linewidth=0)
+inset.fill_between(zoom_line, 1.0, zoom_line, color="mistyrose", linewidth=0)
+inset.plot(zoom_line, zoom_line, color="black", linewidth=1, linestyle="--", zorder=3)
+for name in point_predictors:
+    inset.plot(1e3 * truth[shown[name]], 1e3 * predicted[name][shown[name]], METHOD_STYLES[name][0], color=METHOD_COLORS[name], markersize=5,
+               alpha=0.6, linestyle="none")
+inset.set_xscale("log")
+inset.set_yscale("log")
+inset.set_xlim(*ZOOM_X)
+inset.set_ylim(*ZOOM_Y)
+inset.tick_params(which="both", bottom=False, left=False, labelbottom=False, labelleft=False)   # no ticks (major and minor): the window is stated by the box in the main plot
+ax_scatter.indicate_inset_zoom(inset, edgecolor="black", alpha=0.7, linewidth=1)
 ax_scatter.legend(loc="upper left", bbox_to_anchor=(0, 0.88), fontsize=10, handlelength=1, borderpad=0.3, framealpha=0.8)   # in the empty corner below the zone label
 save(fig_scatter, "problem_prediction")
 
