@@ -1,103 +1,180 @@
-# notebooks/tsc
+# notebooks/tsc: Pegasus (IEEE TSC)
 
-Notebooks and helper code for the Pegasus paper (IEEE TSC): latency bounds for chains of services that are each
-modeled on their own.
+This folder holds the code of the paper on **Pegasus**, a method that gives an upper bound on the tail latency
+(for example the 95th percentile, p95) of a chain of services that was never run as a whole. Pegasus learns one
+model per service from benchmarks of that service alone: a Gaussian process (GP) that predicts the execution time
+of the service from its configuration (quality knobs, number of workers, arrival rate). It then turns each model
+into a pessimistic execution-time model and composes the per-service models with a queueing bound (Kingman's bound,
+or stochastic network calculus for Pegasus SNC) into a bound on the end-to-end latency of the chain.
 
-## Notebooks, in reading order
+The folder contains:
+
+- **The evaluation (Section V of the paper):** six notebooks, `2_B1_base_case.ipynb` to `2_C2_optimization.ipynb`,
+  one per experiment, all on the measured data of a physical testbed. These are the notebooks that reproduce the
+  paper's results; see [Running the experiments](#running-the-experiments-b1-to-c2).
+- **The method:** `1_method_synthetic.ipynb` and `1_method_real.ipynb` walk through the steps of Pegasus and its
+  baselines on one chain.
+- **The library:** the package `pegasus/` implements every method, baseline, data reader and cache; the notebooks
+  only call it.
+- **Supporting material:** figure scripts for Sections II and IV and the `explain_`
+  notebooks, which each answer one question that came up while developing the method. These are listed at the end
+  of this file.
+
+## Setup
+
+Every command below runs from `notebooks/tsc/` with the project's Python virtual environment, `venv/` at the
+repository root (`../../venv/Scripts/python` on Windows, `../../venv/bin/python` on Linux and macOS):
+
+```bash
+python -m venv venv                              # at the repository root
+venv/bin/python -m pip install -r requirements.txt jupyterlab
+cd notebooks/tsc
+```
+
+The testbed itself (Docker containers, Prometheus) is not needed: every experiment reads recorded measurements.
+
+## Downloading the testbed measurements
+
+The experiments read the measurements of the testbed campaign in `statics/results_milos_v2/` at the repository
+root. The folder is too large for the repository and is not committed, so a fresh clone does not contain it.
+
+The measurements are a .zip archive at **https://tucloud.tuwien.ac.at/index.php/s/PgMKsALo5bXgRML** (appending
+`/download` to the link fetches the file directly). Download it and extract it at the repository
+root, into a new folder `statics/results_milos_v2/` (the archive holds `b1/`, `b4/`, ... directly, without a top folder).
+From the repository root:
+
+```bash
+# Linux / macOS
+curl -L -o results_milos_v2.zip https://tucloud.tuwien.ac.at/index.php/s/PgMKsALo5bXgRML/download
+unzip results_milos_v2.zip -d statics/results_milos_v2/
+rm results_milos_v2.zip
+```
+
+```bat
+:: Windows (cmd or PowerShell; curl.exe and tar ship with Windows 10 and later. Write curl.exe, not curl:
+:: in Windows PowerShell, curl is an alias of Invoke-WebRequest, which does not accept these options)
+curl.exe -L -o results_milos_v2.zip https://tucloud.tuwien.ac.at/index.php/s/PgMKsALo5bXgRML/download
+mkdir statics\results_milos_v2
+tar -xf results_milos_v2.zip -C statics\results_milos_v2
+del results_milos_v2.zip
+```
+
+The result must have this layout:
+
+```
+statics/results_milos_v2/
+├── benchmark/w1/ … w4/   every service alone, with one to four workers: the training data of every method
+├── b1/                   the chains of B.1, one worker per service: held-out runs
+├── b1-unthrottled/       the same chains with one to four workers per service: held-out runs
+├── b3-vm/                the fork-join trees of B.3 and their own benchmarks (measured on a second machine)
+├── b4/                   the chain of B.1 under other loads and arrival patterns (B.4)
+└── c2/                   the testbed runs of the deployed plans of C.2 (C.2d)
+```
+
+The readers in `pegasus/real_data.py` locate the folder relative to the repository, so no path needs to be set.
+`statics/results_milos/`, the first, smaller campaign, is read only by `explain_5` to `explain_7` and is not needed
+for the experiments.
+
+## Running the experiments B.1 to C.2
+
+Open the notebooks in Jupyter (`../../venv/bin/jupyter lab`, or the venv as kernel in an IDE) with `notebooks/tsc/`
+as the working directory, and run each one from top to bottom. To run one without opening it:
+
+```bash
+../../venv/bin/jupyter nbconvert --to notebook --execute --inplace 2_B1_base_case.ipynb
+```
+
+Run `2_B1_base_case.ipynb` first. The notebooks after it build on its base case and read it from the cache; a
+notebook whose cache is missing computes the base case itself, so any order works, but the first one then takes
+longer.
+
+| Notebook | Section | What the experiment measures | Data |
+|---|---|---|---|
+| `2_B1_base_case.ipynb` | A, B.1 | The setup (training data, held-out runs, methods, metrics) and the base case: coverage and tightness of Pegasus and every baseline on every chain of the campaign. Coverage is the share of held-out runs whose measured p95 lies below the predicted bound; tightness is the ratio of the bound to the measured p95. | `benchmark/`, `b1/`, `b1-unthrottled/` |
+| `2_B2_evidence.ipynb` | B.2 | How coverage and tightness change with the number of training runs per service, on one chain, when the services receive more runs together, most uncertain first, or least uncertain first. | as B.1 |
+| `2_B3_depth.ipynb` | B.3 | Map-reduce applications of growing depth: balanced fork-join trees, bounded path by path (the latency of a tree is the maximum over its leaf-to-root paths). | `b3-vm/` |
+| `2_B4_load.ipynb` | B.4 | The chain of B.1 under growing utilization and under arrival patterns other than Poisson, and whether the methods detect the runs that overloaded. | `b4/` |
+| `2_C1_finetuning.ipynb` | C.1 | Fine-tuning the bound of Pegasus with a few end-to-end samples of the chain (split-conformal calibration), against baselines that train on those samples alone. | as B.1 |
+| `2_C2_optimization.ipynb` | C.2 | SLO-based composition planning: for five scenarios per application, a grid search picks the composition and configuration that meet the client's constraints on cost, latency and quality; C.2d compares the plans with their testbed runs. | as B.1, `c2/` |
+
+What to know before running:
+
+- **Parameters.** Every notebook shares the parameters in `pegasus/evaluation_setup.py`: the seeds (`seeds`; every
+  experiment is repeated once per seed, and the seed fixes which training runs are drawn), the number of training
+  runs per service (`N_TRAIN`), the violation probability ε and the confidence γ. Changing one of them changes the
+  results.
+- **Data source.** The first code cell of B.1 to B.4 sets `data_source` (`tree_source` in B.3) to `"real"`, the
+  setting of the paper. `"synthetic"` runs the same experiment on generated services and a simulated chain of
+  queues, which needs no download.
+- **Caches.** Results are cached under `statics/cache/` (`*.joblib`, never committed): `evaluation/` holds the result
+  of every experiment cell, `models/` the fitted GPs, `runs/` the values parsed from the raw measurement files. A
+  cached result is recomputed automatically when the parameters, the settings or the computation code in `pegasus/`
+  change (not when only a figure changes); `refresh=True` in a cell forces it. The first run on a fresh clone fits
+  every model and is slow; later runs load from the cache. Deleting `statics/cache/` only costs computation time.
+- **B.4** imports two scripts next to the notebooks, `utilization_one.py` (the point at utilization 1, evaluated on
+  its own sustained runs) and `overload_detection.py` (every run at high load, including the overloaded ones); both
+  keep their own cache in `statics/load_aware_b4/`.
+- **C.2** uses `slo_planning.py` for the knob grid, the scenarios and the grid search. Its results are predicted
+  bounds of inferred configurations, not measurements, except in C.2d. It writes the plans to
+  `statics/slo_planning/c2_plans_new.csv`; with `WRITE_DEPLOYED_FILES = False` (the default) it keeps the figures of
+  the plans that were deployed on the testbed (see `statics/slo_planning/README.md`).
+- **Outputs.** The figures of the paper go to `figures/tsc/experimental-results/` (`save_figure` in
+  `pegasus/figures.py`); the tables are printed in the notebooks.
+
+## Further material
+
+### Method and explanation notebooks
 
 | Notebook | What it is |
 |---|---|
-| `1_method_synthetic.ipynb` | The method: GP model per service, node bounds, compositions, and the baselines of the method section. |
-| `1_method_real.ipynb` | The method on real services: the same steps as `1_method_synthetic.ipynb` on the testbed campaign (training on run statistics, emulated queueing), without the sections that need a synthetic system. |
-| `2a_base_case.ipynb` | The paper's evaluation (Section V), part 1, on synthetic or real data (`data_source`): the two data sources, the setup (A), the metrics and methods of B.1, and B.1 on all chains of the campaign (real data). The base case of B.1 that 2b to 2e build on (`b1_base`) is cached in `statics/evaluation_cache/` by the first notebook that needs it; `1_method_real.ipynb` derives the bounds and compositions on its chain. |
-| `2b_evidence.ipynb` | Evaluation B.2 (varying evidence per service: on the chain `b1-vision-3-single`, the training runs of its services grow one service at a time under three schedules, all services together, most uncertain service first and least uncertain first; real data trains on the benchmarks and the other chains, `pegasus/evidence.py`). |
-| `2c_depth.ipynb` | Evaluation B.3 (varying depth of a map-reduce application: fork-join trees of the services of B.1, why the latency of a tree is the maximum over its leaf-to-root paths, every method applied path by path, balanced trees) on the trees that the second campaign measured (`statics/results_milos_v2/b3/`; `tree_source`, synthetic trees as an option). |
-| `2c_load.ipynb` | Evaluation B.4 (varying load and arrival pattern) on the chain of B.1 that the second campaign measured again under other loads and arrival patterns (`statics/results_milos_v2/b4/`; `data_source`, synthetic data as an option). |
-| `2d_tails_and_percentiles.ipynb` | Evaluation B.5 (varying tail behaviors) and B.6 (varying percentiles). |
-| `2e_finetuning.ipynb` | Evaluation C.1: fine-tuning a bound with end-to-end samples on one chain of B.1 (vision-1, fixed in `C1_CHAIN`, with runs of up to four workers per service held out): the bound of Pegasus with its load-aware models (the default of B.1, `load_aware` in `pegasus/data.py`), read from the cache of `2a_base_case.ipynb`, multiplied by one split-conformal factor (below the smallest number of samples at which it exists, the bound stays that of B.1), next to Quantile Sum and Fluxion-style trained on the samples. |
-| `2f_optimization.ipynb` | Evaluation C.2: SLO-based composition planning on real data. Five scenarios per application (S-V-1 to S-L-5), each with its own arrival rate, constrain one or two of cost (total workers), latency (Pegasus bound on the p95, load-aware models of B.1) and quality (data quality, detector model size), optimize the free dimensions with per-scenario weights on relative changes (each dimension divided by its typical value in the scenario), and name one or two capabilities they need (a functional requirement that excludes compositions without them); a grid search over the knob grid chooses the composition among the five application instances V1 to L5 (chains `b1u-<application>-<i>`) and its configuration (deployed with workers + 0.5 cores per service); the SLSQP solver of the RASK paper stays in `slo_planning.py` but is not run. The results are inferred configurations (predicted bounds), not measurements. Writes the plans to deploy to `statics/slo_planning/c2_plans_new.csv` (`c2_plans_old.csv`: the first deployment, compared with its testbed runs in C.2d). Helpers in `slo_planning.py`. |
+| `0_GP_Demo.ipynb` | The GP model of one service (the image denoiser) as a 3D surface with its 95% band and training runs. |
+| `1_method_synthetic.ipynb` | The method step by step: GP model per service, node bounds, compositions, and the baselines of the method section, on synthetic services. |
+| `1_method_real.ipynb` | The same steps on one real chain of the campaign, without the sections that need a synthetic system. |
 | `explain_1_why_chernoff_mgf.ipynb` | Why the bounds use moment generating functions and Chernoff bounds, and which alternatives exist. |
 | `explain_2_why_poisson_is_loose.ipynb` | Why the SNC node bound is loose under Poisson arrivals. |
-| `explain_3_how_pegasus_bounds_compose.ipynb` | The two versions of Pegasus (per-node union bound, SNC): the math from one queue upward, strengths and weaknesses. |
+| `explain_3_how_pegasus_bounds_compose.ipynb` | The two versions of Pegasus (per-node union bound, SNC): the math from one queue upward. Start here for the fundamentals. |
 | `explain_4_how_fluxion_composes.ipynb` | How the Fluxion baseline composes latency percentiles. |
-| `explain_5_what_allen_cunneen_inputs_cost.ipynb` | Why the GP Queue baseline does not hold in B.1: its queueing formula with predicted, true and pessimistic inputs. |
-| `explain_6_when_load_changes_execution_times.ipynb` | When the load changes the execution time of a service (CPU throttling, warm-up after idle), shown on the testbed campaign, and two remedies: enough cores for the workers, and a benchmark in the slowest state. |
-| `explain_7_which_inputs_predict_execution_time.ipynb` | Which inputs the GP of a service needs to predict the mean execution time of a run on the testbed campaign: quality knobs only, with cores per worker, with cores and parallelism, and each of the last two with the load; cross-validated MSE per service. |
-| `explain_8_which_inputs_predict_execution_time_v2.ipynb` | The question of `explain_7` on the second campaign (`statics/results_milos_v2/`) with six input sets, and a partial-correlation test (as in PC structure learning) of how strongly each input is associated with the mean execution time; the same GPs with one length scale per input (ARD); why the load of that campaign cannot be judged. |
-| `explain_9_does_provisioning_make_execution_times_load_independent.ipynb` | Whether the execution time depends on the load on the second campaign, split by provisioning (fewer cores than workers, one core per worker, more than one): throttling, the probe before each run against the run, the same configuration at different rates, and the state of a service when an item starts (next to other items, many recent arrivals, after a pause); whether over-provisioning ensures Assumption 3. |
+| `explain_5_what_allen_cunneen_inputs_cost.ipynb` | Why the GP Queue baseline (Allen-Cunneen formula) does not hold in B.1. |
+| `explain_6_when_load_changes_execution_times.ipynb` | When the load changes the execution time of a service (CPU throttling, warm-up after idle), and two remedies. |
+| `explain_7_which_inputs_predict_execution_time.ipynb` | Which inputs the GP of a service needs (knobs, cores, parallelism, load), on the first campaign. |
+| `explain_8_which_inputs_predict_execution_time_v2.ipynb` | The same question on the second campaign, with a partial-correlation test per input. |
+| `explain_9_does_provisioning_make_execution_times_load_independent.ipynb` | Whether over-provisioning cores makes the execution time independent of the load. |
 
-The numbered notebooks belong to the paper; the `explain_` notebooks each answer one question and can be read on
-their own. Start with `explain_3` for the fundamentals of the two bounds.
+### Figure scripts
 
-## Figure scripts
+Each script draws one figure of the paper and writes a `.pdf` and a `.jpg` to `figures/tsc/`; run it from
+`notebooks/tsc/`, for example `../../venv/bin/python 0_problem_figure.py`.
 
-Scripts that draw one figure of the paper each. `draft_methodology_figure.py` is an earlier draft of the methodology
-figure, kept for reference: the file name of its output ends in `_draft`. Run a script from `notebooks/tsc/` with the venv, e.g. `../../venv/Scripts/python problem_figure.py`; the
-script writes a `.pdf` and a `.jpg` to `figures/tsc/`.
+| Script | Figure |
+|---|---|
+| `0_problem_figure.py` | Section II-A: per-service execution times do not add up to the end-to-end tail latency (`problem_queueing`), and an accurate point prediction is not a guarantee (`problem_prediction`). Real data: the chain of B.1. |
+| `0_methodology_figure.py` | Section IV: the methodology overview (`methodology_overview`), on synthetic services chosen for readability. |
 
-| Script | Figure | Data | Output in `figures/tsc/` |
-|---|---|---|---|
-| `problem_figure.py` | The two problems the paper addresses (Section II-A): per-service execution times do not add up to the end-to-end tail latency, and an accurate point prediction is not a guarantee. | Real: the chain of B.1 (`b1-vision-1-single`) of the second campaign, trained on the benchmarks as in B.1. (a) emulates queueing at the swept loads from the measured processing times, because the campaign ran every run at one load; (b) uses the measured latencies. | `problem_queueing`, `problem_prediction` |
-| `methodology_figure.py` | The methodology overview, structured like Section IV: learn one model per service; turn it into a pessimistic execution-time model and the load $\phi_i(\theta)$ of every service; compose per service (Pegasus: Kingman's bound, the $d_i(\epsilon/K)$ added) or for the whole pipeline (Pegasus SNC). Every service has two workers, as in the earlier draft; the SNC bar is then an illustration only (the paper requires one worker for Pegasus SNC). | Synthetic: the services `s1`, `s2`, `s3` of `pegasus/data.py`, on a setting chosen for readability; an illustration, not a result of the evaluation. | `methodology_overview` |
-| `draft_methodology_figure.py` | Earlier draft of the methodology overview: learn one model per service, bound each service as a queue, compose the service bounds for a pipeline that is never executed. | As `methodology_figure.py`. | `methodology_overview_draft` |
+### The library `pegasus/`
 
-## Helper code: `pegasus/`
-
-The notebooks and figure scripts only call these functions; no method is implemented inside a notebook. Import them
-as `from pegasus.bounds import ...`, with the working directory at `notebooks/tsc/`.
+Import as `from pegasus.bounds import ...` with `notebooks/tsc/` as the working directory.
 
 | Module | Contents |
 |---|---|
-| `bounds.py` | The latency bounds: SNC node bound, martingale node bounds, propagated arrivals, network service curve. Pegasus is the closed-form martingale node bound with the external arrivals at every service; the propagated bounds (minimum spacing of the departures) are explored variants, not part of Pegasus. |
-| `simulation.py` | The ground truth: simulator of a chain and of a fork-join tree of FIFO services, and the measured quantile with its confidence interval. |
-| `trees.py` | Fork-join trees (B.3 in `2c_depth`): balanced topologies, their leaf-to-root paths, and the maximum over paths through which a chain composition extends to a tree. |
-| `service_gp.py` | The GP model of one service's execution time, and the belief the bounds take from it. |
-| `baselines.py` | Per-service baselines of the evaluation: GP Sum, DNN Sum, GP Queue (Allen-Cunneen formula), Quantile Union, Conformal, Oracle. |
-| `baselines_chain.py` | Baselines of the method notebook that need runs of the chain: Deep GP, Fluxion-style, replay; independence tests. |
-| `data.py` | Data of the evaluation: the seeded generator of synthetic services, the simulated chain data, the simulated fork-join trees of B.3 (`synthetic_tree_data`; the measured ones are in `real_data.py`), and the entry points for both data sources. |
-| `real_data.py` | The real data source: reader of the testbed campaign in `statics/results_milos/`, and the emulation that replays its measured processing times through FIFO queues; the measured fork-join trees of the second campaign for B.3 (`real_tree_data`). `training_campaign=WORKER_TRAINING` trains every service on its benchmark runs with one to four workers (`worker_benchmark_pool`), the training pool of every real-data experiment except the trees of B.3. |
-| `evaluation_setup.py` | What the evaluation notebooks 2a to 2e share: the parameters (ε, confidence, seeds, `N_TRAIN` training runs per service, ...), the options per data source, and the base case of B.1 (`b1_base`), computed once and cached in `statics/evaluation_cache/`; every experiment cell keeps its results there too (`cached`). A cache is recomputed when the parameters, the settings or the code of the experiment, or the computation code of `pegasus/` change (not when only a figure changes); `refresh=True` forces it. |
-| `model_cache.py` | The shared cache of fitted per-service GPs (`statics/model_cache/`), used by `fit_services`: a fit is keyed by its training data and the training code (`service_gp.py`), so every experiment that trains a service on the same runs reuses one fit (B.1 in B.4 to C.2, the training states shared by the schedules of B.2), and a recomputed experiment retrains no GP unless `service_gp.py` or its data changed. Never deleted automatically; removing the folder only costs training time. |
-| `evaluation.py` | What the experiments of the evaluation share: model fitting, the comparison of all methods on a chain and on a fork-join tree (`compare_tree_methods`), every method on the same information on real data (`same_information_methods`: training on `WORKER_TRAINING`, inputs `load_aware(data)` = knobs, number of workers and log10 of the arrival rate), coverage, figures. |
-| `exploration.py` | Experiment B.2b: sampling strategies that pick the next configuration to benchmark (random, Sobol sequence, and four acquisition functions on the GPs), for the synthetic services and for the measured runs of a real service. |
-| `finetuning.py` | Experiment C.1: split-conformal calibration of a bound with end-to-end samples, and the baselines that are trained on runs of the chain itself (Quantile Sum, Fluxion-style). |
-| `optimization.py` | Former experiment C.2 (no longer used by `2f_optimization.ipynb`; kept because removing a module of `pegasus/` recomputes every cached experiment): the SLO-fulfillment objective of a chain, and the optimizers that choose the next run with a latency method and refit its models after every evaluated run. |
-| `load_dependence.py` | `explain_6`: how often a service of the campaign used up its CPU quota, how the processing time of an item depends on the state of its service (next to another item, back to back, after idle), and two simulators (a worker pool under a CPU quota, a service that is slower after idle). |
-| `load_independence.py` | `explain_9`: per run and service of the second campaign, the provisioning class, the probe before the run, and within-run ratios of execution times by the state of the service at the start of an item; summaries of ratios over runs and the elasticity of the execution time with respect to the rate within configurations. |
-Dependencies point one way: `load_independence` depends on `real_data`; `load_dependence` depends on `bounds`, `real_data` and `simulation`; `bounds` and `trees` depend on nothing here; `simulation` on `trees`; `service_gp` on nothing; `baselines` on
-`service_gp`; `baselines_chain` on `baselines`, `bounds` and `service_gp`; `data` on `simulation` and `trees`; `real_data` on `data` and
-`simulation`; `evaluation` on `baselines`, `bounds`, `data`, `service_gp` and `trees`; `exploration` on `data`, `evaluation`, `real_data`
-and `service_gp`; `finetuning` on `baselines`, `baselines_chain`, `evaluation` and `service_gp`; `optimization` on
-`evaluation`.
+| `bounds.py` | The latency bounds: SNC node bound, martingale node bounds (Pegasus), propagated arrivals, network service curve. |
+| `simulation.py` | The ground truth of synthetic data: simulator of a chain and of a fork-join tree of FIFO queues. |
+| `trees.py` | Fork-join trees (B.3): balanced topologies and their leaf-to-root paths. |
+| `service_gp.py` | The GP model of one service's execution time, and the pessimistic belief the bounds take from it. |
+| `baselines.py` | Per-service baselines: GP Sum, DNN Sum, GP Queue (Allen-Cunneen formula), Quantile Union, Conformal, Oracle. |
+| `baselines_chain.py` | Baselines that need runs of the chain: Deep GP, Fluxion-style, replay; independence tests. |
+| `data.py` | Synthetic data, and the load-aware model inputs (`load_aware`: knobs, number of workers, log10 of the arrival rate). |
+| `real_data.py` | Readers of the testbed campaigns and the training pool of every real-data experiment (`WORKER_TRAINING`). |
+| `run_cache.py`, `model_cache.py` | Caches of parsed run files (`statics/cache/runs/`) and of fitted GPs (`statics/cache/models/`). |
+| `evaluation_setup.py` | Shared parameters of the evaluation notebooks, the base case of B.1 (`b1_base`) and the result cache (`cached`). |
+| `evaluation.py` | Model fitting, the comparison of all methods on a chain or tree, every method on the same information (`same_information_methods`), coverage. |
+| `evidence.py`, `exploration.py` | B.2: the schedules of training runs; sampling strategies for the next configuration to benchmark. |
+| `finetuning.py` | C.1: split-conformal calibration and the baselines trained on end-to-end samples. |
+| `optimization.py` | Former C.2, no longer used; kept because removing a module of `pegasus/` invalidates every cached experiment. |
+| `figures.py` | The style of the paper figures and the export to `figures/tsc/experimental-results/`. |
+| `input_sets.py`, `load_dependence.py`, `load_independence.py` | Helpers of `explain_6` to `explain_9`. |
 
-## Analysis scripts
+### `archive/`
 
-| Script | Question | Output |
-|---|---|---|
-| `worker_scaling_analysis.py` | How much the execution time of each service depends on its number of workers, which Pegasus assumes it does not (no model receives the worker count): the ratio to 1 worker of the mean and the 95th percentile at 2 to 4 workers, split into concurrency within the service and a part that remains when an item runs alone, and the projected capacity at full load. Helpers in `worker_scaling.py` next to it, outside `pegasus/` on purpose: the cache key of the evaluation hashes every module of `pegasus/`, so a module there would recompute every cached experiment. Run from `notebooks/tsc/`; `--recompute` rereads the records. | `statics/worker_scaling/`: CSV tables, `summary.json`, and `report.html` (the template `worker_scaling_report.html` filled with the results) |
-| `worker_scaling_coverage.py` | Whether that assumption costs coverage in B.1: reads the cached results of B.1 on all chains (`b1_all_chains` in `2a_base_case.ipynb`, never recomputes them) and splits coverage and tightness of Pegasus, Pegasus SNC, GP Queue and the Oracle by E, the slowdown of a held-out run's total execution time that the per-service ratios of `worker_scaling_analysis.py` predict; per chain on all held-out runs and on the multi-worker runs alone; the elasticity of tightness with respect to E. Needs the outputs of `worker_scaling_analysis.py`. Optional argument: the cache file. | `statics/worker_scaling/coverage_*.csv`, `tightness_elasticity.csv` |
-| `slo_planning.py` | C.2 in `2f_optimization.ipynb`: the knob grid and the node bounds of every composition at the arrival rate of a scenario (load-aware models, `load_aware` in `pegasus/data.py`, fitted without any run of the composition), the scenarios' objective and constraints, the grid search (and the unused SLSQP solver of the RASK paper), the trade-off figure (one panel per scenario) and the deployment table. Outside `pegasus/` for the cache key; its model cache is keyed on the computation code of `pegasus/` (`code_fingerprint`). | `statics/slo_planning/`: `c2_plans_old.csv` and `figures/tsc/experimental-results/c2_slo_plans_<application>` are the plans of the first deployment (older training pool, see `statics/slo_planning/README.md`); `c2_plans_new.csv` is written by the notebook with the current models. The notebook rewrites the figures only if `WRITE_DEPLOYED_FILES` is `True`. Model cache: `statics/cache/slo_planning/` |
-
-## Data and outputs outside this folder
-
-| Path | Contents |
-|---|---|
-| `statics/results_milos/` | The testbed campaign that `real_data.py` reads: one folder per experiment (single services, chains, trees, deep chains). The real data source of `1_method_real.ipynb`, the evaluation notebooks (`2a` to `2e`), `explain_5` and `explain_6` needs this folder. The folder is not part of the repository: it is not committed, so a fresh clone does not contain it. |
-| `statics/results_milos_v2/` | The second testbed campaign, the real data of the evaluation notebooks (`2a` to `2e`): `b1/` (the chains of B1, one worker per service), `b1-unthrottled/` (the same chains with one to four workers per service, none throttled), `benchmark/` (every service alone, the training data), `b3/` and `b3-heights/` (fork-join trees). The held-out runs of a chain are its runs in `b1/` and those of its twin in `b1-unthrottled/` with at most `MAX_WORKERS` = 4 workers per service, i.e. every measured worker count (`DEFAULT_CHAINS` in `pegasus/evaluation_setup.py`; the same cap holds in B.4). Not committed, like `statics/results_milos/`. |
-| `statics/load_independence/results_milos_v2_b1/run_states.csv` | Cache of `run_states` (`load_independence.py`) for `explain_9`: one row per run and service of the second campaign. Recomputed from `statics/results_milos_v2/b1/` when missing. |
-| `statics/worker_scaling/` | Outputs of `worker_scaling_analysis.py`; `item_level.csv` caches the per-run statistics (recomputed when missing). Not committed. |
-| `figures/tsc/` | Outputs of the figure scripts (problem, methodology and experiment schematics). |
-| `figures/tsc/experimental-results/` | The figures of the evaluation notebooks (`save_figure` in `pegasus/figures.py`): B.1 to B.6, C.1 and C.2. |
-| `statics/cache/` | Caches: `evaluation/` (results of the notebook cells), `models/` (fitted GPs and networks), `runs/` (values read from the raw run files), `slo_planning/` (models of C.2), all `*.joblib` and never committed; `input_sets/` (CSV results of explain_7 and explain_8, committed). |
-
-## Other files
-
-`new_experiments.md` is the specification of the testbed campaign: which applications, chains, arrival rates and
-arrival patterns the experiments B.1 to B.6, C.1 and C.2 need as real data. `figure_b3_experiment.py` draws the
-schematic of the proposed experiment B3 that this file shows (`b3_experiment_setup` in `figures/tsc/`); the script
-needs no data and is run like the figure scripts above.
-
-## `archive/`
-
-Older files that nothing else uses: `proofs.ipynb` and `why_arrival_difficult.ipynb` (early standalone notebooks). They
-are kept for reference and are not maintained; relative paths inside them refer to their former location one folder up.
+Earlier notebooks that nothing else uses (`proofs.ipynb`, `why_arrival_difficult.ipynb`, and
+`2d_tails_and_percentiles.ipynb` with B.5 and B.6, which the paper does not use). They are kept for reference and
+are not maintained.
