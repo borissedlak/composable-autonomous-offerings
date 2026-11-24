@@ -22,13 +22,13 @@ The folder contains:
 
 ## Setup
 
-Every command below runs from `notebooks/tsc/` with the project's Python virtual environment, `venv/` at the
-repository root (`../../venv/Scripts/python` on Windows, `../../venv/bin/python` on Linux and macOS):
+Requires **Python 3.12 or newer**. Run the setup and download commands below **from the repository root**. The
+experiments themselves run from `notebooks/tsc/` with the project's virtual environment, `venv/` at the repository
+root (`../../venv/Scripts/python` on Windows, `../../venv/bin/python` on Linux and macOS):
 
 ```bash
-python -m venv venv                              # at the repository root
+python3.12 -m venv venv                          # at the repository root; any Python >= 3.12 works
 venv/bin/python -m pip install -r requirements.txt jupyterlab
-cd notebooks/tsc
 ```
 
 The testbed itself (Docker containers, Prometheus) is not needed: every experiment reads recorded measurements.
@@ -41,23 +41,25 @@ root. The folder is too large for the repository and is not committed, so a fres
 The measurements are a .zip archive at **https://tucloud.tuwien.ac.at/index.php/s/p8gj3payEFCdts7** (appending
 `/download` to the link fetches the file directly). Download it and extract it at the repository
 root, into a new folder `statics/results_milos_v2/` (the archive holds `b1/`, `b4/`, ... directly, without a top folder).
-From the repository root:
+**Run these commands from the repository root**, not from `notebooks/tsc/`. The commands are chained with `&&`, so
+the archive is deleted only after it was extracted successfully:
 
 ```bash
 # Linux / macOS
-curl -L -o results_milos_v2.zip https://tucloud.tuwien.ac.at/index.php/s/p8gj3payEFCdts7/download
-unzip results_milos_v2.zip -d statics/results_milos_v2/
+mkdir -p statics/results_milos_v2 && \
+curl -L -o results_milos_v2.zip https://tucloud.tuwien.ac.at/index.php/s/p8gj3payEFCdts7/download && \
+unzip results_milos_v2.zip -d statics/results_milos_v2/ && \
 rm results_milos_v2.zip
 ```
 
 ```bat
 :: Windows (cmd or PowerShell; curl.exe and tar ship with Windows 10 and later. Write curl.exe, not curl:
 :: in Windows PowerShell, curl is an alias of Invoke-WebRequest, which does not accept these options)
-curl.exe -L -o results_milos_v2.zip https://tucloud.tuwien.ac.at/index.php/s/PgMKsALo5bXgRML/download
-mkdir statics\results_milos_v2
-tar -xf results_milos_v2.zip -C statics\results_milos_v2
-del results_milos_v2.zip
+mkdir statics\results_milos_v2 && curl.exe -L -o results_milos_v2.zip https://tucloud.tuwien.ac.at/index.php/s/p8gj3payEFCdts7/download && tar -xf results_milos_v2.zip -C statics\results_milos_v2 && del results_milos_v2.zip
 ```
+
+To check the extraction, list `statics/results_milos_v2/b1` (`ls statics/results_milos_v2/b1` on Linux / macOS,
+`dir statics\results_milos_v2\b1` on Windows): it must contain files, otherwise the archive was not extracted.
 
 The result must have this layout:
 
@@ -77,8 +79,8 @@ for the experiments.
 
 ## Running the experiments B.1 to C.2
 
-Open the notebooks in Jupyter (`../../venv/bin/jupyter lab`, or the venv as kernel in an IDE) with `notebooks/tsc/`
-as the working directory, and run each one from top to bottom. To run one without opening it:
+Change into `notebooks/tsc/` (`cd notebooks/tsc`), then open the notebooks in Jupyter (`../../venv/bin/jupyter lab`,
+or the venv as kernel in an IDE) with `notebooks/tsc/` as the working directory, and run each one from top to bottom. To run one without opening it:
 
 ```bash
 ../../venv/bin/jupyter nbconvert --to notebook --execute --inplace 2_B1_base_case.ipynb
